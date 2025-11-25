@@ -25,32 +25,81 @@ export class FileStorageService {
   private bucketName: string;
   private region: string;
   private baseUrl: string;
+  private storageType: 's3' | 'r2';
 
   constructor(private readonly configService: ConfigService) {
-    this.region =
-      this.configService.get<string>('AWS_S3_REGION') || 'me-south-1';
+    // Support both AWS S3 and Cloudflare R2
+    // Default to 'r2' if R2 credentials are present, otherwise 's3'
+    const hasR2Credentials =
+      this.configService.get<string>('R2_ACCESS_KEY_ID') &&
+      this.configService.get<string>('R2_SECRET_ACCESS_KEY') &&
+      this.configService.get<string>('R2_ACCOUNT_ID');
+    this.storageType =
+      (this.configService.get<string>('STORAGE_TYPE') ||
+        (hasR2Credentials ? 'r2' : 's3')) as 's3' | 'r2';
     this.bucketName =
-      this.configService.get<string>('AWS_S3_BUCKET') || 'smart-expense-uae';
-    this.baseUrl = `https://${this.bucketName}.s3.${this.region}.amazonaws.com`;
+      this.configService.get<string>('AWS_S3_BUCKET') ||
+      this.configService.get<string>('R2_BUCKET_NAME') ||
+      'smart-expense-uae';
 
-    const accessKeyId = this.configService.get<string>('AWS_ACCESS_KEY_ID');
-    const secretAccessKey = this.configService.get<string>(
-      'AWS_SECRET_ACCESS_KEY',
-    );
+    const accessKeyId =
+      this.configService.get<string>('AWS_ACCESS_KEY_ID') ||
+      this.configService.get<string>('R2_ACCESS_KEY_ID');
+    const secretAccessKey =
+      this.configService.get<string>('AWS_SECRET_ACCESS_KEY') ||
+      this.configService.get<string>('R2_SECRET_ACCESS_KEY');
 
-    if (accessKeyId && secretAccessKey) {
-      this.s3Client = new S3Client({
-        region: this.region,
-        credentials: {
-          accessKeyId,
-          secretAccessKey,
-        },
-      });
+    if (this.storageType === 'r2') {
+      // Cloudflare R2 configuration
+      const accountId = this.configService.get<string>('R2_ACCOUNT_ID');
+      const r2Endpoint =
+        this.configService.get<string>('R2_ENDPOINT') ||
+        `https://${accountId}.r2.cloudflarestorage.com`;
+      const publicUrl =
+        this.configService.get<string>('R2_PUBLIC_BASE_URL') ||
+        this.configService.get<string>('R2_PUBLIC_URL') ||
+        (accountId
+          ? `https://${this.bucketName}.${accountId}.r2.cloudflarestorage.com`
+          : `https://${this.bucketName}.r2.cloudflarestorage.com`);
+
+      this.baseUrl = publicUrl;
+      this.region = 'auto'; // R2 uses 'auto' as region
+
+      if (accessKeyId && secretAccessKey && accountId) {
+        this.s3Client = new S3Client({
+          region: this.region,
+          endpoint: r2Endpoint,
+          credentials: {
+            accessKeyId,
+            secretAccessKey,
+          },
+          forcePathStyle: true, // R2 requires path-style addressing
+        });
+        this.logger.log(`R2 storage configured: bucket=${this.bucketName} endpoint=${r2Endpoint}`);
+      } else {
+        this.logger.warn(
+          'R2 credentials not configured. File storage will use local mode.',
+        );
+      }
     } else {
-      // Fallback for local development without AWS credentials
-      console.warn(
-        'AWS credentials not configured. File storage will use local mode.',
-      );
+      // AWS S3 configuration (default)
+      this.region =
+        this.configService.get<string>('AWS_S3_REGION') || 'me-south-1';
+      this.baseUrl = `https://${this.bucketName}.s3.${this.region}.amazonaws.com`;
+
+      if (accessKeyId && secretAccessKey) {
+        this.s3Client = new S3Client({
+          region: this.region,
+          credentials: {
+            accessKeyId,
+            secretAccessKey,
+          },
+        });
+      } else {
+        console.warn(
+          'AWS credentials not configured. File storage will use local mode.',
+        );
+      }
     }
   }
 
@@ -75,7 +124,8 @@ export class FileStorageService {
     }
 
     try {
-      this.logger.debug(`Uploading to S3 bucket=${this.bucketName} key=${fileKey} size=${file.size} type=${file.mimetype}`);
+      const storageName = this.storageType === 'r2' ? 'R2' : 'S3';
+      this.logger.debug(`Uploading to ${storageName} bucket=${this.bucketName} key=${fileKey} size=${file.size} type=${file.mimetype}`);
       const command = new PutObjectCommand({
         Bucket: this.bucketName,
         Key: fileKey,
@@ -100,7 +150,8 @@ export class FileStorageService {
         fileType: file.mimetype,
       };
     } catch (error) {
-      this.logger.error(`Error uploading file to S3: ${(error as Error)?.message}`, (error as Error)?.stack);
+      const storageName = this.storageType === 'r2' ? 'R2' : 'S3';
+      this.logger.error(`Error uploading file to ${storageName}: ${(error as Error)?.message}`, (error as Error)?.stack);
       throw new Error('Failed to upload file to storage');
     }
   }
@@ -177,9 +228,23 @@ export class FileStorageService {
     if (!fileUrl) return null;
 
     // Extract key from S3 URL: https://bucket.s3.region.amazonaws.com/key
-    const match = fileUrl.match(/s3\.[^/]+\/(.+)$/);
-    if (match) {
-      return match[1];
+    const s3Match = fileUrl.match(/s3\.[^/]+\/(.+)$/);
+    if (s3Match) {
+      return s3Match[1];
+    }
+
+    // Extract key from R2 URL: https://bucket.account-id.r2.cloudflarestorage.com/key
+    // or custom domain: https://custom-domain.com/key
+    const r2Match = fileUrl.match(/r2\.cloudflarestorage\.com\/(.+)$/);
+    if (r2Match) {
+      return r2Match[1];
+    }
+
+    // Extract key from custom R2 domain or any URL ending with the key
+    const customDomainMatch = fileUrl.match(/\/\/([^/]+)\/(.+)$/);
+    if (customDomainMatch) {
+      // Check if it's likely an R2 custom domain (you may need to adjust this)
+      return customDomainMatch[2];
     }
 
     // Extract key from path: /uploads/key

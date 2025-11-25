@@ -111,10 +111,10 @@ export class OcrService {
     file: Express.Multer.File,
     organizationId?: string,
   ): Promise<OcrResult> {
+    let credentials: any = null;
     try {
       // Get credentials from environment variable (base64 encoded or raw JSON)
       // Priority: GOOGLE_CREDENTIALS_BASE64 > GOOGLE_CREDENTIALS_JSON > GOOGLE_APPLICATION_CREDENTIALS (file path)
-      let credentials: any = null;
 
       const credentialsBase64 = this.configService.get<string>(
         'GOOGLE_CREDENTIALS_BASE64',
@@ -185,10 +185,44 @@ export class OcrService {
         );
       }
 
+      // Fix private key formatting if it has escaped newlines
+      if (
+        credentials.private_key &&
+        typeof credentials.private_key === 'string'
+      ) {
+        credentials.private_key = credentials.private_key.replace(/\\n/g, '\n');
+      }
+
       // Initialize Google Vision client with credentials object
-      const client = new ImageAnnotatorClient({
-        credentials: credentials,
-      });
+      // Try using keyFilename first (if file exists), otherwise use credentials object
+      const credsFilePath = this.configService.get<string>(
+        'GOOGLE_APPLICATION_CREDENTIALS',
+      );
+      const defaultCredsPath = path.join(
+        process.cwd(),
+        'google-credentials.json',
+      );
+
+      let client: ImageAnnotatorClient;
+      if (credsFilePath && fs.existsSync(credsFilePath)) {
+        // Use file path if available (preferred method)
+        client = new ImageAnnotatorClient({
+          keyFilename: credsFilePath,
+          projectId: credentials.project_id,
+        });
+      } else if (fs.existsSync(defaultCredsPath)) {
+        // Use default file path
+        client = new ImageAnnotatorClient({
+          keyFilename: defaultCredsPath,
+          projectId: credentials.project_id,
+        });
+      } else {
+        // Use credentials object directly
+        client = new ImageAnnotatorClient({
+          credentials: credentials,
+          projectId: credentials.project_id,
+        });
+      }
 
       // Perform text detection on the image
       const [result] = await client.textDetection({
@@ -245,8 +279,29 @@ export class OcrService {
           textAnnotations: detections.length,
         },
       };
-    } catch (error) {
-      console.error('Error processing with Google Vision:', error);
+    } catch (error: any) {
+      const errorMessage = error?.message || 'Unknown error';
+      const errorCode = error?.code;
+
+      console.error('Error processing with Google Vision:', {
+        message: errorMessage,
+        code: errorCode,
+        details: error?.details,
+      });
+
+      // Provide helpful error messages for common issues
+      if (errorCode === 16 || errorMessage.includes('UNAUTHENTICATED')) {
+        const serviceAccountEmail = credentials?.client_email || 'unknown';
+        console.error(
+          'Google Vision API authentication failed. Please check:\n' +
+            '1. Service account credentials are valid and not expired\n' +
+            '2. Vision API is enabled in Google Cloud Console\n' +
+            '3. Service account has "Cloud Vision API User" role\n' +
+            '4. Credentials JSON is properly formatted\n' +
+            `Service account email: ${serviceAccountEmail}`,
+        );
+      }
+
       console.warn('Falling back to mock OCR.');
       return this.processMock(file, organizationId);
     }
