@@ -1,0 +1,65 @@
+# Dependencies
+node_modules
+npm-debug.log
+yarn-error.log
+
+# Build output
+dist
+build
+*.tsbuildinfo
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Git
+.git
+.gitignore
+
+# Tests
+coverage
+.nyc_output
+*.test.ts
+*.spec.ts
+
+# Documentation
+*.md
+!README.md
+
+# Archives
+*.zip
+*.tar.gz
+
+# Logs
+logs
+*.log
+
+# Temporary files
+.temp
+.tmp
+*.tmp
+
+# Google credentials (should be provided via secrets/volumes)
+google-credentials.json
+*-credentials.json
+
+# Deployment files
+Procfile
+deploy.zip
+backend-deploy.zip
+
+# App directory (duplicate build)
+app/
+

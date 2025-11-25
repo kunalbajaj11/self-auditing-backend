@@ -1,0 +1,98 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: smart-expense-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USERNAME:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+      POSTGRES_DB: ${DB_NAME:-smart_expense_uae}
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - smart-expense-network
+
+  # NestJS Backend API
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: smart-expense-api
+    restart: unless-stopped
+    ports:
+      - "${PORT:-3000}:3000"
+    environment:
+      # Database configuration
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USERNAME: ${DB_USERNAME:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-postgres}
+      DB_NAME: ${DB_NAME:-smart_expense_uae}
+      DB_SYNCHRONIZE: ${DB_SYNCHRONIZE:-false}
+      DB_RUN_MIGRATIONS: ${DB_RUN_MIGRATIONS:-false}
+      DB_LOGGING: ${DB_LOGGING:-false}
+      DB_SSL: ${DB_SSL:-false}
+      
+      # Application configuration
+      PORT: 3000
+      NODE_ENV: ${NODE_ENV:-production}
+      
+      # JWT Configuration
+      JWT_SECRET: ${JWT_SECRET:-your-secret-key-change-in-production}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-24h}
+      
+      # CORS Configuration
+      CORS_ORIGIN: ${CORS_ORIGIN:-}
+      
+      # Rate Limiting
+      RATE_LIMIT_MAX: ${RATE_LIMIT_MAX:-120}
+      
+      # AWS S3 Configuration (if needed)
+      AWS_REGION: ${AWS_REGION:-}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_S3_BUCKET_NAME: ${AWS_S3_BUCKET_NAME:-}
+      
+      # Google Cloud Vision API (if needed)
+      GOOGLE_APPLICATION_CREDENTIALS: ${GOOGLE_APPLICATION_CREDENTIALS:-}
+      
+      # Email Configuration (if needed)
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      # Mount Google credentials if needed (use secrets in production)
+      - ./google-credentials.json:/app/google-credentials.json:ro
+    networks:
+      - smart-expense-network
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/api/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  smart-expense-network:
+    driver: bridge
+

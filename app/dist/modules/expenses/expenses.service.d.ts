@@ -1,0 +1,48 @@
+import { Repository } from 'typeorm';
+import { Expense } from '../../entities/expense.entity';
+import { Organization } from '../../entities/organization.entity';
+import { User } from '../../entities/user.entity';
+import { Category } from '../../entities/category.entity';
+import { Attachment } from '../../entities/attachment.entity';
+import { Accrual } from '../../entities/accrual.entity';
+import { CreateExpenseDto } from './dto/create-expense.dto';
+import { ExpenseFilterDto } from './dto/expense-filter.dto';
+import { UpdateExpenseDto } from './dto/update-expense.dto';
+import { UpdateExpenseStatusDto } from './dto/update-status.dto';
+import { LinkAccrualDto } from './dto/link-accrual.dto';
+import { NotificationsService } from '../notifications/notifications.service';
+import { FileStorageService } from '../attachments/file-storage.service';
+import { DuplicateDetectionService } from '../duplicates/duplicate-detection.service';
+import { ForexRateService } from '../forex/forex-rate.service';
+import { Vendor } from '../vendors/vendor.entity';
+import { Repository as TypeOrmRepository } from 'typeorm';
+export declare class ExpensesService {
+    private readonly expensesRepository;
+    private readonly organizationsRepository;
+    private readonly usersRepository;
+    private readonly categoriesRepository;
+    private readonly attachmentsRepository;
+    private readonly accrualsRepository;
+    private readonly vendorsRepository;
+    private readonly notificationsService;
+    private readonly fileStorageService;
+    private readonly duplicateDetectionService;
+    private readonly forexRateService;
+    constructor(expensesRepository: Repository<Expense>, organizationsRepository: Repository<Organization>, usersRepository: Repository<User>, categoriesRepository: Repository<Category>, attachmentsRepository: Repository<Attachment>, accrualsRepository: Repository<Accrual>, vendorsRepository: TypeOrmRepository<Vendor>, notificationsService: NotificationsService, fileStorageService: FileStorageService, duplicateDetectionService: DuplicateDetectionService, forexRateService: ForexRateService);
+    private formatMoney;
+    findAll(organizationId: string, filters: ExpenseFilterDto): Promise<Expense[]>;
+    findById(id: string, organizationId: string): Promise<Expense>;
+    create(organizationId: string, userId: string, dto: CreateExpenseDto): Promise<Expense>;
+    checkDuplicates(organizationId: string, dto: CreateExpenseDto): Promise<{
+        duplicates: any[];
+        hasDuplicates: boolean;
+    }>;
+    private linkOrCreateVendor;
+    private levenshteinDistance;
+    private autoMatchAccrual;
+    private matchVendorNames;
+    update(id: string, organizationId: string, dto: UpdateExpenseDto): Promise<Expense>;
+    updateStatus(id: string, organizationId: string, dto: UpdateExpenseStatusDto): Promise<Expense>;
+    linkAccrual(id: string, organizationId: string, dto: LinkAccrualDto): Promise<Expense>;
+    private linkExpenseToAccrual;
+}

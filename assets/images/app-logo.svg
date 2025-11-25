@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 320" width="320" height="320" fill="none" role="img" aria-label="Minimalist logo: pen, book, AI">
+  <!-- Definitions -->
+  <defs>
+    <style>
+      .stroke { stroke-linecap: round; stroke-linejoin: round; }
+    </style>
+  </defs>
+
+  <!-- Layout guide (invisible, can help editing) -->
+  <!-- Book base (two open pages) -->
+  <path d="M48 120c28-14 60-26 104-26 44 0 76 12 104 26v76c-28-14-60-26-104-26-44 0-76 12-104 26v-76z"
+        fill="none" stroke="#0F1724" stroke-width="4" class="stroke" opacity="1"/>
+
+  <!-- Left page fold -->
+  <path d="M56 130c24-10 48-18 88-18v96c-40 0-64 8-88 18V130z"
+        fill="none" stroke="#0F1724" stroke-width="3" class="stroke" opacity="1"/>
+
+  <!-- Right page fold -->
+  <path d="M264 130c-24-10-48-18-88-18v96c40 0 64 8 88 18V130z"
+        fill="none" stroke="#0F1724" stroke-width="3" class="stroke" opacity="1"/>
+
+  <!-- Center spine -->
+  <line x1="160" y1="94" x2="160" y2="226" stroke="#0F1724" stroke-width="2" class="stroke" opacity="0.9"/>
+
+  <!-- Subtle page lines -->
+  <path d="M100 150c18-8 34-12 60-12" stroke="#0F1724" stroke-width="1.5" class="stroke" opacity="0.7"/>
+  <path d="M220 150c-18-8-34-12-60-12" stroke="#0F1724" stroke-width="1.5" class="stroke" opacity="0.7"/>
+
+  <!-- Pen body (diagonal across pages) -->
+  <g transform="translate(0,0) rotate(-22 170 160)">
+    <!-- pen shaft -->
+    <rect x="130" y="150" width="110" height="14" rx="6" fill="#0F1724" opacity="1"/>
+    <!-- pen metal tip -->
+    <path d="M242 150l18 7-18 7v-14z" fill="#0F1724"/>
+    <!-- pen accent line -->
+    <rect x="142" y="154" width="92" height="6" rx="3" fill="#14B8A6"/>
+  </g>
+
+  <!-- AI circuit motif on left page (nodes + traces) -->
+  <g stroke="#14B8A6" stroke-width="2.2" fill="none" class="stroke">
+    <circle cx="108" cy="160" r="3.5" fill="#14B8A6"/>
+    <circle cx="128" cy="178" r="3.5" fill="#14B8A6"/>
+    <path d="M108 160 L124 174 L128 178" stroke="#14B8A6" stroke-width="2.2" />
+    <circle cx="142" cy="148" r="3.5" fill="#14B8A6"/>
+    <path d="M142 148 L128 174" stroke="#14B8A6" stroke-width="2.2" />
+  </g>
+
+  <!-- AI circuit motif on right page (nodes + traces) -->
+  <g stroke="#14B8A6" stroke-width="2.2" fill="none" class="stroke">
+    <circle cx="212" cy="160" r="3.5" fill="#14B8A6"/>
+    <circle cx="192" cy="178" r="3.5" fill="#14B8A6"/>
+    <path d="M212 160 L196 174 L192 178" stroke="#14B8A6" stroke-width="2.2" />
+    <circle cx="176" cy="148" r="3.5" fill="#14B8A6"/>
+    <path d="M176 148 L196 174" stroke="#14B8A6" stroke-width="2.2" />
+  </g>
+
+  <!-- Tiny spark above book (idea/AI) -->
+  <path d="M160 92l6 10-6 10-6-10 6-10z" fill="#14B8A6" opacity="0.95"/>
+
+  <!-- Optional: remove comment to show company text under logo -->
+  <!--
+  <text x="50%" y="280" font-family="Inter, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
+        font-size="20" fill="#0F1724" text-anchor="middle">SelfAccounting.AI</text>
+  -->
+</svg>

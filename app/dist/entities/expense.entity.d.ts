@@ -1,0 +1,38 @@
+import { AbstractEntity } from './abstract.entity';
+import { Organization } from './organization.entity';
+import { User } from './user.entity';
+import { Category } from './category.entity';
+import { ExpenseType as ExpenseTypeEnum } from '../common/enums/expense-type.enum';
+import { ExpenseStatus } from '../common/enums/expense-status.enum';
+import { Attachment } from './attachment.entity';
+import { Accrual } from './accrual.entity';
+import { ExpenseSource } from '../common/enums/expense-source.enum';
+import { ExpenseType } from './expense-type.entity';
+import { Vendor } from '../modules/vendors/vendor.entity';
+export declare class Expense extends AbstractEntity {
+    organization: Organization;
+    user: User;
+    type?: ExpenseTypeEnum | null;
+    expenseType?: ExpenseType | null;
+    category?: Category | null;
+    vendor?: Vendor | null;
+    vendorName?: string | null;
+    vendorTrn?: string | null;
+    description?: string | null;
+    amount: string;
+    vatAmount: string;
+    totalAmount: string;
+    currency: string;
+    exchangeRate?: string | null;
+    baseAmount?: string | null;
+    fxGainLoss?: string | null;
+    expenseDate: string;
+    expectedPaymentDate?: string | null;
+    status: ExpenseStatus;
+    linkedAccrual?: Expense | null;
+    linkedExpenses: Expense[];
+    ocrConfidence?: string | null;
+    source: ExpenseSource;
+    attachments: Attachment[];
+    accrualDetail?: Accrual | null;
+}

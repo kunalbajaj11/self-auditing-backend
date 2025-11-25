@@ -1,0 +1,46 @@
+name: Deploy Backend to Elastic Beanstalk
+
+on:
+  push:
+    branches:
+      - main   # deploy automatically when you push to main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: |
+          cd backend/smart-expense-api
+          npm install
+
+      - name: Build project
+        run: |
+          cd backend/smart-expense-api
+          npm run build
+
+      - name: Install EB CLI
+        run: pip install awsebcli
+
+      - name: Deploy to Elastic Beanstalk
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: ap-south-1
+        run: |
+          cd backend/smart-expense-api
+          eb init self-auditing-backend \
+            --platform node.js \
+            --region ap-south-1
+
+          eb use self-auditing-backend-env
+          eb deploy

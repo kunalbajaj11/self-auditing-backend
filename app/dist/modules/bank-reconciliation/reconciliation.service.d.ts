@@ -1,0 +1,40 @@
+import { Repository, DataSource } from 'typeorm';
+import { BankTransaction } from '../../entities/bank-transaction.entity';
+import { SystemTransaction } from '../../entities/system-transaction.entity';
+import { ReconciliationRecord } from '../../entities/reconciliation-record.entity';
+import { Expense } from '../../entities/expense.entity';
+import { Organization } from '../../entities/organization.entity';
+import { User } from '../../entities/user.entity';
+import { Category } from '../../entities/category.entity';
+import { MatchTransactionsDto } from './dto/match-transactions.dto';
+import { ManualEntryDto } from './dto/manual-entry.dto';
+import { BankStatementParserService } from './bank-statement-parser.service';
+import { FileStorageService } from '../attachments/file-storage.service';
+import { ExpensesService } from '../expenses/expenses.service';
+export declare class ReconciliationService {
+    private readonly bankTransactionsRepository;
+    private readonly systemTransactionsRepository;
+    private readonly reconciliationRecordsRepository;
+    private readonly expensesRepository;
+    private readonly organizationsRepository;
+    private readonly usersRepository;
+    private readonly categoriesRepository;
+    private readonly parserService;
+    private readonly fileStorageService;
+    private readonly expensesService;
+    private readonly dataSource;
+    constructor(bankTransactionsRepository: Repository<BankTransaction>, systemTransactionsRepository: Repository<SystemTransaction>, reconciliationRecordsRepository: Repository<ReconciliationRecord>, expensesRepository: Repository<Expense>, organizationsRepository: Repository<Organization>, usersRepository: Repository<User>, categoriesRepository: Repository<Category>, parserService: BankStatementParserService, fileStorageService: FileStorageService, expensesService: ExpensesService, dataSource: DataSource);
+    uploadAndParseStatement(organizationId: string, userId: string, file: Express.Multer.File, statementPeriodStart?: string, statementPeriodEnd?: string): Promise<ReconciliationRecord>;
+    loadSystemTransactions(organizationId: string, startDate: string, endDate: string, reconciliationRecordId: string): Promise<void>;
+    autoMatchTransactions(reconciliationRecordId: string): Promise<void>;
+    private calculateMatchScore;
+    private calculateTextSimilarity;
+    manualMatch(organizationId: string, dto: MatchTransactionsDto): Promise<void>;
+    createManualEntry(organizationId: string, userId: string, reconciliationRecordId: string, dto: ManualEntryDto): Promise<SystemTransaction>;
+    getReconciliationRecords(organizationId: string, filters?: {
+        startDate?: string;
+        endDate?: string;
+        status?: string;
+    }): Promise<ReconciliationRecord[]>;
+    getReconciliationDetail(organizationId: string, recordId: string): Promise<ReconciliationRecord>;
+}
