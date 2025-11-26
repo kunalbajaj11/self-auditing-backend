@@ -5,12 +5,13 @@ import { AttachmentsController } from './attachments.controller';
 import { Attachment } from '../../entities/attachment.entity';
 import { Organization } from '../../entities/organization.entity';
 import { EnterpriseLicenseGuard } from '../../common/guards/enterprise-license.guard';
+import { ImageOptimizationService } from './image-optimization.service';
 
 @Module({
   imports: [TypeOrmModule.forFeature([Attachment, Organization])],
-  providers: [FileStorageService, EnterpriseLicenseGuard],
+  providers: [ImageOptimizationService, FileStorageService, EnterpriseLicenseGuard],
   controllers: [AttachmentsController],
-  exports: [FileStorageService],
+  exports: [FileStorageService, ImageOptimizationService],
 })
 export class AttachmentsModule {}
 

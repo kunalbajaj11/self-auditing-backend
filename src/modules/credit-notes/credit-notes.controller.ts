@@ -2,6 +2,9 @@ import {
   Controller,
   Get,
   Post,
+  Put,
+  Patch,
+  Delete,
   Body,
   Param,
   UseGuards,
@@ -14,11 +17,22 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { AuthenticatedUser } from '../../common/decorators/current-user.decorator';
 import { UserRole } from '../../common/enums/user-role.enum';
+import { CreditNoteStatus } from '../../common/enums/credit-note-status.enum';
 
 @Controller('credit-notes')
 @UseGuards(JwtAuthGuard, RolesGuard, TenantGuard)
 export class CreditNotesController {
   constructor(private readonly creditNotesService: CreditNotesService) {}
+
+  @Get('next-credit-note-number')
+  @Roles(UserRole.ADMIN, UserRole.ACCOUNTANT)
+  async getNextCreditNoteNumber(@CurrentUser() user: AuthenticatedUser) {
+    const creditNoteNumber =
+      await this.creditNotesService.getNextCreditNoteNumber(
+        user?.organizationId as string,
+      );
+    return { creditNoteNumber };
+  }
 
   @Get()
   @Roles(UserRole.ADMIN, UserRole.ACCOUNTANT)
@@ -48,9 +62,53 @@ export class CreditNotesController {
   ) {
     return this.creditNotesService.create(
       user?.organizationId as string,
-      user?.id as string,
+      user?.userId as string,
       dto,
     );
+  }
+
+  @Put(':id')
+  @Roles(UserRole.ADMIN, UserRole.ACCOUNTANT)
+  async update(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: any, // UpdateCreditNoteDto
+  ) {
+    return this.creditNotesService.update(
+      user?.organizationId as string,
+      id,
+      user?.userId as string,
+      dto,
+    );
+  }
+
+  @Patch(':id/status')
+  @Roles(UserRole.ADMIN, UserRole.ACCOUNTANT)
+  async updateStatus(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: { status: CreditNoteStatus },
+  ) {
+    return this.creditNotesService.updateStatus(
+      user?.organizationId as string,
+      id,
+      user?.userId as string,
+      dto.status,
+    );
+  }
+
+  @Delete(':id')
+  @Roles(UserRole.ADMIN, UserRole.ACCOUNTANT)
+  async delete(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    await this.creditNotesService.delete(
+      user?.organizationId as string,
+      id,
+      user?.userId as string,
+    );
+    return { message: 'Credit note deleted successfully' };
   }
 
   @Post(':id/apply')

@@ -26,6 +26,9 @@ import { ForexModule } from './modules/forex/forex.module';
 import { DuplicatesModule } from './modules/duplicates/duplicates.module';
 import { VendorsModule } from './modules/vendors/vendors.module';
 import { ContactModule } from './modules/contact/contact.module';
+import { CustomersModule } from './modules/customers/customers.module';
+import { SalesInvoicesModule } from './modules/sales-invoices/sales-invoices.module';
+import { CreditNotesModule } from './modules/credit-notes/credit-notes.module';
 import { AppBootstrapService } from './bootstrap/app-bootstrap.service';
 import { SanitizeAttachmentsInterceptor } from './common/interceptors/sanitize-attachments.interceptor';
 
@@ -64,6 +67,9 @@ import { SanitizeAttachmentsInterceptor } from './common/interceptors/sanitize-a
     DuplicatesModule,
     VendorsModule,
     ContactModule,
+    CustomersModule,
+    SalesInvoicesModule,
+    CreditNotesModule,
   ],
   controllers: [AppController],
   providers: [

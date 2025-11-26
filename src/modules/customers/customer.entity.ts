@@ -41,6 +41,9 @@ export class Customer extends AbstractEntity {
   @Column({ length: 50, nullable: true })
   country?: string | null;
 
+  @Column({ length: 100, nullable: true })
+  emirate?: string | null;
+
   @Column({ length: 20, nullable: true })
   phone?: string | null;
 

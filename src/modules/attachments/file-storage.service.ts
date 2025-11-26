@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional, Inject } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   S3Client,
@@ -9,6 +9,7 @@ import {
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { v4 as uuidv4 } from 'uuid';
 import { Logger } from '@nestjs/common';
+import { ImageOptimizationService } from './image-optimization.service';
 
 export interface UploadResult {
   fileName: string;
@@ -27,7 +28,11 @@ export class FileStorageService {
   private baseUrl: string;
   private storageType: 's3' | 'r2';
 
-  constructor(private readonly configService: ConfigService) {
+  constructor(
+    private readonly configService: ConfigService,
+    @Optional() @Inject(ImageOptimizationService)
+    private readonly imageOptimizationService?: ImageOptimizationService,
+  ) {
     // Support both AWS S3 and Cloudflare R2
     // Default to 'r2' if R2 credentials are present, otherwise 's3'
     const hasR2Credentials =
@@ -111,6 +116,34 @@ export class FileStorageService {
     const fileExtension = file.originalname.split('.').pop() || 'bin';
     const fileKey = `${organizationId}/${folder}/${uuidv4()}.${fileExtension}`;
 
+    // Optimize image before upload if it's an image file
+    let uploadBuffer = file.buffer;
+    let uploadMimeType = file.mimetype;
+    let uploadSize = file.size;
+
+    if (this.imageOptimizationService && this.imageOptimizationService.isImageFile(file.mimetype)) {
+      try {
+        this.logger.debug(`Optimizing image before upload: ${file.originalname} (${file.size} bytes)`);
+        const optimizationResult = await this.imageOptimizationService.optimizeImage(
+          file.buffer,
+          file.mimetype,
+        );
+
+        if (optimizationResult.optimized) {
+          uploadBuffer = optimizationResult.buffer;
+          uploadSize = optimizationResult.optimizedSize;
+          this.logger.log(
+            `Image optimized before upload: ${optimizationResult.originalSize} bytes -> ${optimizationResult.optimizedSize} bytes (${((optimizationResult.originalSize - optimizationResult.optimizedSize) / optimizationResult.originalSize * 100).toFixed(1)}% reduction)`,
+          );
+        }
+      } catch (error) {
+        // If optimization fails, log warning but continue with original file
+        this.logger.warn(
+          `Image optimization failed, uploading original: ${(error as Error)?.message}`,
+        );
+      }
+    }
+
     if (!this.s3Client) {
       // Local development mode - return mock URL
       this.logger.warn(`S3 client not configured, returning local mock URL for upload. key=${fileKey}`);
@@ -118,19 +151,19 @@ export class FileStorageService {
         fileName: file.originalname,
         fileUrl: `/uploads/${fileKey}`,
         fileKey,
-        fileSize: file.size,
-        fileType: file.mimetype,
+        fileSize: uploadSize,
+        fileType: uploadMimeType,
       };
     }
 
     try {
       const storageName = this.storageType === 'r2' ? 'R2' : 'S3';
-      this.logger.debug(`Uploading to ${storageName} bucket=${this.bucketName} key=${fileKey} size=${file.size} type=${file.mimetype}`);
+      this.logger.debug(`Uploading to ${storageName} bucket=${this.bucketName} key=${fileKey} size=${uploadSize} type=${uploadMimeType}`);
       const command = new PutObjectCommand({
         Bucket: this.bucketName,
         Key: fileKey,
-        Body: file.buffer,
-        ContentType: file.mimetype,
+        Body: uploadBuffer,
+        ContentType: uploadMimeType,
         Metadata: {
           originalName: file.originalname,
           organizationId,
@@ -146,8 +179,8 @@ export class FileStorageService {
         fileName: file.originalname,
         fileUrl,
         fileKey,
-        fileSize: file.size,
-        fileType: file.mimetype,
+        fileSize: uploadSize,
+        fileType: uploadMimeType,
       };
     } catch (error) {
       const storageName = this.storageType === 'r2' ? 'R2' : 'S3';

@@ -60,11 +60,12 @@ export class InvoiceLineItem extends AbstractEntity {
 
   @Column({
     name: 'vat_tax_type',
-    type: 'enum',
-    enum: VatTaxType,
-    default: VatTaxType.STANDARD,
+    type: 'varchar', // Use varchar instead of enum to avoid TypeORM synchronization issues
+    length: 50,
+    nullable: true,
+    default: 'standard',
   })
-  vatTaxType: VatTaxType; // Tax type: STANDARD, ZERO_RATED, EXEMPT, REVERSE_CHARGE
+  vatTaxType?: VatTaxType | null; // Tax type: STANDARD, ZERO_RATED, EXEMPT, REVERSE_CHARGE
 
   @Column({ type: 'decimal', precision: 12, scale: 2 })
   amount: string; // quantity × unitPrice

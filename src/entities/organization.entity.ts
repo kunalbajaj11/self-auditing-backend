@@ -21,6 +21,8 @@ import { Plan } from './plan.entity';
 import { ExpenseType } from './expense-type.entity';
 import { ExchangeRate } from './exchange-rate.entity';
 import { Vendor } from '../modules/vendors/vendor.entity';
+import { SalesInvoice } from './sales-invoice.entity';
+import { CreditNote } from './credit-note.entity';
 
 @Entity({ name: 'organizations' })
 @Unique(['name'])
@@ -64,6 +66,33 @@ export class Organization extends AbstractEntity {
   @Column({ name: 'contact_email', length: 100, nullable: true })
   contactEmail?: string | null;
 
+  @Column({ length: 20, nullable: true })
+  phone?: string | null;
+
+  @Column({ length: 200, nullable: true })
+  website?: string | null;
+
+  @Column({ length: 100, nullable: true })
+  emirate?: string | null;
+
+  @Column({ name: 'bank_account_holder', length: 200, nullable: true })
+  bankAccountHolder?: string | null;
+
+  @Column({ name: 'bank_name', length: 200, nullable: true })
+  bankName?: string | null;
+
+  @Column({ name: 'bank_account_number', length: 50, nullable: true })
+  bankAccountNumber?: string | null;
+
+  @Column({ name: 'bank_iban', length: 50, nullable: true })
+  bankIban?: string | null;
+
+  @Column({ name: 'bank_branch', length: 200, nullable: true })
+  bankBranch?: string | null;
+
+  @Column({ name: 'bank_swift_code', length: 20, nullable: true })
+  bankSwiftCode?: string | null;
+
   @Column({ name: 'storage_quota_mb', type: 'int', default: 500 })
   storageQuotaMb: number;
 
@@ -106,5 +135,11 @@ export class Organization extends AbstractEntity {
 
   @OneToMany(() => Vendor, (vendor) => vendor.organization)
   vendors: Vendor[];
+
+  @OneToMany(() => SalesInvoice, (invoice) => invoice.organization)
+  salesInvoices: SalesInvoice[];
+
+  @OneToMany(() => CreditNote, (creditNote) => creditNote.organization)
+  creditNotes: CreditNote[];
 }
 

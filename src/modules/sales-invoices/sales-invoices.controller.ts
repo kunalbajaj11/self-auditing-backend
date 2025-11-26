@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Put,
+  Patch,
   Delete,
   Body,
   Param,
@@ -19,6 +20,7 @@ import { AuthenticatedUser } from '../../common/decorators/current-user.decorato
 import { UserRole } from '../../common/enums/user-role.enum';
 import { InvoiceStatus } from '../../common/enums/invoice-status.enum';
 import { SalesInvoiceFilterDto } from './dto/sales-invoice-filter.dto';
+import { CreatePaymentDto } from './dto/create-payment.dto';
 
 @Controller('sales-invoices')
 export class SalesInvoicesController {
@@ -33,8 +35,9 @@ export class SalesInvoicesController {
     @CurrentUser() user: AuthenticatedUser,
     @Query() filters: SalesInvoiceFilterDto,
   ) {
-    // If paymentStatus is 'overdue', map it to invoice status 'overdue'
-    if (filters.paymentStatus === 'overdue') {
+    // If paymentStatus filter is 'overdue', map it to invoice status 'overdue'
+    // Note: 'overdue' is not a PaymentStatus, it's an InvoiceStatus
+    if ((filters.paymentStatus as any) === 'overdue') {
       filters.status = InvoiceStatus.OVERDUE;
       delete filters.paymentStatus; // Remove to avoid validation error
     }
@@ -42,6 +45,16 @@ export class SalesInvoicesController {
       user?.organizationId as string,
       filters,
     );
+  }
+
+  @Get('next-invoice-number')
+  @UseGuards(JwtAuthGuard, RolesGuard, TenantGuard)
+  @Roles(UserRole.ADMIN, UserRole.ACCOUNTANT)
+  async getNextInvoiceNumber(@CurrentUser() user: AuthenticatedUser) {
+    const invoiceNumber = await this.salesInvoicesService.getNextInvoiceNumber(
+      user?.organizationId as string,
+    );
+    return { invoiceNumber };
   }
 
   @Get('public/:token')
@@ -84,7 +97,7 @@ export class SalesInvoicesController {
   ) {
     return this.salesInvoicesService.create(
       user?.organizationId as string,
-      user?.id as string,
+      user?.userId as string,
       dto,
     );
   }
@@ -97,8 +110,28 @@ export class SalesInvoicesController {
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: any, // UpdateSalesInvoiceDto
   ) {
-    // Implementation for update
-    return { message: 'Update not yet implemented' };
+    return this.salesInvoicesService.update(
+      user?.organizationId as string,
+      id,
+      user?.userId as string,
+      dto,
+    );
+  }
+
+  @Patch(':id/status')
+  @UseGuards(JwtAuthGuard, RolesGuard, TenantGuard)
+  @Roles(UserRole.ADMIN, UserRole.ACCOUNTANT)
+  async updateStatus(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: { status: InvoiceStatus },
+  ) {
+    return this.salesInvoicesService.updateStatus(
+      user?.organizationId as string,
+      id,
+      user?.userId as string,
+      dto.status,
+    );
   }
 
   @Delete(':id')
@@ -108,8 +141,79 @@ export class SalesInvoicesController {
     @Param('id') id: string,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    // Implementation for delete
-    return { message: 'Delete not yet implemented' };
+    await this.salesInvoicesService.delete(
+      user?.organizationId as string,
+      id,
+      user?.userId as string,
+    );
+    return { message: 'Invoice deleted successfully' };
+  }
+
+  @Post(':id/payments')
+  @UseGuards(JwtAuthGuard, RolesGuard, TenantGuard)
+  @Roles(UserRole.ADMIN, UserRole.ACCOUNTANT)
+  async recordPayment(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: CreatePaymentDto,
+  ) {
+    return this.salesInvoicesService.recordPayment(
+      user?.organizationId as string,
+      id,
+      user?.userId as string,
+      dto,
+    );
+  }
+
+  @Get(':id/payments')
+  @UseGuards(JwtAuthGuard, RolesGuard, TenantGuard)
+  @Roles(UserRole.ADMIN, UserRole.ACCOUNTANT, UserRole.EMPLOYEE)
+  async listPayments(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.salesInvoicesService.listPayments(
+      user?.organizationId as string,
+      id,
+    );
+  }
+
+  @Delete(':id/payments/:paymentId')
+  @UseGuards(JwtAuthGuard, RolesGuard, TenantGuard)
+  @Roles(UserRole.ADMIN, UserRole.ACCOUNTANT)
+  async deletePayment(
+    @Param('id') id: string,
+    @Param('paymentId') paymentId: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    await this.salesInvoicesService.deletePayment(
+      user?.organizationId as string,
+      id,
+      paymentId,
+      user?.userId as string,
+    );
+    return { message: 'Payment deleted successfully' };
+  }
+
+  @Post(':id/send-email')
+  @UseGuards(JwtAuthGuard, RolesGuard, TenantGuard)
+  @Roles(UserRole.ADMIN, UserRole.ACCOUNTANT)
+  async sendEmail(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() emailData: {
+      recipientEmail: string;
+      subject?: string;
+      message?: string;
+    },
+  ) {
+    await this.salesInvoicesService.sendInvoiceEmail(
+      id,
+      user?.organizationId as string,
+      user?.userId as string,
+      emailData,
+    );
+    return { message: 'Invoice email sent successfully' };
   }
 }
 

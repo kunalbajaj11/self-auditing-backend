@@ -17,6 +17,8 @@ import { Report } from './report.entity';
 import { Category } from './category.entity';
 import { Attachment } from './attachment.entity';
 import { ExpenseType } from './expense-type.entity';
+import { SalesInvoice } from './sales-invoice.entity';
+import { CreditNote } from './credit-note.entity';
 
 @Index('idx_users_email', ['email'], { unique: true })
 @Entity({ name: 'users' })
@@ -78,5 +80,11 @@ export class User extends AbstractEntity {
 
   @OneToMany(() => Attachment, (attachment) => attachment.uploadedBy)
   attachments: Attachment[];
+
+  @OneToMany(() => SalesInvoice, (invoice) => invoice.user)
+  salesInvoices: SalesInvoice[];
+
+  @OneToMany(() => CreditNote, (creditNote) => creditNote.user)
+  creditNotes: CreditNote[];
 }
 

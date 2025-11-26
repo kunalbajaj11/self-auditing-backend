@@ -1,16 +1,26 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, DataSource } from 'typeorm';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { SalesInvoice } from '../../entities/sales-invoice.entity';
 import { InvoiceLineItem } from '../../entities/invoice-line-item.entity';
 import { InvoicePayment } from '../../entities/invoice-payment.entity';
 import { CreditNoteApplication } from '../../entities/credit-note-application.entity';
+import { InvoiceNumberSequence } from '../../entities/invoice-number-sequence.entity';
 import { Organization } from '../../entities/organization.entity';
 import { User } from '../../entities/user.entity';
+import { Customer } from '../customers/customer.entity';
 import { InvoiceStatus } from '../../common/enums/invoice-status.enum';
 import { PaymentStatus } from '../../common/enums/payment-status.enum';
+import { PaymentMethod } from '../../common/enums/payment-method.enum';
+import { AuditAction } from '../../common/enums/audit-action.enum';
 import { EmailService } from '../notifications/email.service';
+import { ReportGeneratorService } from '../reports/report-generator.service';
+import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import * as crypto from 'crypto';
 
 @Injectable()
@@ -24,11 +34,18 @@ export class SalesInvoicesService {
     private readonly paymentsRepository: Repository<InvoicePayment>,
     @InjectRepository(CreditNoteApplication)
     private readonly creditNoteApplicationsRepository: Repository<CreditNoteApplication>,
+    @InjectRepository(InvoiceNumberSequence)
+    private readonly invoiceNumberSequencesRepository: Repository<InvoiceNumberSequence>,
     @InjectRepository(Organization)
     private readonly organizationsRepository: Repository<Organization>,
     @InjectRepository(User)
     private readonly usersRepository: Repository<User>,
+    @InjectRepository(Customer)
+    private readonly customersRepository: Repository<Customer>,
     private readonly emailService: EmailService,
+    private readonly reportGeneratorService: ReportGeneratorService,
+    private readonly auditLogsService: AuditLogsService,
+    private readonly dataSource: DataSource,
   ) {}
 
   async findAll(organizationId: string, filters: any): Promise<SalesInvoice[]> {
@@ -400,11 +417,579 @@ export class SalesInvoicesService {
     return crypto.randomBytes(32).toString('hex');
   }
 
+  /**
+   * Thread-safe invoice number generation using database-level locking
+   * Format: INV-YYYY-NNN (e.g., INV-2024-001)
+   */
   private async generateInvoiceNumber(
     organizationId: string,
     year: number,
   ): Promise<string> {
-    // Implementation for generating invoice numbers
-    return `INV-${year}-${Date.now()}`;
+    return await this.dataSource.transaction(async (manager) => {
+      // Pessimistic lock on sequence row to prevent race conditions
+      const sequence = await manager.findOne(InvoiceNumberSequence, {
+        where: { organizationId, year },
+        lock: { mode: 'pessimistic_write' },
+      });
+
+      if (!sequence) {
+        // Create new sequence for this year
+        const newSequence = manager.create(InvoiceNumberSequence, {
+          organizationId,
+          year,
+          lastNumber: 1,
+        });
+        await manager.save(newSequence);
+        return `INV-${year}-001`;
+      }
+
+      // Increment and save
+      sequence.lastNumber += 1;
+      await manager.save(sequence);
+      const paddedNumber = sequence.lastNumber.toString().padStart(3, '0');
+      return `INV-${year}-${paddedNumber}`;
+    });
+  }
+
+  /**
+   * Get next invoice number without creating an invoice
+   * Useful for previewing the next number
+   */
+  async getNextInvoiceNumber(organizationId: string): Promise<string> {
+    const year = new Date().getFullYear();
+    return await this.dataSource.transaction(async (manager) => {
+      const sequence = await manager.findOne(InvoiceNumberSequence, {
+        where: { organizationId, year },
+        lock: { mode: 'pessimistic_write' },
+      });
+
+      if (!sequence) {
+        return `INV-${year}-001`;
+      }
+
+      const nextNumber = sequence.lastNumber + 1;
+      const paddedNumber = nextNumber.toString().padStart(3, '0');
+      return `INV-${year}-${paddedNumber}`;
+    });
+  }
+
+  /**
+   * Generate invoice PDF
+   */
+  async generateInvoicePDF(
+    invoiceId: string,
+    organizationId: string,
+  ): Promise<Buffer> {
+    const invoice = await this.invoicesRepository.findOne({
+      where: { id: invoiceId, organization: { id: organizationId } },
+      relations: ['organization', 'customer', 'lineItems', 'user'],
+    });
+
+    if (!invoice) {
+      throw new NotFoundException('Invoice not found');
+    }
+
+    const reportData = {
+      type: 'sales_invoice',
+      data: invoice,
+      metadata: {
+        organizationName: invoice.organization?.name,
+        vatNumber: invoice.organization?.vatNumber,
+        address: invoice.organization?.address,
+        phone: invoice.organization?.phone,
+        email: invoice.organization?.contactEmail,
+        website: invoice.organization?.website,
+        currency: invoice.currency || 'AED',
+        generatedAt: new Date(),
+        generatedByName: invoice.user?.name,
+        organizationId: invoice.organization?.id,
+      },
+    };
+
+    return this.reportGeneratorService.generatePDF(reportData);
+  }
+
+  /**
+   * Send invoice via email with PDF attachment
+   */
+  async sendInvoiceEmail(
+    invoiceId: string,
+    organizationId: string,
+    userId: string,
+    emailData: {
+      recipientEmail: string;
+      subject?: string;
+      message?: string;
+    },
+  ): Promise<void> {
+    const invoice = await this.invoicesRepository.findOne({
+      where: { id: invoiceId, organization: { id: organizationId } },
+      relations: ['organization', 'customer', 'lineItems'],
+    });
+
+    if (!invoice) {
+      throw new NotFoundException('Invoice not found');
+    }
+
+    if (
+      !invoice.customerName ||
+      (!invoice.customer?.email && !emailData.recipientEmail)
+    ) {
+      throw new BadRequestException(
+        'Customer email is required to send invoice',
+      );
+    }
+
+    const recipientEmail = emailData.recipientEmail || invoice.customer?.email;
+
+    if (!recipientEmail) {
+      throw new BadRequestException('Recipient email is required');
+    }
+
+    // Generate PDF
+    const pdfBuffer = await this.generateInvoicePDF(invoiceId, organizationId);
+
+    // Send email with PDF attachment
+    await this.emailService.sendEmail({
+      to: recipientEmail,
+      subject: emailData.subject || `Invoice ${invoice.invoiceNumber}`,
+      text:
+        emailData.message ||
+        `Please find attached invoice ${invoice.invoiceNumber}`,
+      html:
+        emailData.message ||
+        `<p>Please find attached invoice ${invoice.invoiceNumber}</p>`,
+      attachments: [
+        {
+          filename: `invoice-${invoice.invoiceNumber}.pdf`,
+          content: pdfBuffer,
+          contentType: 'application/pdf',
+        },
+      ],
+    });
+
+    // Update invoice status to SENT if it's DRAFT
+    if (invoice.status === InvoiceStatus.DRAFT) {
+      invoice.status = InvoiceStatus.SENT;
+      await this.invoicesRepository.save(invoice);
+    }
+  }
+
+  /**
+   * Record payment for an invoice
+   */
+  async recordPayment(
+    organizationId: string,
+    invoiceId: string,
+    userId: string,
+    dto: {
+      amount: number;
+      paymentDate: string;
+      paymentMethod?: PaymentMethod;
+      referenceNumber?: string;
+      notes?: string;
+    },
+  ): Promise<InvoicePayment> {
+    return await this.dataSource.transaction(async (manager) => {
+      const invoice = await manager.findOne(SalesInvoice, {
+        where: { id: invoiceId, organization: { id: organizationId } },
+      });
+
+      if (!invoice) {
+        throw new NotFoundException('Invoice not found');
+      }
+
+      if (invoice.status === InvoiceStatus.CANCELLED) {
+        throw new BadRequestException(
+          'Cannot record payment on cancelled invoice',
+        );
+      }
+
+      const currentPaidAmount = parseFloat(invoice.paidAmount || '0');
+      const paymentAmount = parseFloat(dto.amount.toString());
+      const totalAmount = parseFloat(invoice.totalAmount);
+
+      // Calculate outstanding balance including credit notes
+      const applications = await manager.find(CreditNoteApplication, {
+        where: {
+          invoice: { id: invoiceId },
+          organization: { id: organizationId },
+        },
+      });
+
+      const appliedCreditAmount = applications.reduce(
+        (sum, app) => sum + parseFloat(app.appliedAmount),
+        0,
+      );
+
+      const outstandingBalance =
+        totalAmount - currentPaidAmount - appliedCreditAmount;
+
+      if (paymentAmount > outstandingBalance) {
+        throw new BadRequestException(
+          `Payment amount (${paymentAmount}) exceeds outstanding balance (${outstandingBalance.toFixed(2)})`,
+        );
+      }
+
+      if (paymentAmount <= 0) {
+        throw new BadRequestException('Payment amount must be greater than 0');
+      }
+
+      // Create payment record
+      const payment = manager.create(InvoicePayment, {
+        invoice: { id: invoiceId },
+        organization: { id: organizationId },
+        paymentDate: dto.paymentDate,
+        amount: paymentAmount.toString(),
+        paymentMethod: dto.paymentMethod || PaymentMethod.OTHER,
+        referenceNumber: dto.referenceNumber,
+        notes: dto.notes,
+      });
+
+      await manager.save(payment);
+
+      // Update invoice paidAmount
+      invoice.paidAmount = (currentPaidAmount + paymentAmount).toString();
+
+      // Update payment status and invoice status
+      const newOutstanding = outstandingBalance - paymentAmount;
+      if (newOutstanding <= 0) {
+        invoice.paymentStatus = PaymentStatus.PAID;
+        invoice.status = InvoiceStatus.PAID;
+        invoice.paidDate = dto.paymentDate;
+      } else if (currentPaidAmount > 0 || paymentAmount > 0) {
+        invoice.paymentStatus = PaymentStatus.PARTIAL;
+      } else {
+        invoice.paymentStatus = PaymentStatus.UNPAID;
+      }
+
+      await manager.save(invoice);
+
+      // Audit log
+      await this.auditLogsService.record({
+        organizationId,
+        userId,
+        entityType: 'InvoicePayment',
+        entityId: payment.id,
+        action: AuditAction.CREATE,
+        changes: {
+          amount: paymentAmount,
+          invoiceId,
+          invoiceNumber: invoice.invoiceNumber,
+        },
+      });
+
+      return payment;
+    });
+  }
+
+  /**
+   * List all payments for an invoice
+   */
+  async listPayments(
+    organizationId: string,
+    invoiceId: string,
+  ): Promise<InvoicePayment[]> {
+    const invoice = await this.invoicesRepository.findOne({
+      where: { id: invoiceId, organization: { id: organizationId } },
+    });
+
+    if (!invoice) {
+      throw new NotFoundException('Invoice not found');
+    }
+
+    return this.paymentsRepository.find({
+      where: {
+        invoice: { id: invoiceId },
+        organization: { id: organizationId },
+      },
+      order: { paymentDate: 'DESC', createdAt: 'DESC' },
+    });
+  }
+
+  /**
+   * Delete a payment and recalculate invoice amounts
+   */
+  async deletePayment(
+    organizationId: string,
+    invoiceId: string,
+    paymentId: string,
+    userId: string,
+  ): Promise<void> {
+    return await this.dataSource.transaction(async (manager) => {
+      const invoice = await manager.findOne(SalesInvoice, {
+        where: { id: invoiceId, organization: { id: organizationId } },
+      });
+
+      if (!invoice) {
+        throw new NotFoundException('Invoice not found');
+      }
+
+      const payment = await manager.findOne(InvoicePayment, {
+        where: {
+          id: paymentId,
+          invoice: { id: invoiceId },
+          organization: { id: organizationId },
+        },
+      });
+
+      if (!payment) {
+        throw new NotFoundException('Payment not found');
+      }
+
+      // Delete payment
+      await manager.remove(payment);
+
+      // Recalculate paidAmount from remaining payments
+      const remainingPayments = await manager.find(InvoicePayment, {
+        where: {
+          invoice: { id: invoiceId },
+          organization: { id: organizationId },
+        },
+      });
+
+      const totalPaid = remainingPayments.reduce(
+        (sum, p) => sum + parseFloat(p.amount),
+        0,
+      );
+
+      invoice.paidAmount = totalPaid.toString();
+
+      // Recalculate payment status
+      await this.updatePaymentStatus(invoiceId, organizationId);
+
+      // Update invoice status if needed
+      const outstanding = await this.calculateOutstandingBalance(
+        invoiceId,
+        organizationId,
+      );
+      if (outstanding <= 0) {
+        invoice.status = InvoiceStatus.PAID;
+        invoice.paidDate =
+          remainingPayments.length > 0
+            ? remainingPayments[remainingPayments.length - 1].paymentDate
+            : null;
+      } else if (invoice.status === InvoiceStatus.PAID) {
+        invoice.status = InvoiceStatus.SENT;
+        invoice.paidDate = null;
+      }
+
+      await manager.save(invoice);
+
+      // Audit log
+      await this.auditLogsService.record({
+        organizationId,
+        userId,
+        entityType: 'InvoicePayment',
+        entityId: paymentId,
+        action: AuditAction.DELETE,
+        changes: {
+          amount: payment.amount,
+          invoiceId,
+          invoiceNumber: invoice.invoiceNumber,
+        },
+      });
+    });
+  }
+
+  /**
+   * Update invoice
+   */
+  async update(
+    organizationId: string,
+    invoiceId: string,
+    userId: string,
+    dto: any, // UpdateSalesInvoiceDto
+  ): Promise<SalesInvoice> {
+    const invoice = await this.findById(organizationId, invoiceId);
+
+    if (invoice.status === InvoiceStatus.PAID) {
+      throw new BadRequestException('Cannot update paid invoice');
+    }
+
+    if (invoice.status === InvoiceStatus.CANCELLED) {
+      throw new BadRequestException('Cannot update cancelled invoice');
+    }
+
+    // Update allowed fields
+    if (dto.invoiceDate !== undefined) {
+      invoice.invoiceDate = dto.invoiceDate;
+    }
+    if (dto.dueDate !== undefined) {
+      invoice.dueDate = dto.dueDate;
+    }
+    if (dto.description !== undefined) {
+      invoice.description = dto.description;
+    }
+    if (dto.notes !== undefined) {
+      invoice.notes = dto.notes;
+    }
+    if (dto.customerId !== undefined) {
+      if (dto.customerId) {
+        const customer = await this.customersRepository.findOne({
+          where: { id: dto.customerId, organization: { id: organizationId } },
+        });
+        if (!customer) {
+          throw new NotFoundException('Customer not found');
+        }
+        invoice.customer = customer;
+        invoice.customerName = customer.name;
+        invoice.customerTrn = customer.customerTrn;
+      } else {
+        invoice.customer = null;
+        invoice.customerName = dto.customerName;
+        invoice.customerTrn = dto.customerTrn;
+      }
+    }
+
+    // Update line items if provided
+    if (dto.lineItems && Array.isArray(dto.lineItems)) {
+      // Delete existing line items
+      await this.lineItemsRepository.delete({
+        invoice: { id: invoiceId },
+        organization: { id: organizationId },
+      });
+
+      // Create new line items
+      const lineItems = dto.lineItems.map((item: any, index: number) => {
+        const amount = parseFloat(item.quantity) * parseFloat(item.unitPrice);
+        const vatRate = parseFloat(item.vatRate || '5');
+        const vatAmount = amount * (vatRate / 100);
+
+        return this.lineItemsRepository.create({
+          invoice: { id: invoiceId },
+          organization: { id: organizationId },
+          itemName: item.itemName,
+          description: item.description,
+          quantity: item.quantity.toString(),
+          unitPrice: item.unitPrice.toString(),
+          unitOfMeasure: item.unitOfMeasure || 'unit',
+          vatRate: vatRate.toString(),
+          vatTaxType: item.vatTaxType || 'standard',
+          amount: amount.toString(),
+          vatAmount: vatAmount.toString(),
+          lineNumber: index + 1,
+        });
+      });
+
+      await this.lineItemsRepository.save(lineItems);
+
+      // Recalculate totals
+      const totalAmount = lineItems.reduce(
+        (sum, item) => sum + parseFloat(item.amount),
+        0,
+      );
+      const totalVatAmount = lineItems.reduce(
+        (sum, item) => sum + parseFloat(item.vatAmount),
+        0,
+      );
+
+      invoice.amount = totalAmount.toString();
+      invoice.vatAmount = totalVatAmount.toString();
+    } else if (dto.amount !== undefined || dto.vatAmount !== undefined) {
+      // Update amounts directly
+      if (dto.amount !== undefined) {
+        invoice.amount = dto.amount.toString();
+      }
+      if (dto.vatAmount !== undefined) {
+        invoice.vatAmount = dto.vatAmount.toString();
+      }
+    }
+
+    const updated = await this.invoicesRepository.save(invoice);
+
+    // Audit log
+    await this.auditLogsService.record({
+      organizationId,
+      userId,
+      entityType: 'SalesInvoice',
+      entityId: invoiceId,
+      action: AuditAction.UPDATE,
+      changes: dto,
+    });
+
+    return this.findById(organizationId, updated.id);
+  }
+
+  /**
+   * Update invoice status
+   */
+  async updateStatus(
+    organizationId: string,
+    invoiceId: string,
+    userId: string,
+    status: InvoiceStatus,
+  ): Promise<SalesInvoice> {
+    const invoice = await this.findById(organizationId, invoiceId);
+
+    // Validate status transition
+    if (
+      invoice.status === InvoiceStatus.PAID &&
+      status !== InvoiceStatus.PAID
+    ) {
+      throw new BadRequestException('Cannot change status of paid invoice');
+    }
+
+    if (
+      invoice.status === InvoiceStatus.CANCELLED &&
+      status !== InvoiceStatus.CANCELLED
+    ) {
+      throw new BadRequestException(
+        'Cannot change status of cancelled invoice',
+      );
+    }
+
+    if (
+      status === InvoiceStatus.PAID &&
+      invoice.paymentStatus !== PaymentStatus.PAID
+    ) {
+      throw new BadRequestException(
+        'Cannot set status to PAID unless invoice is fully paid',
+      );
+    }
+
+    invoice.status = status;
+    const updated = await this.invoicesRepository.save(invoice);
+
+    // Audit log
+    await this.auditLogsService.record({
+      organizationId,
+      userId,
+      entityType: 'SalesInvoice',
+      entityId: invoiceId,
+      action: AuditAction.UPDATE,
+      changes: { status: { from: invoice.status, to: status } },
+    });
+
+    return this.findById(organizationId, updated.id);
+  }
+
+  /**
+   * Delete invoice (soft delete)
+   */
+  async delete(
+    organizationId: string,
+    invoiceId: string,
+    userId: string,
+  ): Promise<void> {
+    const invoice = await this.findById(organizationId, invoiceId);
+
+    if (invoice.status === InvoiceStatus.PAID) {
+      throw new BadRequestException('Cannot delete paid invoice');
+    }
+
+    // Soft delete
+    invoice.isDeleted = true;
+    await this.invoicesRepository.save(invoice);
+
+    // Audit log
+    await this.auditLogsService.record({
+      organizationId,
+      userId,
+      entityType: 'SalesInvoice',
+      entityId: invoiceId,
+      action: AuditAction.DELETE,
+      changes: { invoiceNumber: invoice.invoiceNumber },
+    });
   }
 }

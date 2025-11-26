@@ -61,9 +61,107 @@ export class ReportGeneratorService {
     });
   }
 
+  private formatDateForInvoice(dateString: string | Date): string {
+    if (!dateString) return '';
+    const date =
+      typeof dateString === 'string' ? new Date(dateString) : dateString;
+    const day = date.getDate().toString().padStart(2, '0');
+    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const month = monthNames[date.getMonth()];
+    const year = date.getFullYear().toString().slice(-2);
+    return `${day}-${month}-${year}`;
+  }
+
+  private numberToWords(num: number): string {
+    const ones = [
+      '',
+      'One',
+      'Two',
+      'Three',
+      'Four',
+      'Five',
+      'Six',
+      'Seven',
+      'Eight',
+      'Nine',
+      'Ten',
+      'Eleven',
+      'Twelve',
+      'Thirteen',
+      'Fourteen',
+      'Fifteen',
+      'Sixteen',
+      'Seventeen',
+      'Eighteen',
+      'Nineteen',
+    ];
+    const tens = [
+      '',
+      '',
+      'Twenty',
+      'Thirty',
+      'Forty',
+      'Fifty',
+      'Sixty',
+      'Seventy',
+      'Eighty',
+      'Ninety',
+    ];
+
+    if (num === 0) return 'Zero';
+
+    const convertHundreds = (n: number): string => {
+      if (n === 0) return '';
+      let result = '';
+      if (n >= 100) {
+        result += ones[Math.floor(n / 100)] + ' Hundred ';
+        n %= 100;
+        if (n > 0) result += 'and ';
+      }
+      if (n >= 20) {
+        result += tens[Math.floor(n / 10)] + ' ';
+        n %= 10;
+      }
+      if (n > 0) {
+        result += ones[n] + ' ';
+      }
+      return result.trim();
+    };
+
+    let result = '';
+    const integerPart = Math.floor(num);
+    const decimalPart = Math.round((num - integerPart) * 100);
+
+    if (integerPart >= 1000000) {
+      const millions = Math.floor(integerPart / 1000000);
+      result += convertHundreds(millions) + ' Million ';
+      const remainder = integerPart % 1000000;
+      if (remainder > 0) {
+        result += convertHundreds(remainder);
+      }
+    } else if (integerPart >= 1000) {
+      const thousands = Math.floor(integerPart / 1000);
+      result += convertHundreds(thousands) + ' Thousand ';
+      const remainder = integerPart % 1000;
+      if (remainder > 0) {
+        result += convertHundreds(remainder);
+      }
+    } else {
+      result += convertHundreds(integerPart);
+    }
+
+    return result.trim();
+  }
+
   async generatePDF(reportData: ReportData): Promise<Buffer> {
     return new Promise((resolve, reject) => {
       try {
+        // Special handling for sales invoice
+        if (reportData.type === 'sales_invoice') {
+          this.generateInvoicePDF(reportData).then(resolve).catch(reject);
+          return;
+        }
+
         // Use landscape for wide tables, portrait for summary reports
         const useLandscape = this.shouldUseLandscape(reportData.type);
         const doc = new PDFDocument({
@@ -162,7 +260,7 @@ export class ReportGeneratorService {
   private addPDFHeader(doc: PDFKit.PDFDocument, reportData: ReportData): void {
     const pageWidth = doc.page.width;
     const margin = 50;
-    const headerBgColor = '#f3f6fa';
+    const headerBgColor = '#fafafa'; // Subtle gray, professional
     const headerHeight = 120;
 
     // Header background
@@ -227,23 +325,23 @@ export class ReportGeneratorService {
           });
         } else {
           // Invalid path/URL, show application name as fallback
-          doc.fontSize(10).font('Helvetica-Bold').fillColor('#1e3a8a');
+          doc.fontSize(10).font('Helvetica-Bold').fillColor('#1a1a1a');
           doc.text('selfAccounting.AI', logoX, logoY, { width: logoSize });
         }
       } catch (error) {
         // If logo fails to load, show application name
         console.warn('Failed to load logo:', error);
-        doc.fontSize(10).font('Helvetica-Bold').fillColor('#1e3a8a');
+        doc.fontSize(10).font('Helvetica-Bold').fillColor('#1a1a1a');
         doc.text('selfAccounting.AI', logoX, logoY, { width: logoSize });
       }
     } else {
       // No logo available, show application name
-      doc.fontSize(10).font('Helvetica-Bold').fillColor('#1e3a8a');
+      doc.fontSize(10).font('Helvetica-Bold').fillColor('#1a1a1a');
       doc.text('selfAccounting.AI', logoX, logoY, { width: logoSize });
     }
 
     // Company name (to the right of the logo)
-    doc.fontSize(18).font('Helvetica-Bold').fillColor('#1e3a8a');
+    doc.fontSize(18).font('Helvetica-Bold').fillColor('#1a1a1a');
     const orgName = reportData.metadata?.organizationName || 'SmartExpense UAE';
     const leftTextX = logoX + logoSize + 12;
     doc.text(orgName, leftTextX, 40, {
@@ -251,7 +349,7 @@ export class ReportGeneratorService {
     });
 
     // Organization details (left side, under organization name)
-    doc.fontSize(9).font('Helvetica').fillColor('#333');
+    doc.fontSize(9).font('Helvetica').fillColor('#666666');
     let yPos = 65;
     if (reportData.metadata?.vatNumber) {
       doc.text(`TRN/VAT: ${reportData.metadata.vatNumber}`, leftTextX, yPos);
@@ -273,13 +371,13 @@ export class ReportGeneratorService {
 
     // Report title and metadata (right side)
     const rightX = pageWidth / 2 + 20;
-    doc.fontSize(16).font('Helvetica-Bold').fillColor('#1e3a8a');
+    doc.fontSize(16).font('Helvetica-Bold').fillColor('#1a1a1a');
     doc.text(this.getReportTitle(reportData.type), rightX, 40, {
       width: pageWidth - rightX - margin,
       align: 'right',
     });
 
-    doc.fontSize(9).font('Helvetica').fillColor('#333');
+    doc.fontSize(9).font('Helvetica').fillColor('#666666');
     yPos = 60;
     if (
       reportData.metadata?.reportPeriod?.startDate ||
@@ -359,16 +457,16 @@ export class ReportGeneratorService {
       });
     }
 
-    // Horizontal line below header
+    // Horizontal line below header - clean professional border
     doc
       .moveTo(margin, 30 + headerHeight + 5)
       .lineTo(pageWidth - margin, 30 + headerHeight + 5)
-      .strokeColor('#d0d7de')
-      .lineWidth(1)
+      .strokeColor('#e0e0e0')
+      .lineWidth(0.5)
       .stroke();
 
     // Reset fill color
-    doc.fillColor('black');
+    doc.fillColor('#1a1a1a');
     doc.y = 30 + headerHeight + 15;
   }
 
@@ -383,26 +481,26 @@ export class ReportGeneratorService {
       ? `${this.formatDate(reportData.metadata.reportPeriod.startDate || '')} to ${this.formatDate(reportData.metadata.reportPeriod.endDate || '')}`
       : 'All Time';
 
-    // Summary box background
+    // Summary box background - Clean professional styling
     const summaryStartY = doc.y;
     const summaryHeight = 180;
     doc
       .rect(margin, summaryStartY, pageWidth - 2 * margin, summaryHeight)
-      .fillColor('#f9fafb')
+      .fillColor('#fafafa')
       .fill()
-      .strokeColor('#d0d7de')
-      .lineWidth(1)
+      .strokeColor('#e0e0e0')
+      .lineWidth(0.5)
       .stroke();
 
     // Summary title
-    doc.fontSize(14).font('Helvetica-Bold').fillColor('#1e3a8a');
+    doc.fontSize(14).font('Helvetica-Bold').fillColor('#1a1a1a');
     doc.text(`Summary (Period: ${period})`, margin + 10, summaryStartY + 10);
 
     // Summary content in two columns
     const leftX = margin + 10;
     const rightX = pageWidth / 2 + 10;
     let yPos = summaryStartY + 35;
-    doc.fontSize(10).font('Helvetica').fillColor('#333');
+    doc.fontSize(10).font('Helvetica').fillColor('#666666');
 
     // Left column
     if (summary.totalExpenses !== undefined) {
@@ -483,7 +581,7 @@ export class ReportGeneratorService {
     }
 
     // Reset fill color and update position
-    doc.fillColor('black');
+    doc.fillColor('#1a1a1a');
     doc.y = summaryStartY + summaryHeight + 10;
   }
 
@@ -506,7 +604,7 @@ export class ReportGeneratorService {
       .lineWidth(0.5)
       .stroke();
 
-    doc.fontSize(8).font('Helvetica').fillColor('#666');
+    doc.fontSize(8).font('Helvetica').fillColor('#666666');
 
     // Left side: Disclaimer and branding
     const disclaimer =
@@ -534,7 +632,7 @@ export class ReportGeneratorService {
     doc.text(footerDate, pageWidth - margin - dateTextWidth, footerY + 10);
 
     // Reset fill color
-    doc.fillColor('black');
+    doc.fillColor('#1a1a1a');
   }
 
   async generateXLSX(reportData: ReportData): Promise<Buffer> {
@@ -634,11 +732,11 @@ export class ReportGeneratorService {
     const formattedHeaders = headers.map((h) => this.formatHeaderLabel(h));
     expenseSheet.addRow(formattedHeaders);
     const headerRow = expenseSheet.getRow(expenseSheet.rowCount);
-    headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    headerRow.font = { bold: true, color: { argb: 'FF1a1a1a' } };
     headerRow.fill = {
       type: 'pattern',
       pattern: 'solid',
-      fgColor: { argb: 'FF1e3a8a' },
+      fgColor: { argb: 'FFF9FAFB' },
     };
     headerRow.alignment = { horizontal: 'center', vertical: 'middle' };
     headerRow.border = {
@@ -773,11 +871,11 @@ export class ReportGeneratorService {
     const categorySheet = workbook.addWorksheet('Category Summary');
     categorySheet.addRow(['Category', 'Count', 'Amount', 'VAT', 'Total']);
     const categoryHeaderRow = categorySheet.getRow(1);
-    categoryHeaderRow.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    categoryHeaderRow.font = { bold: true, color: { argb: 'FF1a1a1a' } };
     categoryHeaderRow.fill = {
       type: 'pattern',
       pattern: 'solid',
-      fgColor: { argb: 'FF1e3a8a' },
+      fgColor: { argb: 'FFF9FAFB' },
     };
 
     const categoryMap = new Map<
@@ -819,11 +917,11 @@ export class ReportGeneratorService {
     const vendorSheet = workbook.addWorksheet('Vendor Summary');
     vendorSheet.addRow(['Vendor', 'Count', 'Amount', 'VAT', 'Total']);
     const vendorHeaderRow = vendorSheet.getRow(1);
-    vendorHeaderRow.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    vendorHeaderRow.font = { bold: true, color: { argb: 'FF1a1a1a' } };
     vendorHeaderRow.fill = {
       type: 'pattern',
       pattern: 'solid',
-      fgColor: { argb: 'FF1e3a8a' },
+      fgColor: { argb: 'FFF9FAFB' },
     };
 
     const vendorMap = new Map<
@@ -865,11 +963,11 @@ export class ReportGeneratorService {
     const monthlySheet = workbook.addWorksheet('Monthly Breakdown');
     monthlySheet.addRow(['Month', 'Total Spend', 'VAT']);
     const monthlyHeaderRow = monthlySheet.getRow(1);
-    monthlyHeaderRow.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    monthlyHeaderRow.font = { bold: true, color: { argb: 'FF1a1a1a' } };
     monthlyHeaderRow.fill = {
       type: 'pattern',
       pattern: 'solid',
-      fgColor: { argb: 'FF1e3a8a' },
+      fgColor: { argb: 'FFF9FAFB' },
     };
 
     const monthlyMap = new Map<string, { spend: number; vat: number }>();
@@ -972,12 +1070,12 @@ export class ReportGeneratorService {
       const headerY = doc.y;
       doc
         .rect(margin, headerY, availableWidth, 25)
-        .fillColor('#f3f6fa')
+        .fillColor('#fafafa')
         .fill()
-        .strokeColor('#d0d7de')
+        .strokeColor('#e0e0e0')
         .stroke();
 
-      doc.fontSize(10).font('Helvetica-Bold').fillColor('#1e3a8a');
+      doc.fontSize(10).font('Helvetica-Bold').fillColor('#1a1a1a');
       let x = margin + 5;
       headers.forEach((header) => {
         const headerLabel = this.formatHeaderLabel(header);
@@ -987,7 +1085,7 @@ export class ReportGeneratorService {
         });
         x += colWidth;
       });
-      doc.fillColor('black');
+      doc.fillColor('#1a1a1a');
 
       // Data rows with alternating colors
       let rowY = headerY + 25;
@@ -1004,7 +1102,7 @@ export class ReportGeneratorService {
             .fill()
             .strokeColor('#d0d7de')
             .stroke();
-          doc.fontSize(10).font('Helvetica-Bold').fillColor('#1e3a8a');
+          doc.fontSize(10).font('Helvetica-Bold').fillColor('#1a1a1a');
           x = margin + 5;
           headers.forEach((header) => {
             const headerLabel = this.formatHeaderLabel(header);
@@ -1014,19 +1112,23 @@ export class ReportGeneratorService {
             });
             x += colWidth;
           });
-          doc.fillColor('black');
+          doc.fillColor('#1a1a1a');
           rowY += 25;
         }
 
+        // Draw row border for clean professional look
+        doc.strokeColor('#e0e0e0').lineWidth(0.5);
+        doc.rect(margin, rowY, availableWidth, 20).stroke();
+        
         // Alternate row background
         if (index % 2 === 0) {
           doc
             .rect(margin, rowY, availableWidth, 20)
-            .fillColor('#f9fafb')
+            .fillColor('#fafafa')
             .fill();
         }
 
-        doc.fontSize(9).font('Helvetica').fillColor('black');
+        doc.fontSize(9).font('Helvetica').fillColor('#1a1a1a');
         x = margin + 5;
         headers.forEach((header) => {
           const value = this.formatCellValue(row[header], header, currency);
@@ -1047,12 +1149,13 @@ export class ReportGeneratorService {
         rowY += 5;
         doc
           .rect(margin, rowY, availableWidth, 25)
-          .fillColor('#e8eef5')
+          .fillColor('#f0f0f0')
           .fill()
-          .strokeColor('#d0d7de')
+          .strokeColor('#e0e0e0')
+          .lineWidth(1)
           .stroke();
 
-        doc.fontSize(10).font('Helvetica-Bold').fillColor('#1e3a8a');
+        doc.fontSize(10).font('Helvetica-Bold').fillColor('#1a1a1a');
         x = margin + 5;
         headers.forEach((header) => {
           const value = totalRow[header] || '';
@@ -1062,7 +1165,7 @@ export class ReportGeneratorService {
           });
           x += colWidth;
         });
-        doc.fillColor('black');
+        doc.fillColor('#1a1a1a');
       }
 
       doc.y = rowY + 30;
@@ -1413,16 +1516,17 @@ export class ReportGeneratorService {
     const availableWidth = pageWidth - 2 * margin;
     const colWidth = availableWidth / columns.length;
 
-    // Header
+    // Header - Professional clean styling
     const headerY = doc.y;
     doc
       .rect(margin, headerY, availableWidth, 25)
-      .fillColor('#f3f6fa')
+      .fillColor('#fafafa')
       .fill()
-      .strokeColor('#d0d7de')
+      .strokeColor('#e0e0e0')
+      .lineWidth(0.5)
       .stroke();
 
-    doc.fontSize(10).font('Helvetica-Bold').fillColor('#1e3a8a');
+    doc.fontSize(10).font('Helvetica-Bold').fillColor('#1a1a1a');
     let x = margin + 5;
     columns.forEach((col) => {
       doc.text(this.formatHeaderLabel(col), x, headerY + 8, {
@@ -1431,7 +1535,7 @@ export class ReportGeneratorService {
       });
       x += colWidth;
     });
-    doc.fillColor('black');
+    doc.fillColor('#1a1a1a');
 
     // Rows
     let rowY = headerY + 25;
@@ -1443,11 +1547,12 @@ export class ReportGeneratorService {
         // Redraw header
         doc
           .rect(margin, rowY, availableWidth, 25)
-          .fillColor('#f3f6fa')
+          .fillColor('#fafafa')
           .fill()
-          .strokeColor('#d0d7de')
+          .strokeColor('#e0e0e0')
+          .lineWidth(0.5)
           .stroke();
-        doc.fontSize(10).font('Helvetica-Bold').fillColor('#1e3a8a');
+        doc.fontSize(10).font('Helvetica-Bold').fillColor('#1a1a1a');
         x = margin + 5;
         columns.forEach((col) => {
           doc.text(this.formatHeaderLabel(col), x, rowY + 8, {
@@ -1456,12 +1561,16 @@ export class ReportGeneratorService {
           });
           x += colWidth;
         });
-        doc.fillColor('black');
+        doc.fillColor('#1a1a1a');
         rowY += 25;
       }
 
+      // Draw row borders for clean professional look
+      doc.strokeColor('#e0e0e0').lineWidth(0.5);
+      doc.rect(margin, rowY, availableWidth, 20).stroke();
+      
       if (index % 2 === 0) {
-        doc.rect(margin, rowY, availableWidth, 20).fillColor('#f9fafb').fill();
+        doc.rect(margin, rowY, availableWidth, 20).fillColor('#fafafa').fill();
       }
 
       doc.fontSize(9).font('Helvetica');
@@ -1492,7 +1601,7 @@ export class ReportGeneratorService {
     ]);
     worksheet.mergeCells(`A1:D1`);
     const headerCell = worksheet.getCell('A1');
-    headerCell.font = { size: 16, bold: true, color: { argb: 'FF1e3a8a' } };
+    headerCell.font = { size: 16, bold: true, color: { argb: 'FF1a1a1a' } };
     headerCell.alignment = { horizontal: 'left', vertical: 'middle' };
 
     // Report title
@@ -1651,7 +1760,7 @@ export class ReportGeneratorService {
           return totalRow[h] || '';
         });
         const totalDataRow = worksheet.addRow(totalValues);
-        totalDataRow.font = { bold: true, color: { argb: 'FF1e3a8a' } };
+        totalDataRow.font = { bold: true, color: { argb: 'FF1a1a1a' } };
         totalDataRow.fill = {
           type: 'pattern',
           pattern: 'solid',
@@ -2021,5 +2130,571 @@ export class ReportGeneratorService {
         });
       }
     }
+  }
+
+  /**
+   * Generate professional invoice PDF matching UAE Tax Invoice format
+   * Premium design inspired by Xero/Tally with clean lines and professional styling
+   */
+  private async generateInvoicePDF(reportData: ReportData): Promise<Buffer> {
+    return new Promise((resolve, reject) => {
+      try {
+        const invoice = reportData.data;
+        const organization = invoice.organization;
+        const customer = invoice.customer;
+        const metadata = reportData.metadata || {};
+        const currency = metadata.currency || invoice.currency || 'AED';
+
+        const doc = new PDFDocument({
+          margin: 50,
+          size: 'A4',
+          layout: 'portrait',
+        });
+
+        const buffers: Buffer[] = [];
+        doc.on('data', buffers.push.bind(buffers));
+        doc.on('end', () => {
+          const pdfBuffer = Buffer.concat(buffers);
+          resolve(pdfBuffer);
+        });
+        doc.on('error', reject);
+
+        const pageWidth = doc.page.width;
+        const margin = 50;
+        const contentWidth = pageWidth - (2 * margin);
+        
+        // Color scheme - professional and clean
+        const colors = {
+          text: '#1a1a1a',
+          textLight: '#666666',
+          border: '#e0e0e0',
+          borderLight: '#f0f0f0',
+          background: '#ffffff',
+          backgroundLight: '#fafafa',
+        };
+
+        // ============================================================================
+        // HEADER: TAX INVOICE TITLE
+        // ============================================================================
+        doc.fontSize(24).font('Helvetica-Bold').fillColor(colors.text).text('TAX INVOICE', { align: 'center' });
+        doc.moveDown(1.5);
+
+        // ============================================================================
+        // SENDER DETAILS (Left side - Organization)
+        // ============================================================================
+        const leftX = margin;
+        const rightX = pageWidth / 2 + 10;
+        let currentY = doc.y;
+
+        // Sender Section Header
+        doc.fontSize(12).font('Helvetica-Bold').fillColor(colors.text);
+        const orgName = organization?.name || metadata.organizationName || '';
+        doc.text(orgName, leftX, currentY, { width: contentWidth / 2 - 10 });
+        currentY += 16;
+
+        doc.fontSize(9).font('Helvetica').fillColor(colors.text);
+        const orgAddress = organization?.address || metadata.address || '';
+        if (orgAddress) {
+          doc.text(orgAddress, leftX, currentY, { width: contentWidth / 2 - 10 });
+          currentY += 13;
+        }
+
+        const orgEmirate = organization?.emirate || '';
+        if (orgEmirate) {
+          doc.fillColor(colors.textLight).text(`Emirate: `, leftX, currentY);
+          doc.fillColor(colors.text).text(orgEmirate, leftX + 55, currentY);
+          currentY += 13;
+        }
+
+        const orgTrn = organization?.vatNumber || metadata.vatNumber || '';
+        if (orgTrn) {
+          doc.fillColor(colors.textLight).text(`TRN: `, leftX, currentY);
+          doc.fillColor(colors.text).text(orgTrn, leftX + 32, currentY);
+          currentY += 13;
+        }
+
+        const orgPhone = organization?.phone || metadata.phone || '';
+        if (orgPhone) {
+          doc.fillColor(colors.textLight).text(`Contact: `, leftX, currentY);
+          doc.fillColor(colors.text).text(orgPhone, leftX + 55, currentY);
+          currentY += 13;
+        }
+
+        const orgEmail = organization?.contactEmail || metadata.email || '';
+        if (orgEmail) {
+          doc.fillColor(colors.textLight).text(`E-Mail: `, leftX, currentY);
+          doc.fillColor(colors.text).text(orgEmail, leftX + 55, currentY);
+          currentY += 13;
+        }
+
+        const orgWebsite = organization?.website || '';
+        if (orgWebsite) {
+          doc.fillColor(colors.textLight).text(`Website: `, leftX, currentY);
+          doc.fillColor(colors.text).text(orgWebsite, leftX + 55, currentY);
+          currentY += 13;
+        }
+        
+        doc.fillColor(colors.text);
+
+        // ============================================================================
+        // INVOICE DETAILS (Top Right) - Clean two-column layout
+        // ============================================================================
+        let invoiceY = margin + 20;
+        const invoiceDetailsWidth = 200;
+        const labelWidth = 110;
+        const valueWidth = 90;
+        
+        // Helper function to draw invoice detail row
+        const drawDetailRow = (label: string, value: string, y: number) => {
+          doc.fontSize(9).font('Helvetica').fillColor(colors.textLight);
+          doc.text(label, rightX, y, { width: labelWidth });
+          doc.fillColor(colors.text);
+          doc.text(value || '', rightX + labelWidth, y, { width: valueWidth });
+        };
+        
+        drawDetailRow('Invoice No.:', invoice.invoiceNumber || '', invoiceY);
+        invoiceY += 14;
+        drawDetailRow('Dated:', this.formatDateForInvoice(invoice.invoiceDate || ''), invoiceY);
+        invoiceY += 14;
+        drawDetailRow('Delivery Note:', '', invoiceY);
+        invoiceY += 14;
+        const paymentTerms = customer?.paymentTerms ? `${customer.paymentTerms} days` : '';
+        drawDetailRow('Mode/Terms of Payment:', paymentTerms, invoiceY);
+        invoiceY += 14;
+        drawDetailRow('Supplier\'s Ref.:', '', invoiceY);
+        invoiceY += 14;
+        drawDetailRow('Other Reference(s):', '', invoiceY);
+        invoiceY += 14;
+        drawDetailRow('Buyer\'s Order No.:', '', invoiceY);
+        invoiceY += 14;
+        drawDetailRow('Dated (for Buyer\'s Order):', '', invoiceY);
+        invoiceY += 14;
+        drawDetailRow('Despatch Document No.:', '', invoiceY);
+        invoiceY += 14;
+        drawDetailRow('Delivery Note Date:', '', invoiceY);
+        invoiceY += 14;
+        drawDetailRow('Despatched through:', '', invoiceY);
+        invoiceY += 14;
+        drawDetailRow('Destination:', '', invoiceY);
+        invoiceY += 14;
+        drawDetailRow('Terms of Delivery:', '', invoiceY);
+        
+        doc.fillColor(colors.text);
+
+        // ============================================================================
+        // RECIPIENT DETAILS (Below sender/invoice details)
+        // ============================================================================
+        doc.moveDown(1.5);
+        const recipientStartY = doc.y;
+
+        const customerName = customer?.name || invoice.customerName || '';
+        
+        // Consignee section
+        doc.fontSize(10).font('Helvetica-Bold').fillColor(colors.text).text('Consignee:', leftX, recipientStartY);
+        doc.fontSize(9).font('Helvetica').text(customerName, leftX, recipientStartY + 14);
+        
+        // Buyer section (right side)
+        doc.fontSize(10).font('Helvetica-Bold').text('Buyer:', leftX + (contentWidth / 2), recipientStartY);
+        doc.fontSize(9).font('Helvetica').text(customerName, leftX + (contentWidth / 2), recipientStartY + 14);
+
+        let recipientY = recipientStartY + 28;
+        const customerAddress = customer?.address || '';
+        if (customerAddress) {
+          doc.text(customerAddress, leftX, recipientY);
+          recipientY += 13;
+        }
+
+        const customerCity = customer?.city || '';
+        const customerCountry = customer?.country || '';
+        if (customerCity || customerCountry) {
+          doc.text(`${customerCity || ''}${customerCity && customerCountry ? ', ' : ''}${customerCountry || ''}`, leftX, recipientY);
+          recipientY += 13;
+        }
+
+        const customerEmirate = customer?.emirate || '';
+        if (customerEmirate) {
+          doc.fillColor(colors.textLight).text(`Emirate: `, leftX, recipientY);
+          doc.fillColor(colors.text).text(customerEmirate, leftX + 55, recipientY);
+          recipientY += 13;
+        }
+
+        const customerCountryFull = customer?.country || 'UAE';
+        doc.fillColor(colors.textLight).text(`Country: `, leftX, recipientY);
+        doc.fillColor(colors.text).text(customerCountryFull, leftX + 55, recipientY);
+
+        doc.moveDown(1.5);
+
+        // ============================================================================
+        // LINE ITEMS TABLE - Premium design with clean borders
+        // ============================================================================
+        const lineItems = invoice.lineItems || [];
+        const tableTop = doc.y + 5;
+        const tableStartX = margin;
+        const colWidths = {
+          siNo: 35,
+          particulars: 200,
+          quantity: 50,
+          rate: 65,
+          per: 35,
+          amount: 80,
+          vatPercent: 55,
+        };
+        const tableWidth = Object.values(colWidths).reduce((sum, w) => sum + w, 0);
+        const rowHeight = 26; // Increased to accommodate VAT amount below percentage
+
+        // Draw table border
+        doc.strokeColor(colors.border).lineWidth(0.5);
+        doc.rect(tableStartX, tableTop, tableWidth, rowHeight).stroke();
+        
+        // Table Header - Clean with subtle background
+        let tableX = tableStartX;
+        doc.fillColor(colors.backgroundLight).rect(tableStartX, tableTop, tableWidth, rowHeight).fill();
+        doc.strokeColor(colors.border).lineWidth(0.5);
+        doc.rect(tableStartX, tableTop, tableWidth, rowHeight).stroke();
+        
+        doc.fontSize(9).font('Helvetica-Bold').fillColor(colors.text);
+        
+        // Draw column dividers
+        let dividerX = tableStartX;
+        doc.moveTo(dividerX + colWidths.siNo, tableTop).lineTo(dividerX + colWidths.siNo, tableTop + rowHeight).stroke();
+        dividerX += colWidths.siNo;
+        doc.moveTo(dividerX + colWidths.particulars, tableTop).lineTo(dividerX + colWidths.particulars, tableTop + rowHeight).stroke();
+        dividerX += colWidths.particulars;
+        doc.moveTo(dividerX + colWidths.quantity, tableTop).lineTo(dividerX + colWidths.quantity, tableTop + rowHeight).stroke();
+        dividerX += colWidths.quantity;
+        doc.moveTo(dividerX + colWidths.rate, tableTop).lineTo(dividerX + colWidths.rate, tableTop + rowHeight).stroke();
+        dividerX += colWidths.rate;
+        doc.moveTo(dividerX + colWidths.per, tableTop).lineTo(dividerX + colWidths.per, tableTop + rowHeight).stroke();
+        dividerX += colWidths.per;
+        doc.moveTo(dividerX + colWidths.amount, tableTop).lineTo(dividerX + colWidths.amount, tableTop + rowHeight).stroke();
+        dividerX += colWidths.amount;
+        
+        doc.text('SI No.', tableX + 8, tableTop + 7, { width: colWidths.siNo - 16, align: 'center' });
+        tableX += colWidths.siNo;
+        
+        doc.text('Particulars', tableX + 8, tableTop + 7, { width: colWidths.particulars - 16 });
+        tableX += colWidths.particulars;
+        
+        doc.text('Quantity', tableX + 8, tableTop + 7, { width: colWidths.quantity - 16, align: 'center' });
+        tableX += colWidths.quantity;
+        
+        doc.text('Rate', tableX + 8, tableTop + 7, { width: colWidths.rate - 16, align: 'right' });
+        tableX += colWidths.rate;
+        
+        doc.text('per', tableX + 8, tableTop + 7, { width: colWidths.per - 16, align: 'center' });
+        tableX += colWidths.per;
+        
+        doc.text('Amount', tableX + 8, tableTop + 7, { width: colWidths.amount - 16, align: 'right' });
+        tableX += colWidths.amount;
+        
+        doc.text('VAT %', tableX + 8, tableTop + 7, { width: colWidths.vatPercent - 16, align: 'center' });
+
+        // Table Rows - Clean styling with subtle borders
+        let rowY = tableTop + rowHeight;
+        lineItems.forEach((item: any, index: number) => {
+          // Check if we need a new page
+          if (rowY + rowHeight * 2 > doc.page.height - 150) {
+            doc.addPage();
+            rowY = margin + 20;
+            // Redraw table header on new page
+            doc.fillColor(colors.backgroundLight).rect(tableStartX, rowY, tableWidth, rowHeight).fill();
+            doc.strokeColor(colors.border).lineWidth(0.5);
+            doc.rect(tableStartX, rowY, tableWidth, rowHeight).stroke();
+            
+            // Redraw column dividers for header
+            let headerDividerX = tableStartX;
+            doc.moveTo(headerDividerX + colWidths.siNo, rowY).lineTo(headerDividerX + colWidths.siNo, rowY + rowHeight).stroke();
+            headerDividerX += colWidths.siNo;
+            doc.moveTo(headerDividerX + colWidths.particulars, rowY).lineTo(headerDividerX + colWidths.particulars, rowY + rowHeight).stroke();
+            headerDividerX += colWidths.particulars;
+            doc.moveTo(headerDividerX + colWidths.quantity, rowY).lineTo(headerDividerX + colWidths.quantity, rowY + rowHeight).stroke();
+            headerDividerX += colWidths.quantity;
+            doc.moveTo(headerDividerX + colWidths.rate, rowY).lineTo(headerDividerX + colWidths.rate, rowY + rowHeight).stroke();
+            headerDividerX += colWidths.rate;
+            doc.moveTo(headerDividerX + colWidths.per, rowY).lineTo(headerDividerX + colWidths.per, rowY + rowHeight).stroke();
+            headerDividerX += colWidths.per;
+            doc.moveTo(headerDividerX + colWidths.amount, rowY).lineTo(headerDividerX + colWidths.amount, rowY + rowHeight).stroke();
+            
+            doc.fontSize(9).font('Helvetica-Bold').fillColor(colors.text);
+            tableX = tableStartX;
+            doc.text('SI No.', tableX + 8, rowY + 7, { width: colWidths.siNo - 16, align: 'center' });
+            tableX += colWidths.siNo;
+            doc.text('Particulars', tableX + 8, rowY + 7, { width: colWidths.particulars - 16 });
+            tableX += colWidths.particulars;
+            doc.text('Quantity', tableX + 8, rowY + 7, { width: colWidths.quantity - 16, align: 'center' });
+            tableX += colWidths.quantity;
+            doc.text('Rate', tableX + 8, rowY + 7, { width: colWidths.rate - 16, align: 'right' });
+            tableX += colWidths.rate;
+            doc.text('per', tableX + 8, rowY + 7, { width: colWidths.per - 16, align: 'center' });
+            tableX += colWidths.per;
+            doc.text('Amount', tableX + 8, rowY + 7, { width: colWidths.amount - 16, align: 'right' });
+            tableX += colWidths.amount;
+            doc.text('VAT %', tableX + 8, rowY + 7, { width: colWidths.vatPercent - 16, align: 'center' });
+            rowY += rowHeight;
+          }
+
+          // Draw row border
+          doc.strokeColor(colors.border).lineWidth(0.5);
+          doc.rect(tableStartX, rowY, tableWidth, rowHeight).stroke();
+          
+          // Draw column dividers for this row
+          dividerX = tableStartX;
+          doc.moveTo(dividerX + colWidths.siNo, rowY).lineTo(dividerX + colWidths.siNo, rowY + rowHeight).stroke();
+          dividerX += colWidths.siNo;
+          doc.moveTo(dividerX + colWidths.particulars, rowY).lineTo(dividerX + colWidths.particulars, rowY + rowHeight).stroke();
+          dividerX += colWidths.particulars;
+          doc.moveTo(dividerX + colWidths.quantity, rowY).lineTo(dividerX + colWidths.quantity, rowY + rowHeight).stroke();
+          dividerX += colWidths.quantity;
+          doc.moveTo(dividerX + colWidths.rate, rowY).lineTo(dividerX + colWidths.rate, rowY + rowHeight).stroke();
+          dividerX += colWidths.rate;
+          doc.moveTo(dividerX + colWidths.per, rowY).lineTo(dividerX + colWidths.per, rowY + rowHeight).stroke();
+          dividerX += colWidths.per;
+          doc.moveTo(dividerX + colWidths.amount, rowY).lineTo(dividerX + colWidths.amount, rowY + rowHeight).stroke();
+          dividerX += colWidths.amount;
+
+          tableX = tableStartX;
+          doc.fontSize(9).font('Helvetica').fillColor(colors.text);
+
+          // SI No.
+          doc.text((index + 1).toString(), tableX + 8, rowY + 7, { width: colWidths.siNo - 16, align: 'center' });
+          tableX += colWidths.siNo;
+
+          // Particulars
+          doc.text(item.itemName || '', tableX + 8, rowY + 7, { width: colWidths.particulars - 16 });
+          tableX += colWidths.particulars;
+
+          // Quantity
+          doc.text(parseFloat(item.quantity || '0').toString(), tableX + 8, rowY + 7, { width: colWidths.quantity - 16, align: 'center' });
+          tableX += colWidths.quantity;
+
+          // Rate
+          const unitPrice = parseFloat(item.unitPrice || '0');
+          doc.text(unitPrice.toFixed(2), tableX + 8, rowY + 7, { width: colWidths.rate - 16, align: 'right' });
+          tableX += colWidths.rate;
+
+          // per
+          doc.text(item.unitOfMeasure || 'unit', tableX + 8, rowY + 7, { width: colWidths.per - 16, align: 'center' });
+          tableX += colWidths.per;
+
+          // Amount
+          const itemAmount = parseFloat(item.amount || '0');
+          doc.text(itemAmount.toFixed(2), tableX + 8, rowY + 7, { width: colWidths.amount - 16, align: 'right' });
+          tableX += colWidths.amount;
+
+          // VAT % and VAT Amount
+          const vatRate = parseFloat(item.vatRate || '0');
+          const vatAmount = parseFloat(item.vatAmount || '0');
+          
+          // VAT % on first line
+          doc.fontSize(9).fillColor(colors.text);
+          doc.text(`${vatRate.toFixed(2)}%`, tableX + 8, rowY + 5, { width: colWidths.vatPercent - 16, align: 'center' });
+          // VAT Amount on second line (below) - matching sample format
+          doc.fontSize(8).fillColor(colors.textLight);
+          doc.text(vatAmount.toFixed(2), tableX + 8, rowY + 16, { width: colWidths.vatPercent - 16, align: 'center' });
+          doc.fontSize(9).fillColor(colors.text);
+
+          rowY += rowHeight;
+        });
+        
+        // Close table bottom border
+        doc.strokeColor(colors.border).lineWidth(0.5);
+        doc.moveTo(tableStartX, rowY).lineTo(tableStartX + tableWidth, rowY).stroke();
+
+        doc.y = rowY + 20;
+
+        // ============================================================================
+        // TOTALS AND VAT SUMMARY - Premium styling
+        // ============================================================================
+        const totalsX = pageWidth - margin - 280;
+        const totalsY = doc.y;
+        const vatTableWidth = 200;
+        const vatRowHeight = 22;
+
+        // VAT Summary Table (Right side) - Clean borders
+        const vatSummaryX = totalsX;
+        let vatY = totalsY;
+
+        // Table header with subtle background
+        doc.fillColor(colors.backgroundLight).rect(vatSummaryX, vatY, vatTableWidth, vatRowHeight).fill();
+        doc.strokeColor(colors.border).lineWidth(0.5);
+        doc.rect(vatSummaryX, vatY, vatTableWidth, vatRowHeight).stroke();
+        
+        // Column dividers
+        doc.moveTo(vatSummaryX + 50, vatY).lineTo(vatSummaryX + 50, vatY + vatRowHeight).stroke();
+        doc.moveTo(vatSummaryX + 125, vatY).lineTo(vatSummaryX + 125, vatY + vatRowHeight).stroke();
+        
+        doc.fontSize(9).font('Helvetica-Bold').fillColor(colors.text);
+        doc.text('VAT %', vatSummaryX + 8, vatY + 7, { width: 42, align: 'center' });
+        doc.text('Assessable Value', vatSummaryX + 58, vatY + 7, { width: 67, align: 'right' });
+        doc.text('Tax Amount', vatSummaryX + 133, vatY + 7, { width: 67, align: 'right' });
+
+        vatY += 20;
+
+        // Group line items by VAT rate
+        const vatGroups = new Map<number, { assessable: number; tax: number }>();
+        lineItems.forEach((item: any) => {
+          const vatRate = parseFloat(item.vatRate || '0');
+          const assessable = parseFloat(item.amount || '0');
+          const tax = parseFloat(item.vatAmount || '0');
+          
+          if (!vatGroups.has(vatRate)) {
+            vatGroups.set(vatRate, { assessable: 0, tax: 0 });
+          }
+          const group = vatGroups.get(vatRate)!;
+          group.assessable += assessable;
+          group.tax += tax;
+        });
+
+        vatY += vatRowHeight;
+        
+        vatGroups.forEach((group, vatRate) => {
+          if (vatY + vatRowHeight > doc.page.height - 100) {
+            doc.addPage();
+            vatY = margin + 20;
+          }
+
+          // Draw row border
+          doc.strokeColor(colors.border).lineWidth(0.5);
+          doc.rect(vatSummaryX, vatY, vatTableWidth, vatRowHeight).stroke();
+          doc.moveTo(vatSummaryX + 50, vatY).lineTo(vatSummaryX + 50, vatY + vatRowHeight).stroke();
+          doc.moveTo(vatSummaryX + 125, vatY).lineTo(vatSummaryX + 125, vatY + vatRowHeight).stroke();
+
+          doc.fontSize(9).font('Helvetica').fillColor(colors.text);
+          doc.text(`${vatRate.toFixed(2)}%`, vatSummaryX + 8, vatY + 7, { width: 42, align: 'center' });
+          doc.text(group.assessable.toFixed(2), vatSummaryX + 58, vatY + 7, { width: 67, align: 'right' });
+          doc.text(group.tax.toFixed(2), vatSummaryX + 133, vatY + 7, { width: 67, align: 'right' });
+          vatY += vatRowHeight;
+        });
+
+        // VAT Summary Total Row - Bold with top border
+        const totalAssessable = parseFloat(invoice.amount || '0');
+        const totalVat = parseFloat(invoice.vatAmount || '0');
+        
+        if (vatY + vatRowHeight > doc.page.height - 100) {
+          doc.addPage();
+          vatY = margin + 20;
+        }
+
+        // Top border (thicker for emphasis)
+        doc.strokeColor(colors.border).lineWidth(1);
+        doc.moveTo(vatSummaryX, vatY).lineTo(vatSummaryX + vatTableWidth, vatY).stroke();
+        
+        // Row border and dividers
+        doc.strokeColor(colors.border).lineWidth(0.5);
+        doc.rect(vatSummaryX, vatY, vatTableWidth, vatRowHeight).stroke();
+        doc.moveTo(vatSummaryX + 50, vatY).lineTo(vatSummaryX + 50, vatY + vatRowHeight).stroke();
+        doc.moveTo(vatSummaryX + 125, vatY).lineTo(vatSummaryX + 125, vatY + vatRowHeight).stroke();
+
+        doc.fontSize(9).font('Helvetica-Bold').fillColor(colors.text);
+        doc.text('Total', vatSummaryX + 8, vatY + 7, { width: 42, align: 'center' });
+        doc.text(totalAssessable.toFixed(2), vatSummaryX + 58, vatY + 7, { width: 67, align: 'right' });
+        doc.text(totalVat.toFixed(2), vatSummaryX + 133, vatY + 7, { width: 67, align: 'right' });
+
+        // Total Amount (Left side)
+        const totalAmountX = margin;
+        let totalY = totalsY + (vatGroups.size + 1) * vatRowHeight + 10;
+
+        if (totalY + 120 > doc.page.height - 100) {
+          doc.addPage();
+          totalY = margin + 20;
+        }
+
+        const totalAmount = parseFloat(invoice.totalAmount || '0');
+        doc.fontSize(12).font('Helvetica-Bold').fillColor(colors.text);
+        doc.text(`Total: ${this.formatCurrency(totalAmount, currency)}`, totalAmountX, totalY);
+
+        // Amount in words
+        totalY += 18;
+        const amountInWords = this.numberToWords(totalAmount);
+        doc.fontSize(9).font('Helvetica').fillColor(colors.text);
+        doc.text(`Amount Chargeable (in words):`, totalAmountX, totalY);
+        totalY += 14;
+        doc.font('Helvetica-Bold').text(`UAE Dirham ${amountInWords} Only (${this.formatCurrency(totalAmount, currency)})`, totalAmountX, totalY);
+
+        // VAT Amount in words
+        totalY += 18;
+        const vatInWords = this.numberToWords(totalVat);
+        doc.fontSize(9).font('Helvetica').text(`VAT Amount (in words):`, totalAmountX, totalY);
+        totalY += 14;
+        doc.font('Helvetica-Bold').text(`UAE Dirham ${vatInWords} Only (${this.formatCurrency(totalVat, currency)})`, totalAmountX, totalY);
+
+        // E. & O.E.
+        totalY += 18;
+        doc.fontSize(8).font('Helvetica').fillColor(colors.textLight).text('E. & O.E.', totalAmountX + 220, totalY);
+
+        doc.moveDown(1);
+
+        // ============================================================================
+        // REMARKS SECTION
+        // ============================================================================
+        doc.moveDown(1.5);
+        if (invoice.description || invoice.notes) {
+          doc.fontSize(10).font('Helvetica-Bold').fillColor(colors.text).text('Remarks:', margin, doc.y);
+          doc.moveDown(0.5);
+          doc.fontSize(9).font('Helvetica').fillColor(colors.text);
+          if (invoice.description) {
+            doc.text(invoice.description, margin, doc.y, { width: contentWidth - 100 });
+          }
+          if (invoice.notes) {
+            if (invoice.description) doc.moveDown(0.5);
+            doc.text(invoice.notes, margin, doc.y, { width: contentWidth - 100 });
+          }
+          doc.moveDown(1.5);
+        }
+
+        // ============================================================================
+        // BANK DETAILS SECTION
+        // ============================================================================
+        if (organization?.bankAccountNumber || organization?.bankIban) {
+          doc.fontSize(10).font('Helvetica-Bold').fillColor(colors.text).text('Company\'s Bank Details:', margin, doc.y);
+          doc.moveDown(0.5);
+          doc.fontSize(9).font('Helvetica').fillColor(colors.text);
+
+          let bankY = doc.y;
+          if (organization.bankAccountHolder) {
+            doc.fillColor(colors.textLight).text(`A/c Holder's Name: `, margin, bankY);
+            doc.fillColor(colors.text).text(organization.bankAccountHolder, margin + 100, bankY);
+            bankY += 14;
+          }
+          if (organization.bankName) {
+            doc.fillColor(colors.textLight).text(`Bank Name: `, margin, bankY);
+            doc.fillColor(colors.text).text(organization.bankName, margin + 72, bankY);
+            bankY += 14;
+          }
+          if (organization.bankAccountNumber) {
+            doc.fillColor(colors.textLight).text(`A/c No.: `, margin, bankY);
+            doc.fillColor(colors.text).text(organization.bankAccountNumber, margin + 58, bankY);
+            bankY += 14;
+          }
+          if (organization.bankIban) {
+            doc.fillColor(colors.textLight).text(`IBAN: `, margin, bankY);
+            doc.fillColor(colors.text).text(organization.bankIban, margin + 42, bankY);
+            bankY += 14;
+          }
+          if (organization.bankBranch || organization.bankSwiftCode) {
+            const branchInfo = `${organization.bankBranch || ''}${organization.bankBranch && organization.bankSwiftCode ? ' & ' : ''}${organization.bankSwiftCode || ''}`;
+            doc.fillColor(colors.textLight).text(`Branch & SWIFT Code: `, margin, bankY);
+            doc.fillColor(colors.text).text(branchInfo, margin + 125, bankY);
+            bankY += 14;
+          }
+
+          doc.y = bankY + 20;
+          doc.fillColor(colors.text);
+        }
+
+        // ============================================================================
+        // FOOTER
+        // ============================================================================
+        const footerY = doc.page.height - 70;
+        doc.fontSize(8).font('Helvetica').fillColor(colors.textLight);
+        doc.text('This is a Computer Generated Invoice', margin, footerY, { align: 'center', width: contentWidth });
+        doc.fontSize(9).font('Helvetica').fillColor(colors.text);
+        doc.text('Authorised Signatory', margin, footerY + 20, { align: 'left' });
+
+        doc.end();
+      } catch (error) {
+        reject(error);
+      }
+    });
   }
 }
