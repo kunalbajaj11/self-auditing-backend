@@ -41,8 +41,7 @@ lerna-debug.log*
 .env.test.local
 .env.production.local
 .env.local
-# Keep .env.example as it's a template file
-!.env.example
+.env.example
 
 # Google Cloud credentials
 google-credentials.json
