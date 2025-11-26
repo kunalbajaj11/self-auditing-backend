@@ -28,22 +28,7 @@ async function bootstrap() {
   ];
 
   app.enableCors({
-    origin: (origin, callback) => {
-      // Allow requests with no origin (like mobile apps or curl requests)
-      if (!origin) {
-        return callback(null, true);
-      }
-      // Normalize origin (remove trailing slash, convert to lowercase for comparison)
-      const normalizedOrigin = origin.trim().toLowerCase().replace(/\/$/, '');
-      const normalizedAllowedOrigins = allowedOrigins.map((o) => o.trim().toLowerCase().replace(/\/$/, ''));
-      
-      if (normalizedAllowedOrigins.includes(normalizedOrigin)) {
-        callback(null, true);
-      } else {
-        console.warn(`CORS blocked origin: ${origin}`);
-        callback(new Error('Not allowed by CORS'));
-      }
-    },
+    origin: allowedOrigins,
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: [
@@ -52,18 +37,14 @@ async function bootstrap() {
       'Accept',
       'Origin',
       'X-Requested-With',
-      'Access-Control-Allow-Origin',
-      'Access-Control-Allow-Headers',
-      'Access-Control-Allow-Methods',
     ],
     exposedHeaders: ['Authorization'],
     preflightContinue: false,
     optionsSuccessStatus: 204,
   });
 
-  // Configure Helmet to not interfere with CORS
-  const helmetMiddleware = helmet();
-  app.use(helmetMiddleware);
+  // Configure Helmet
+  app.use((helmet as unknown as () => any)());
   app.use((hpp as unknown as () => any)());
   app.use((compression as unknown as () => any)());
   app.use(
