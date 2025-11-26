@@ -18,12 +18,14 @@ async function bootstrap() {
   app.setGlobalPrefix('api');
   app.enableCors({
     origin: [
-      'http://self-auditing-frontend.s3-website.ap-south-1.amazonaws.com',
-      'https://self-auditing-frontend.s3-website.ap-south-1.amazonaws.com',
+      'https://self-auditing-frontend.pages.dev',
+      'https://self-auditing.com',
+      // 'http://self-auditing-frontend.s3-website.ap-south-1.amazonaws.com',
+      // 'https://self-auditing-frontend.s3-website.ap-south-1.amazonaws.com',
       // Dynamically allow additional CORS origins from environment variable, if set
       ...(process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',') : []),
       // Allow any subdomain of amazonaws.com using RegExp
-      /amazonaws\.com$/,
+      // /amazonaws\.com$/,
     ],
     credentials: true,
   });
