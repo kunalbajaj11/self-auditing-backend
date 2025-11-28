@@ -29,6 +29,7 @@ import { ContactModule } from './modules/contact/contact.module';
 import { CustomersModule } from './modules/customers/customers.module';
 import { SalesInvoicesModule } from './modules/sales-invoices/sales-invoices.module';
 import { CreditNotesModule } from './modules/credit-notes/credit-notes.module';
+import { SettingsModule } from './modules/settings/settings.module';
 import { AppBootstrapService } from './bootstrap/app-bootstrap.service';
 import { SanitizeAttachmentsInterceptor } from './common/interceptors/sanitize-attachments.interceptor';
 
@@ -70,6 +71,7 @@ import { SanitizeAttachmentsInterceptor } from './common/interceptors/sanitize-a
     CustomersModule,
     SalesInvoicesModule,
     CreditNotesModule,
+    SettingsModule,
   ],
   controllers: [AppController],
   providers: [

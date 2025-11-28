@@ -53,5 +53,11 @@ export class Notification extends AbstractEntity {
 
   @Column({ name: 'sent_at', type: 'timestamp', nullable: true })
   sentAt?: Date | null;
+
+  @Column({ name: 'entity_type', length: 50, nullable: true })
+  entityType?: string | null; // e.g., 'invoice', 'expense', 'accrual'
+
+  @Column({ name: 'entity_id', type: 'uuid', nullable: true })
+  entityId?: string | null; // Reference to the invoice/expense/accrual ID
 }
 

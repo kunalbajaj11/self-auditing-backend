@@ -190,3 +190,4 @@ To build for a specific platform:
 docker buildx build --platform linux/amd64 -t smart-expense-api .
 ```
 
+

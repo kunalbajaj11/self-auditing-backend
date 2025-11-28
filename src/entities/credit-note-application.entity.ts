@@ -52,3 +52,4 @@ export class CreditNoteApplication extends AbstractEntity {
   notes?: string | null;
 }
 
+

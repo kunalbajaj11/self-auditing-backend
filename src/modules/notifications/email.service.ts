@@ -1,7 +1,9 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Inject, Optional, forwardRef } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as nodemailer from 'nodemailer';
 import { Transporter } from 'nodemailer';
+import { NotificationType } from '../../common/enums/notification-type.enum';
+import { EmailTemplateService } from './email-template.service';
 
 export interface EmailOptions {
   to: string | string[];
@@ -20,7 +22,12 @@ export interface EmailOptions {
 export class EmailService {
   private transporter: Transporter | null = null;
 
-  constructor(private readonly configService: ConfigService) {
+  constructor(
+    private readonly configService: ConfigService,
+    @Inject(forwardRef(() => EmailTemplateService))
+    @Optional()
+    private readonly emailTemplateService?: EmailTemplateService,
+  ) {
     const smtpHost = this.configService.get<string>('SMTP_HOST');
     const smtpPort = this.configService.get<number>('SMTP_PORT', 587);
     const smtpUser = this.configService.get<string>('SMTP_USER');
@@ -92,7 +99,41 @@ export class EmailService {
     title: string,
     message: string,
     type?: string,
+    organizationId?: string,
+    templateVariables?: Record<string, any>,
   ): Promise<boolean> {
+    // Priority 3: Try to use custom template if available
+    if (
+      this.emailTemplateService &&
+      organizationId &&
+      type &&
+      Object.values(NotificationType).includes(type as NotificationType) &&
+      templateVariables
+    ) {
+      try {
+        const template = await this.emailTemplateService.getTemplate(
+          organizationId,
+          type as NotificationType,
+        );
+
+        if (template) {
+          const rendered = this.emailTemplateService.renderTemplate(
+            template,
+            templateVariables,
+          );
+          return this.sendEmail({
+            to,
+            subject: rendered.subject,
+            html: rendered.html,
+            text: rendered.text,
+          });
+        }
+      } catch (error) {
+        console.warn('Failed to use email template, falling back to default:', error);
+      }
+    }
+
+    // Fallback to default email format
     const subject = `SmartExpense: ${title}`;
     const html = this.buildNotificationHtml(title, message, type);
 

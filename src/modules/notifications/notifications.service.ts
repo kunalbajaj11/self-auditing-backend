@@ -19,6 +19,10 @@ interface ScheduleNotificationInput {
   type: NotificationType;
   channel: NotificationChannel;
   scheduledFor?: Date | string | null;
+  entityType?: string | null; // e.g., 'invoice', 'expense', 'accrual'
+  entityId?: string | null; // Reference to the invoice/expense/accrual ID
+  recipientEmail?: string | null; // Optional direct email (for customers)
+  templateVariables?: Record<string, any>; // Variables for email template rendering
 }
 
 const DEFAULT_REMINDER_OFFSET_DAYS = Number(
@@ -71,22 +75,32 @@ export class NotificationsService {
         ? new Date(input.scheduledFor)
         : null,
       isRead: false,
+      entityType: input.entityType ?? null,
+      entityId: input.entityId ?? null,
     });
 
     const saved = await this.notificationsRepository.save(notification);
 
     // Send email if channel includes email
     if (input.channel === NotificationChannel.EMAIL) {
-      // Determine recipient email: user email if available, otherwise organization contact email
-      const recipientEmail = user?.email || organization.contactEmail;
-      
+      // Determine recipient email: direct email > user email > organization contact email
+      const recipientEmail =
+        input.recipientEmail || user?.email || organization.contactEmail;
+
       if (recipientEmail) {
         // Send immediately if not scheduled, or schedule for later
         const shouldSendNow = !input.scheduledFor || new Date(input.scheduledFor) <= new Date();
         
         if (shouldSendNow) {
           this.emailService
-            .sendNotificationEmail(recipientEmail, input.title, input.message, input.type)
+            .sendNotificationEmail(
+              recipientEmail,
+              input.title,
+              input.message,
+              input.type,
+              organization.id,
+              input.templateVariables,
+            )
             .then((sent) => {
               if (sent) {
                 saved.sentAt = new Date();
