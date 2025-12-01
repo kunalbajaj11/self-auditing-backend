@@ -60,6 +60,12 @@ export class User extends AbstractEntity {
   @Column({ name: 'last_login', type: 'timestamp', nullable: true })
   lastLogin?: Date | null;
 
+  @Column({ name: 'password_reset_token', length: 255, nullable: true })
+  passwordResetToken?: string | null;
+
+  @Column({ name: 'password_reset_token_expires', type: 'timestamp', nullable: true })
+  passwordResetTokenExpires?: Date | null;
+
   @OneToMany(() => Expense, (expense) => expense.user)
   expenses: Expense[];
 

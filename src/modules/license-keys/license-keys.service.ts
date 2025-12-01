@@ -12,12 +12,14 @@ import { CreateLicenseKeyDto } from './dto/create-license-key.dto';
 import { RenewLicenseKeyDto } from './dto/renew-license-key.dto';
 import { LicenseKeyStatus } from '../../common/enums/license-key-status.enum';
 import { PlanType } from '../../common/enums/plan-type.enum';
+import { EmailService } from '../notifications/email.service';
 
 @Injectable()
 export class LicenseKeysService {
   constructor(
     @InjectRepository(LicenseKey)
     private readonly licenseKeysRepository: Repository<LicenseKey>,
+    private readonly emailService: EmailService,
   ) {}
 
   async create(
@@ -37,9 +39,80 @@ export class LicenseKeysService {
       storageQuotaMb: dto.storageQuotaMb ?? null,
       expiresAt,
       notes: dto.notes ?? null,
+      email: dto.email ?? null,
       createdById,
     });
-    return this.licenseKeysRepository.save(license);
+    const savedLicense = await this.licenseKeysRepository.save(license);
+
+    // Send email with license key
+    if (dto.email) {
+      try {
+        const planTypeText = dto.planType ? dto.planType.toUpperCase() : 'Custom';
+        const validityText = validityDays === 365 ? '1 year' : `${validityDays} days`;
+        const maxUsersText = dto.maxUsers ? `Max Users: ${dto.maxUsers}` : '';
+        const storageText = dto.storageQuotaMb ? `Storage Quota: ${dto.storageQuotaMb} MB` : '';
+
+        const emailSubject = 'Your License Key - SmartExpense UAE';
+        const emailHtml = `
+          <!DOCTYPE html>
+          <html>
+            <head>
+              <meta charset="utf-8">
+              <style>
+                body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+                .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+                .header { background-color: #1976d2; color: white; padding: 20px; text-align: center; }
+                .content { padding: 20px; background-color: #f9f9f9; }
+                .license-key { background-color: #fff; border: 2px solid #1976d2; padding: 15px; margin: 20px 0; text-align: center; font-family: monospace; font-size: 18px; font-weight: bold; color: #1976d2; }
+                .details { background-color: #fff; padding: 15px; margin: 10px 0; border-left: 4px solid #1976d2; }
+                .footer { text-align: center; padding: 20px; font-size: 12px; color: #666; }
+              </style>
+            </head>
+            <body>
+              <div class="container">
+                <div class="header">
+                  <h1>SmartExpense UAE</h1>
+                </div>
+                <div class="content">
+                  <h2>Your License Key</h2>
+                  <p>Your license key has been generated successfully. Please use this key to register your organization.</p>
+                  
+                  <div class="license-key">${savedLicense.key}</div>
+                  
+                  <div class="details">
+                    <h3>License Details:</h3>
+                    <p><strong>Plan Type:</strong> ${planTypeText}</p>
+                    <p><strong>Validity:</strong> ${validityText}</p>
+                    ${maxUsersText ? `<p><strong>${maxUsersText}</strong></p>` : ''}
+                    ${storageText ? `<p><strong>${storageText}</strong></p>` : ''}
+                    <p><strong>Expires At:</strong> ${expiresAt.toLocaleDateString()}</p>
+                  </div>
+                  
+                  ${dto.notes ? `<p><strong>Notes:</strong> ${dto.notes}</p>` : ''}
+                  
+                  <p>Please keep this license key secure and use it during the registration process.</p>
+                </div>
+                <div class="footer">
+                  <p>This is an automated notification from SmartExpense UAE.</p>
+                </div>
+              </div>
+            </body>
+          </html>
+        `;
+
+        await this.emailService.sendEmail({
+          to: dto.email,
+          subject: emailSubject,
+          html: emailHtml,
+          text: `Your License Key: ${savedLicense.key}\n\nPlan Type: ${planTypeText}\nValidity: ${validityText}\nExpires At: ${expiresAt.toLocaleDateString()}`,
+        });
+      } catch (error) {
+        // Log error but don't fail license creation
+        console.error('Failed to send license key email:', error);
+      }
+    }
+
+    return savedLicense;
   }
 
   async findAll(): Promise<LicenseKey[]> {

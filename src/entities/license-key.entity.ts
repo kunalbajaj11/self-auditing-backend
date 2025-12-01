@@ -45,6 +45,9 @@ export class LicenseKey extends AbstractEntity {
   @Column({ nullable: true })
   notes?: string | null;
 
+  @Column({ nullable: true })
+  email?: string | null;
+
   @ManyToOne(() => User, { nullable: true })
   createdBy?: User | null;
 

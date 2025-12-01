@@ -9,6 +9,7 @@ import { CategoriesModule } from '../categories/categories.module';
 import { JwtStrategy } from './jwt.strategy';
 import { AuditLogsModule } from '../audit-logs/audit-logs.module';
 import { LicenseKeysModule } from '../license-keys/license-keys.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
   imports: [
@@ -25,6 +26,7 @@ import { LicenseKeysModule } from '../license-keys/license-keys.module';
     CategoriesModule,
     AuditLogsModule,
     LicenseKeysModule,
+    NotificationsModule,
   ],
   providers: [AuthService, JwtStrategy],
   controllers: [AuthController],

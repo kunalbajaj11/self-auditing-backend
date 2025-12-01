@@ -276,8 +276,21 @@ export class ReportGeneratorService {
 
     // Get application logo path (default logo)
     const getApplicationLogoPath = (): string | null => {
-      // Try multiple possible paths for the logo
+      // Try multiple possible paths for the logo (prioritize SVG, then JPG)
       const possiblePaths = [
+        // SVG logo paths (preferred)
+        path.join(process.cwd(), 'assets', 'images', 'logo.svg'),
+        path.join(
+          __dirname,
+          '..',
+          '..',
+          '..',
+          'assets',
+          'images',
+          'logo.svg',
+        ),
+        path.join(__dirname, '..', '..', 'assets', 'images', 'logo.svg'),
+        // JPG logo paths (fallback)
         path.join(process.cwd(), 'assets', 'images', 'app-logo.jpg'),
         path.join(
           __dirname,

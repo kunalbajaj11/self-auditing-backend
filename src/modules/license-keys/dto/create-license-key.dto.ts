@@ -1,4 +1,5 @@
 import {
+  IsEmail,
   IsEnum,
   IsInt,
   IsNotEmpty,
@@ -34,5 +35,8 @@ export class CreateLicenseKeyDto {
   @Min(1)
   validityDays?: number;
 
+  @IsNotEmpty()
+  @IsEmail()
+  email: string;
 }
 

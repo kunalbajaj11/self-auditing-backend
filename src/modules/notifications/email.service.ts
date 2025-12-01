@@ -4,6 +4,8 @@ import * as nodemailer from 'nodemailer';
 import { Transporter } from 'nodemailer';
 import { NotificationType } from '../../common/enums/notification-type.enum';
 import { EmailTemplateService } from './email-template.service';
+import * as fs from 'fs';
+import * as path from 'path';
 
 export interface EmailOptions {
   to: string | string[];
@@ -243,6 +245,164 @@ export class EmailService {
         </body>
       </html>
     `;
+  }
+
+  async sendWelcomeEmail(
+    to: string,
+    userName: string,
+    organizationName?: string,
+  ): Promise<boolean> {
+    try {
+      // Get the path to the user manual PDF
+      // The PDF is located in the backend assets directory for production compatibility
+      // Try multiple possible paths to handle both development and production
+      let pdfPath: string | null = null;
+      
+      // Try path from compiled dist directory (production) - assets folder
+      const distAssetsPath = path.resolve(__dirname, '../../../assets', 'USER-MANUAL.pdf');
+      // Try path from source directory (development) - assets folder
+      const srcAssetsPath = path.resolve(__dirname, '../../../assets', 'USER-MANUAL.pdf');
+      // Try path from compiled dist directory (legacy - docs folder at project root)
+      const distPath = path.resolve(__dirname, '../../../../..', 'docs', 'USER-MANUAL.pdf');
+      // Try path from source directory (legacy - docs folder at project root)
+      const srcPath = path.resolve(__dirname, '../../../../../docs', 'USER-MANUAL.pdf');
+      // Try using environment variable if set
+      const envPath = this.configService.get<string>('USER_MANUAL_PDF_PATH');
+      
+      if (envPath && fs.existsSync(envPath)) {
+        pdfPath = envPath;
+      } else if (fs.existsSync(distAssetsPath)) {
+        pdfPath = distAssetsPath;
+      } else if (fs.existsSync(srcAssetsPath)) {
+        pdfPath = srcAssetsPath;
+      } else if (fs.existsSync(distPath)) {
+        pdfPath = distPath;
+      } else if (fs.existsSync(srcPath)) {
+        pdfPath = srcPath;
+      } else {
+        pdfPath = null;
+      }
+
+      // Check if PDF exists
+      if (!pdfPath || !fs.existsSync(pdfPath)) {
+        console.warn(
+          `User manual PDF not found. Tried paths: ${distAssetsPath}, ${srcAssetsPath}, ${distPath}, ${srcPath}${envPath ? `, ${envPath}` : ''}. Sending welcome email without attachment.`,
+        );
+        return this.sendEmail({
+          to,
+          subject: 'Welcome to SmartExpense UAE',
+          html: this.buildWelcomeEmailHtml(userName, organizationName),
+          text: this.buildWelcomeEmailText(userName, organizationName),
+        });
+      }
+
+      // Read PDF file
+      const pdfBuffer = fs.readFileSync(pdfPath);
+
+      return this.sendEmail({
+        to,
+        subject: 'Welcome to SmartExpense UAE',
+        html: this.buildWelcomeEmailHtml(userName, organizationName),
+        text: this.buildWelcomeEmailText(userName, organizationName),
+        attachments: [
+          {
+            filename: 'USER-MANUAL.pdf',
+            content: pdfBuffer,
+            contentType: 'application/pdf',
+          },
+        ],
+      });
+    } catch (error) {
+      console.error('Error sending welcome email:', error);
+      // Try to send without attachment if there's an error reading the PDF
+      return this.sendEmail({
+        to,
+        subject: 'Welcome to SmartExpense UAE',
+        html: this.buildWelcomeEmailHtml(userName, organizationName),
+        text: this.buildWelcomeEmailText(userName, organizationName),
+      });
+    }
+  }
+
+  private buildWelcomeEmailHtml(
+    userName: string,
+    organizationName?: string,
+  ): string {
+    return `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="utf-8">
+          <style>
+            body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+            .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+            .header { background-color: #1976d2; color: white; padding: 20px; text-align: center; }
+            .content { padding: 20px; background-color: #f9f9f9; }
+            .footer { text-align: center; padding: 20px; font-size: 12px; color: #666; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="header">
+              <h1>Welcome to SmartExpense UAE</h1>
+            </div>
+            <div class="content">
+              <h2>Hello ${userName}!</h2>
+              ${
+                organizationName
+                  ? `<p>Welcome to <strong>${organizationName}</strong> on SmartExpense UAE!</p>`
+                  : '<p>Welcome to SmartExpense UAE!</p>'
+              }
+              <p>We're excited to have you on board. SmartExpense UAE is a comprehensive expense management system designed to help you manage your expenses efficiently and stay compliant with UAE regulations.</p>
+              <p>To help you get started, we've attached a comprehensive user manual that covers:</p>
+              <ul>
+                <li>Getting started with the platform</li>
+                <li>Creating and managing expenses</li>
+                <li>Understanding roles and permissions</li>
+                <li>Using advanced features</li>
+                <li>And much more!</li>
+              </ul>
+              <p>Please take a moment to review the attached user manual. It will help you make the most of SmartExpense UAE.</p>
+              <p>If you have any questions or need assistance, please don't hesitate to reach out to our support team.</p>
+              <p>Best regards,<br>The SmartExpense UAE Team</p>
+            </div>
+            <div class="footer">
+              <p>This is an automated welcome email from SmartExpense UAE.</p>
+            </div>
+          </div>
+        </body>
+      </html>
+    `;
+  }
+
+  private buildWelcomeEmailText(
+    userName: string,
+    organizationName?: string,
+  ): string {
+    return `Hello ${userName}!
+
+${
+  organizationName
+    ? `Welcome to ${organizationName} on SmartExpense UAE!\n\n`
+    : 'Welcome to SmartExpense UAE!\n\n'
+}We're excited to have you on board. SmartExpense UAE is a comprehensive expense management system designed to help you manage your expenses efficiently and stay compliant with UAE regulations.
+
+To help you get started, we've attached a comprehensive user manual that covers:
+- Getting started with the platform
+- Creating and managing expenses
+- Understanding roles and permissions
+- Using advanced features
+- And much more!
+
+Please take a moment to review the attached user manual. It will help you make the most of SmartExpense UAE.
+
+If you have any questions or need assistance, please don't hesitate to reach out to our support team.
+
+Best regards,
+The SmartExpense UAE Team
+
+---
+This is an automated welcome email from SmartExpense UAE.`;
   }
 
   isConfigured(): boolean {

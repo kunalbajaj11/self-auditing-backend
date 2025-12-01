@@ -15,6 +15,7 @@ import { Organization } from '../../entities/organization.entity';
 import { UserStatus } from '../../common/enums/user-status.enum';
 import { PlanType } from '../../common/enums/plan-type.enum';
 import { hashPassword } from '../../utils/password.util';
+import { EmailService } from '../notifications/email.service';
 
 @Injectable()
 export class UsersService {
@@ -23,6 +24,7 @@ export class UsersService {
     private readonly usersRepository: Repository<User>,
     @InjectRepository(Organization)
     private readonly organizationsRepository: Repository<Organization>,
+    private readonly emailService: EmailService,
   ) {}
 
   async findByEmail(email: string): Promise<User | null> {
@@ -117,7 +119,21 @@ export class UsersService {
       passwordHash: await hashPassword(dto.password),
       organization,
     });
-    return this.usersRepository.save(user);
+    const savedUser = await this.usersRepository.save(user);
+
+    // Send welcome email to the new user
+    try {
+      await this.emailService.sendWelcomeEmail(
+        savedUser.email,
+        savedUser.name,
+        organization.name,
+      );
+    } catch (error) {
+      // Log error but don't fail user creation if email fails
+      console.error('Failed to send welcome email:', error);
+    }
+
+    return savedUser;
   }
 
   async updateUser(
@@ -211,5 +227,32 @@ export class UsersService {
       maxUsers,
       planType: organization.planType,
     };
+  }
+
+  async setPasswordResetToken(
+    userId: string,
+    token: string,
+    expiresAt: Date,
+  ): Promise<void> {
+    await this.usersRepository.update(userId, {
+      passwordResetToken: token,
+      passwordResetTokenExpires: expiresAt,
+    });
+  }
+
+  async findByPasswordResetToken(token: string): Promise<User | null> {
+    return this.usersRepository.findOne({
+      where: { passwordResetToken: token },
+      relations: ['organization'],
+    });
+  }
+
+  async updatePassword(userId: string, newPassword: string): Promise<void> {
+    const passwordHash = await hashPassword(newPassword);
+    await this.usersRepository.update(userId, {
+      passwordHash,
+      passwordResetToken: null,
+      passwordResetTokenExpires: null,
+    });
   }
 }
