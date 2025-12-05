@@ -7,6 +7,8 @@ import {
   DeleteObjectCommand,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { NodeHttpHandler } from '@smithy/node-http-handler';
+import * as https from 'https';
 import { v4 as uuidv4 } from 'uuid';
 import { Logger } from '@nestjs/common';
 import { ImageOptimizationService } from './image-optimization.service';
@@ -71,6 +73,16 @@ export class FileStorageService {
       this.region = 'auto'; // R2 uses 'auto' as region
 
       if (accessKeyId && secretAccessKey && accountId) {
+        // Create HTTPS agent with modern TLS settings for R2
+        // This helps resolve SSL handshake issues with Cloudflare R2
+        const httpsAgent = new https.Agent({
+          keepAlive: true,
+          keepAliveMsecs: 1000,
+          maxSockets: 50,
+          // Use modern TLS (1.2 and 1.3)
+          minVersion: 'TLSv1.2',
+        });
+
         this.s3Client = new S3Client({
           region: this.region,
           endpoint: r2Endpoint,
@@ -79,6 +91,9 @@ export class FileStorageService {
             secretAccessKey,
           },
           forcePathStyle: true, // R2 requires path-style addressing
+          requestHandler: new NodeHttpHandler({
+            httpsAgent,
+          }),
         });
         this.logger.log(`R2 storage configured: bucket=${this.bucketName} endpoint=${r2Endpoint}`);
       } else {
@@ -118,7 +133,7 @@ export class FileStorageService {
 
     // Optimize image before upload if it's an image file
     let uploadBuffer = file.buffer;
-    let uploadMimeType = file.mimetype;
+    const uploadMimeType = file.mimetype;
     let uploadSize = file.size;
 
     if (this.imageOptimizationService && this.imageOptimizationService.isImageFile(file.mimetype)) {

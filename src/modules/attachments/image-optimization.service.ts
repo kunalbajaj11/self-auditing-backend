@@ -36,10 +36,11 @@ export class ImageOptimizationService {
 
   constructor(private readonly configService: ConfigService) {
     // Configuration from environment variables with sensible defaults
-    this.maxWidth = this.configService.get<number>('IMAGE_MAX_WIDTH', 2000);
-    this.jpegQuality = this.configService.get<number>('IMAGE_JPEG_QUALITY', 85);
-    this.pngQuality = this.configService.get<number>('IMAGE_PNG_QUALITY', 90);
-    this.webpQuality = this.configService.get<number>('IMAGE_WEBP_QUALITY', 85);
+    // Parse as numbers since env vars are strings
+    this.maxWidth = parseInt(this.configService.get<string>('IMAGE_MAX_WIDTH', '2000'), 10);
+    this.jpegQuality = parseInt(this.configService.get<string>('IMAGE_JPEG_QUALITY', '85'), 10);
+    this.pngQuality = parseInt(this.configService.get<string>('IMAGE_PNG_QUALITY', '90'), 10);
+    this.webpQuality = parseInt(this.configService.get<string>('IMAGE_WEBP_QUALITY', '85'), 10);
     this.enabled = this.configService.get<string>('IMAGE_OPTIMIZATION_ENABLED', 'true').toLowerCase() === 'true';
     
     this.logger.log(
@@ -133,8 +134,7 @@ export class ImageOptimizationService {
       } else if (normalizedMimeType === 'image/png') {
         optimizedBuffer = await sharpInstance
           .png({ 
-            quality: this.pngQuality,
-            compressionLevel: 9, // Maximum compression
+            compressionLevel: 9, // Maximum compression (0-9, higher = better compression)
             adaptiveFiltering: true, // Better compression
           })
           .toBuffer();
