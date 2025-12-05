@@ -22,6 +22,10 @@ FROM node:20-alpine AS production
 
 WORKDIR /app
 
+# Install CA certificates for SSL/TLS (required for Cloudflare R2)
+RUN apk add --no-cache ca-certificates && \
+    update-ca-certificates
+
 # Create non-root user
 RUN addgroup -g 1001 -S nodejs && \
     adduser -S nestjs -u 1001

@@ -7,8 +7,6 @@ import {
   DeleteObjectCommand,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { NodeHttpHandler } from '@smithy/node-http-handler';
-import * as https from 'https';
 import { v4 as uuidv4 } from 'uuid';
 import { Logger } from '@nestjs/common';
 import { ImageOptimizationService } from './image-optimization.service';
@@ -73,26 +71,10 @@ export class FileStorageService {
       this.region = 'auto'; // R2 uses 'auto' as region
 
       if (accessKeyId && secretAccessKey && accountId) {
-        // R2 configuration with explicit TLS 1.2+ support
-        // Cloudflare R2 requires TLS 1.2 or higher (they disabled SSLv3)
-        // Using NodeHttpHandler with custom HTTPS agent to ensure TLS 1.2+
-        const httpsAgentOptions: https.AgentOptions = {
-          keepAlive: true,
-          keepAliveMsecs: 1000,
-          maxSockets: 50,
-        };
-
-        // Use minVersion if available (Node 11.4+), otherwise fallback to secureProtocol
-        if (typeof (https.Agent.prototype as any).minVersion !== 'undefined') {
-          (httpsAgentOptions as any).minVersion = 'TLSv1.2';
-          (httpsAgentOptions as any).maxVersion = 'TLSv1.3';
-        } else {
-          // Fallback for older Node.js versions
-          httpsAgentOptions.secureProtocol = 'TLSv1_2_method';
-        }
-
-        const httpsAgent = new https.Agent(httpsAgentOptions);
-
+        // Cloudflare R2 is S3-compatible, so we use AWS SDK
+        // R2 requires TLS 1.2+ and proper SNI (Server Name Indication)
+        // Using the simplest configuration - let AWS SDK handle SSL negotiation
+        
         this.s3Client = new S3Client({
           region: this.region,
           endpoint: r2Endpoint,
@@ -100,12 +82,9 @@ export class FileStorageService {
             accessKeyId,
             secretAccessKey,
           },
-          forcePathStyle: true, // R2 requires path-style addressing
-          requestHandler: new NodeHttpHandler({
-            httpsAgent,
-            connectionTimeout: 10000,
-            requestTimeout: 30000,
-          }),
+          forcePathStyle: true, // R2 requires path-style addressing (bucket/key format)
+          // Don't override requestHandler - let AWS SDK use its default SSL/TLS handling
+          // This should work better with Cloudflare R2's SSL requirements
         });
         this.logger.log(
           `R2 storage configured: bucket=${this.bucketName} endpoint=${r2Endpoint} region=${this.region}`,
@@ -224,9 +203,16 @@ export class FileStorageService {
       
       // If it's an SSL/TLS error, log additional context
       if (errorMessage.includes('SSL') || errorMessage.includes('TLS') || errorMessage.includes('handshake')) {
+        const endpoint = this.storageType === 'r2' 
+          ? (this.configService.get<string>('R2_ENDPOINT') || `https://${this.configService.get<string>('R2_ACCOUNT_ID')}.r2.cloudflarestorage.com`)
+          : 'S3';
         this.logger.error(
-          `SSL/TLS error detected. Endpoint: ${this.storageType === 'r2' ? this.configService.get<string>('R2_ENDPOINT') : 'S3'}, ` +
-          `Region: ${this.region}, Bucket: ${this.bucketName}`,
+          `SSL/TLS error detected. This may indicate: ` +
+          `1) Container Node.js/OpenSSL version incompatibility, ` +
+          `2) Network/proxy interference, or ` +
+          `3) Cloudflare R2 SSL requirements changed. ` +
+          `Endpoint: ${endpoint}, Region: ${this.region}, Bucket: ${this.bucketName}. ` +
+          `Please check container Node.js version (node --version) and OpenSSL version (openssl version).`,
         );
       }
       
