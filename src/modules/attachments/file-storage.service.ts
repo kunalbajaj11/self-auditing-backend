@@ -75,12 +75,13 @@ export class FileStorageService {
       if (accessKeyId && secretAccessKey && accountId) {
         // Create HTTPS agent with modern TLS settings for R2
         // This helps resolve SSL handshake issues with Cloudflare R2
+        // Use secureProtocol to enforce TLS 1.2+ (required by Cloudflare R2)
         const httpsAgent = new https.Agent({
           keepAlive: true,
           keepAliveMsecs: 1000,
           maxSockets: 50,
-          // Use modern TLS (1.2 and 1.3)
-          minVersion: 'TLSv1.2',
+          // Enforce TLS 1.2+ - this is required by Cloudflare R2
+          secureProtocol: 'TLSv1_2_method',
         });
 
         this.s3Client = new S3Client({
@@ -93,6 +94,8 @@ export class FileStorageService {
           forcePathStyle: true, // R2 requires path-style addressing
           requestHandler: new NodeHttpHandler({
             httpsAgent,
+            connectionTimeout: 10000, // 10 second timeout
+            requestTimeout: 30000, // 30 second timeout
           }),
         });
         this.logger.log(`R2 storage configured: bucket=${this.bucketName} endpoint=${r2Endpoint}`);
@@ -199,7 +202,23 @@ export class FileStorageService {
       };
     } catch (error) {
       const storageName = this.storageType === 'r2' ? 'R2' : 'S3';
-      this.logger.error(`Error uploading file to ${storageName}: ${(error as Error)?.message}`, (error as Error)?.stack);
+      const errorMessage = (error as Error)?.message || 'Unknown error';
+      const errorStack = (error as Error)?.stack;
+      
+      // Log detailed error information for debugging SSL issues
+      this.logger.error(
+        `Error uploading file to ${storageName}: ${errorMessage}`,
+        errorStack,
+      );
+      
+      // If it's an SSL/TLS error, log additional context
+      if (errorMessage.includes('SSL') || errorMessage.includes('TLS') || errorMessage.includes('handshake')) {
+        this.logger.error(
+          `SSL/TLS error detected. Endpoint: ${this.storageType === 'r2' ? this.configService.get<string>('R2_ENDPOINT') : 'S3'}, ` +
+          `Region: ${this.region}, Bucket: ${this.bucketName}`,
+        );
+      }
+      
       throw new Error('Failed to upload file to storage');
     }
   }
