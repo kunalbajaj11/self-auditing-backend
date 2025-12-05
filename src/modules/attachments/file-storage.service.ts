@@ -7,8 +7,6 @@ import {
   DeleteObjectCommand,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { NodeHttpHandler } from '@smithy/node-http-handler';
-import * as https from 'https';
 import { v4 as uuidv4 } from 'uuid';
 import { Logger } from '@nestjs/common';
 import { ImageOptimizationService } from './image-optimization.service';
@@ -73,17 +71,8 @@ export class FileStorageService {
       this.region = 'auto'; // R2 uses 'auto' as region
 
       if (accessKeyId && secretAccessKey && accountId) {
-        // Create HTTPS agent with modern TLS settings for R2
-        // This helps resolve SSL handshake issues with Cloudflare R2
-        // Use secureProtocol to enforce TLS 1.2+ (required by Cloudflare R2)
-        const httpsAgent = new https.Agent({
-          keepAlive: true,
-          keepAliveMsecs: 1000,
-          maxSockets: 50,
-          // Enforce TLS 1.2+ - this is required by Cloudflare R2
-          secureProtocol: 'TLSv1_2_method',
-        });
-
+        // R2 configuration - using default TLS/SSL settings
+        // This should work with Cloudflare R2's SSL requirements
         this.s3Client = new S3Client({
           region: this.region,
           endpoint: r2Endpoint,
@@ -92,11 +81,6 @@ export class FileStorageService {
             secretAccessKey,
           },
           forcePathStyle: true, // R2 requires path-style addressing
-          requestHandler: new NodeHttpHandler({
-            httpsAgent,
-            connectionTimeout: 10000, // 10 second timeout
-            requestTimeout: 30000, // 30 second timeout
-          }),
         });
         this.logger.log(`R2 storage configured: bucket=${this.bucketName} endpoint=${r2Endpoint}`);
       } else {
