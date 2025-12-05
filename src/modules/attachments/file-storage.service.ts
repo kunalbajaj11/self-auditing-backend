@@ -7,6 +7,8 @@ import {
   DeleteObjectCommand,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { NodeHttpHandler } from '@smithy/node-http-handler';
+import * as https from 'https';
 import { v4 as uuidv4 } from 'uuid';
 import { Logger } from '@nestjs/common';
 import { ImageOptimizationService } from './image-optimization.service';
@@ -71,8 +73,26 @@ export class FileStorageService {
       this.region = 'auto'; // R2 uses 'auto' as region
 
       if (accessKeyId && secretAccessKey && accountId) {
-        // R2 configuration - using default TLS/SSL settings
-        // This should work with Cloudflare R2's SSL requirements
+        // R2 configuration with explicit TLS 1.2+ support
+        // Cloudflare R2 requires TLS 1.2 or higher (they disabled SSLv3)
+        // Using NodeHttpHandler with custom HTTPS agent to ensure TLS 1.2+
+        const httpsAgentOptions: https.AgentOptions = {
+          keepAlive: true,
+          keepAliveMsecs: 1000,
+          maxSockets: 50,
+        };
+
+        // Use minVersion if available (Node 11.4+), otherwise fallback to secureProtocol
+        if (typeof (https.Agent.prototype as any).minVersion !== 'undefined') {
+          (httpsAgentOptions as any).minVersion = 'TLSv1.2';
+          (httpsAgentOptions as any).maxVersion = 'TLSv1.3';
+        } else {
+          // Fallback for older Node.js versions
+          httpsAgentOptions.secureProtocol = 'TLSv1_2_method';
+        }
+
+        const httpsAgent = new https.Agent(httpsAgentOptions);
+
         this.s3Client = new S3Client({
           region: this.region,
           endpoint: r2Endpoint,
@@ -81,8 +101,15 @@ export class FileStorageService {
             secretAccessKey,
           },
           forcePathStyle: true, // R2 requires path-style addressing
+          requestHandler: new NodeHttpHandler({
+            httpsAgent,
+            connectionTimeout: 10000,
+            requestTimeout: 30000,
+          }),
         });
-        this.logger.log(`R2 storage configured: bucket=${this.bucketName} endpoint=${r2Endpoint}`);
+        this.logger.log(
+          `R2 storage configured: bucket=${this.bucketName} endpoint=${r2Endpoint} region=${this.region}`,
+        );
       } else {
         this.logger.warn(
           'R2 credentials not configured. File storage will use local mode.',
