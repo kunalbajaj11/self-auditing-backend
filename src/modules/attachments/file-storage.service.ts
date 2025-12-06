@@ -74,21 +74,31 @@ export class FileStorageService {
         // Cloudflare R2 is S3-compatible, so we use AWS SDK
         // R2 requires TLS 1.2+ and proper SNI (Server Name Indication)
         // Using the simplest configuration - let AWS SDK handle SSL negotiation
+        // Note: Server environment (Alpine Linux) requires CA certificates to be installed
+        // See Dockerfile for ca-certificates installation
         
-        this.s3Client = new S3Client({
-          region: this.region,
-          endpoint: r2Endpoint,
-          credentials: {
-            accessKeyId,
-            secretAccessKey,
-          },
-          forcePathStyle: true, // R2 requires path-style addressing (bucket/key format)
-          // Don't override requestHandler - let AWS SDK use its default SSL/TLS handling
-          // This should work better with Cloudflare R2's SSL requirements
-        });
-        this.logger.log(
-          `R2 storage configured: bucket=${this.bucketName} endpoint=${r2Endpoint} region=${this.region}`,
-        );
+        try {
+          this.s3Client = new S3Client({
+            region: this.region,
+            endpoint: r2Endpoint,
+            credentials: {
+              accessKeyId,
+              secretAccessKey,
+            },
+            forcePathStyle: true, // R2 requires path-style addressing (bucket/key format)
+            // Don't override requestHandler - let AWS SDK use its default SSL/TLS handling
+            // This should work better with Cloudflare R2's SSL requirements
+          });
+          this.logger.log(
+            `R2 storage configured: bucket=${this.bucketName} endpoint=${r2Endpoint} region=${this.region}`,
+          );
+        } catch (error) {
+          this.logger.error(
+            `Failed to configure R2 client: ${(error as Error)?.message}. ` +
+            `Ensure CA certificates are installed in the container (see Dockerfile).`,
+          );
+          throw error;
+        }
       } else {
         this.logger.warn(
           'R2 credentials not configured. File storage will use local mode.',
