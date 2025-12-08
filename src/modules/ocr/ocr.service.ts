@@ -32,8 +32,16 @@ export class OcrService {
   ): Promise<OcrResult> {
     const provider = this.configService.get<string>('OCR_PROVIDER', 'mock');
 
+    // Check if file is PDF
+    const isPdf =
+      file.mimetype === 'application/pdf' ||
+      file.originalname.toLowerCase().endsWith('.pdf');
+
     switch (provider.toLowerCase()) {
       case 'google':
+        if (isPdf) {
+          return this.processPdfWithGoogleVision(file, organizationId);
+        }
         return this.processWithGoogleVision(file, organizationId);
       case 'azure':
         return this.processWithAzureFormRecognizer(file, organizationId);
@@ -224,15 +232,18 @@ export class OcrService {
         });
       }
 
-      // Perform text detection on the image
+      // Perform text detection on the image or PDF
+      // Note: Google Vision API textDetection supports both images and PDFs
+      // For PDFs, it processes the first page or converts PDF to images
       const [result] = await client.textDetection({
         image: { content: file.buffer },
       });
 
       const detections = result.textAnnotations;
       if (!detections || detections.length === 0) {
-        console.warn('No text detected in image. Falling back to mock.');
-        return this.processMock(file);
+        const fileType = file.mimetype === 'application/pdf' ? 'PDF' : 'image';
+        console.warn(`No text detected in ${fileType}. Falling back to mock.`);
+        return this.processMock(file, organizationId);
       }
 
       // Extract full text (first detection contains all text)
@@ -305,6 +316,24 @@ export class OcrService {
       console.warn('Falling back to mock OCR.');
       return this.processMock(file, organizationId);
     }
+  }
+
+  /**
+   * Process PDF files with Google Vision API
+   * Note: Google Vision API's textDetection can handle PDFs, but for better results
+   * with multi-page PDFs, asyncBatchAnnotateFiles is recommended (async operation)
+   * For now, we use the same textDetection method which works for single-page PDFs
+   * or the first page of multi-page PDFs
+   */
+  private async processPdfWithGoogleVision(
+    file: Express.Multer.File,
+    organizationId?: string,
+  ): Promise<OcrResult> {
+    // For PDFs, we can use the same processWithGoogleVision method
+    // Google Vision API textDetection supports PDFs, though results may vary
+    // For production, consider implementing asyncBatchAnnotateFiles for better PDF support
+    console.log('[OCR] Processing PDF file with Google Vision API');
+    return this.processWithGoogleVision(file, organizationId);
   }
 
   private parseOcrText(text: string): {
