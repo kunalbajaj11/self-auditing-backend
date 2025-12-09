@@ -356,17 +356,89 @@ export class OcrService {
     // Extract vendor name (usually at the top of the receipt)
     const allLines = text.split('\n');
     const nonEmptyLines = allLines.filter((line) => line.trim().length > 0);
+
+    // Improved vendor name extraction
     if (nonEmptyLines.length > 0) {
-      // Skip common header lines
+      // Patterns to skip (addresses, phone numbers, dates, etc.)
       const skipPatterns = [
-        /^[\d\s\-]+$/,
-        /^(street|avenue|road|city|state|zip)/i,
+        /^[\d\s\-\.\/]+$/, // Only numbers, spaces, dashes, dots, slashes
+        /^(street|avenue|road|city|state|zip|p\.?o\.?\s*box|po box)/i,
+        /^(phone|tel|mobile|fax|email|e-mail)[\s:]/i,
+        /^(date|invoice\s*date|bill\s*date)[\s:]/i,
+        /^(invoice|bill|receipt|tax\s*invoice)[\s#:]/i,
+        /^(total|subtotal|amount|vat|tax)[\s:]/i,
+        /^[\d]{1,2}[\/\-][\d]{1,2}[\/\-][\d]{2,4}$/, // Date patterns
+        /^[A-Z]{2,3}\s*[\d,]+\.?\d*$/, // Currency codes with amounts
+        /^[\d,]+\.?\d*\s*(AED|USD|EUR|GBP|SAR)$/i, // Amounts with currency
+        /^(qty|quantity|item|description|unit|price)[\s:]/i,
+        /^TRN[\s:]/i,
+        /^[A-Z0-9]{10,20}$/, // TRN numbers
       ];
-      for (const line of nonEmptyLines) {
+
+      // Look for vendor name in first 10 lines (usually at top)
+      const searchLines = nonEmptyLines.slice(
+        0,
+        Math.min(10, nonEmptyLines.length),
+      );
+
+      // Priority 1: Look for company/business name patterns
+      const companyPatterns = [
+        /^(LLC|L\.L\.C\.|LTD|L\.T\.D\.|INC|INC\.|CORP|CORP\.|CO\.|COMPANY)/i,
+        /(LLC|L\.L\.C\.|LTD|L\.T\.D\.|INC|INC\.|CORP|CORP\.|CO\.|COMPANY)/i,
+      ];
+
+      for (const line of searchLines) {
         const trimmed = line.trim();
-        if (trimmed.length > 2 && !skipPatterns.some((p) => p.test(trimmed))) {
-          result.vendorName = trimmed.substring(0, 100);
+        // Skip if matches skip patterns
+        if (skipPatterns.some((p) => p.test(trimmed))) {
+          continue;
+        }
+
+        // Check if line looks like a company name
+        const hasCompanyIndicator = companyPatterns.some((p) =>
+          p.test(trimmed),
+        );
+        const hasMultipleWords = trimmed.split(/\s+/).length >= 2;
+        const reasonableLength = trimmed.length >= 3 && trimmed.length <= 100;
+        const hasLetters = /[A-Za-z]/.test(trimmed);
+
+        // If it has company indicators or looks like a business name
+        if (
+          hasLetters &&
+          reasonableLength &&
+          (hasCompanyIndicator || hasMultipleWords)
+        ) {
+          // Clean up the vendor name
+          let vendorName = trimmed
+            .replace(/\s+/g, ' ') // Normalize whitespace
+            .substring(0, 100);
+
+          // Remove common suffixes that might be OCR errors
+          vendorName = vendorName.replace(/\s+(LLC|LTD|INC|CORP|CO)\.?$/i, '');
+
+          result.vendorName = vendorName;
           break;
+        }
+      }
+
+      // Priority 2: If no company name found, take first substantial line
+      if (!result.vendorName) {
+        for (const line of searchLines) {
+          const trimmed = line.trim();
+          if (skipPatterns.some((p) => p.test(trimmed))) {
+            continue;
+          }
+
+          // Must have letters, reasonable length, and multiple words or substantial content
+          const hasLetters = /[A-Za-z]/.test(trimmed);
+          const reasonableLength = trimmed.length >= 3 && trimmed.length <= 100;
+          const hasSubstance =
+            trimmed.split(/\s+/).length >= 1 && trimmed.length >= 5;
+
+          if (hasLetters && reasonableLength && hasSubstance) {
+            result.vendorName = trimmed.substring(0, 100);
+            break;
+          }
         }
       }
     }
@@ -406,72 +478,202 @@ export class OcrService {
     }
 
     // Extract amounts - improved patterns to handle various formats
-    // First, try to find "Total" and get the amount on same or next line
-    let totalAmount: number | null = null;
+    // Priority order: Grand Total > Total Amount > Total > Amount > largest number with currency
 
-    // Look for "Total" line and get amount from same or next line
+    interface AmountMatch {
+      value: number;
+      priority: number;
+      lineIndex: number;
+    }
+
+    const amounts: AmountMatch[] = [];
+
+    // Enhanced amount patterns with priorities
+    // Priority 1: Grand Total, Total Amount, Final Total (highest priority)
+    const highPriorityPatterns = [
+      {
+        pattern:
+          /(?:grand\s*)?total\s*(?:amount)?\s*[:\s]*(?:AED\s*)?([\d,]+\.?\d*)/gi,
+        priority: 10,
+      },
+      {
+        pattern: /(?:final\s*)?total\s*[:\s]*(?:AED\s*)?([\d,]+\.?\d*)/gi,
+        priority: 9,
+      },
+      {
+        pattern:
+          /total\s*(?:amount|due|payable)?\s*[:\s]*(?:AED\s*)?([\d,]+\.?\d*)/gi,
+        priority: 8,
+      },
+    ];
+
+    // Priority 2: Total on same line or next line
     for (let i = 0; i < allLines.length; i++) {
       const line = allLines[i].trim();
-      if (/^total\s*[:\s]*$/i.test(line)) {
+      const lowerLine = line.toLowerCase();
+
+      // Check for "Total" keyword
+      if (/^(?:grand\s*)?total\s*(?:amount)?\s*[:\s]*$/i.test(line)) {
         // Total is on this line, amount might be on next line
         if (i + 1 < allLines.length) {
           const nextLine = allLines[i + 1].trim();
-          const amountMatch = nextLine.match(/^([\d,]+\.?\d*)$/);
+          // Match amount with optional currency
+          const amountMatch = nextLine.match(
+            /^(?:AED\s*)?([\d,]+\.?\d*)\s*(?:AED)?$/i,
+          );
           if (amountMatch) {
-            totalAmount = parseFloat(amountMatch[1].replace(/,/g, ''));
-            break;
+            const amount = parseFloat(amountMatch[1].replace(/,/g, ''));
+            if (!isNaN(amount) && amount > 0 && amount < 1000000) {
+              amounts.push({
+                value: amount,
+                priority: lowerLine.includes('grand') ? 10 : 8,
+                lineIndex: i,
+              });
+            }
           }
         }
-      } else if (/^total\s*[:\s]*([\d,]+\.?\d*)/i.test(line)) {
+      } else if (
+        /^(?:grand\s*)?total\s*(?:amount)?\s*[:\s]*(?:AED\s*)?([\d,]+\.?\d*)/i.test(
+          line,
+        )
+      ) {
         // Total and amount on same line
-        const match = line.match(/^total\s*[:\s]*([\d,]+\.?\d*)/i);
+        const match = line.match(
+          /^(?:grand\s*)?total\s*(?:amount)?\s*[:\s]*(?:AED\s*)?([\d,]+\.?\d*)/i,
+        );
         if (match && match[1]) {
-          totalAmount = parseFloat(match[1].replace(/,/g, ''));
-          break;
+          const amount = parseFloat(match[1].replace(/,/g, ''));
+          if (!isNaN(amount) && amount > 0 && amount < 1000000) {
+            amounts.push({
+              value: amount,
+              priority: lowerLine.includes('grand') ? 10 : 8,
+              lineIndex: i,
+            });
+          }
         }
       }
     }
 
-    // If not found, use regex patterns
-    const amountPatterns = [
-      // Total with currency: "Total AED 120.00" or "Total: 120.00"
-      /(?:^|\n)\s*total\s*[:\s]*(?:AED\s*)?([\d,]+\.?\d*)/gi,
-      // Amount line: "AMOUNT 120.00" or "Amount: 120.00"
-      /(?:^|\n)\s*amount\s*[:\s]*(?:AED\s*)?([\d,]+\.?\d*)/gi,
-      // Currency patterns: "AED 120.00" or "$120.00"
-      /(?:AED|USD|\$|€|£)\s*([\d,]+\.?\d*)/gi,
-    ];
-
-    const amounts: number[] = [];
-    if (totalAmount !== null) {
-      amounts.push(totalAmount);
-    }
-
-    for (const pattern of amountPatterns) {
+    // Search for high priority patterns in text
+    for (const { pattern, priority } of highPriorityPatterns) {
       try {
         const matches = text.matchAll(pattern);
         for (const match of matches) {
-          const amount = parseFloat(match[1].replace(/,/g, ''));
-          if (!isNaN(amount) && amount > 0 && amount < 1000000) {
-            // Reasonable upper limit
-            amounts.push(amount);
+          if (match[1]) {
+            const amount = parseFloat(match[1].replace(/,/g, ''));
+            if (!isNaN(amount) && amount > 0 && amount < 1000000) {
+              // Find line index for this match
+              const matchIndex =
+                text.substring(0, match.index || 0).split('\n').length - 1;
+              amounts.push({ value: amount, priority, lineIndex: matchIndex });
+            }
           }
         }
-      } catch (error) {
+      } catch {
         // Fallback: use match() if matchAll fails
         const match = text.match(pattern);
         if (match && match[1]) {
           const amount = parseFloat(match[1].replace(/,/g, ''));
           if (!isNaN(amount) && amount > 0 && amount < 1000000) {
-            amounts.push(amount);
+            amounts.push({ value: amount, priority, lineIndex: 0 });
+          }
+        }
+      }
+    }
+
+    // Priority 3: Amount line patterns
+    const amountPatterns = [
+      {
+        pattern:
+          /(?:^|\n)\s*amount\s*(?:due|payable)?\s*[:\s]*(?:AED\s*)?([\d,]+\.?\d*)/gi,
+        priority: 5,
+      },
+      {
+        pattern:
+          /(?:^|\n)\s*pay\s*(?:amount|total)?\s*[:\s]*(?:AED\s*)?([\d,]+\.?\d*)/gi,
+        priority: 5,
+      },
+    ];
+
+    for (const { pattern, priority } of amountPatterns) {
+      try {
+        const matches = text.matchAll(pattern);
+        for (const match of matches) {
+          if (match[1]) {
+            const amount = parseFloat(match[1].replace(/,/g, ''));
+            if (!isNaN(amount) && amount > 0 && amount < 1000000) {
+              const matchIndex =
+                text.substring(0, match.index || 0).split('\n').length - 1;
+              amounts.push({ value: amount, priority, lineIndex: matchIndex });
+            }
+          }
+        }
+      } catch {
+        const match = text.match(pattern);
+        if (match && match[1]) {
+          const amount = parseFloat(match[1].replace(/,/g, ''));
+          if (!isNaN(amount) && amount > 0 && amount < 1000000) {
+            amounts.push({ value: amount, priority, lineIndex: 0 });
+          }
+        }
+      }
+    }
+
+    // Priority 4: Currency patterns (AED, USD, etc.) - lower priority
+    const currencyPatterns = [
+      /(?:AED|USD|\$|€|£|SAR)\s*([\d,]+\.?\d*)/gi,
+      /([\d,]+\.?\d*)\s*(?:AED|USD|SAR)/gi,
+    ];
+
+    for (const pattern of currencyPatterns) {
+      try {
+        const matches = text.matchAll(pattern);
+        for (const match of matches) {
+          if (match[1]) {
+            const amount = parseFloat(match[1].replace(/,/g, ''));
+            if (!isNaN(amount) && amount > 0 && amount < 1000000) {
+              const matchIndex =
+                text.substring(0, match.index || 0).split('\n').length - 1;
+              amounts.push({
+                value: amount,
+                priority: 1,
+                lineIndex: matchIndex,
+              });
+            }
+          }
+        }
+      } catch {
+        const match = text.match(pattern);
+        if (match && match[1]) {
+          const amount = parseFloat(match[1].replace(/,/g, ''));
+          if (!isNaN(amount) && amount > 0 && amount < 1000000) {
+            amounts.push({ value: amount, priority: 1, lineIndex: 0 });
           }
         }
       }
     }
 
     if (amounts.length > 0) {
-      // Use the largest amount as total (usually the final total)
-      result.amount = Math.max(...amounts);
+      // Sort by priority (descending), then by line index (descending - later in document)
+      amounts.sort((a, b) => {
+        if (b.priority !== a.priority) {
+          return b.priority - a.priority;
+        }
+        return b.lineIndex - a.lineIndex; // Prefer amounts appearing later in document
+      });
+
+      // Use the highest priority amount, or if same priority, the largest one
+      const topPriority = amounts[0].priority;
+      const topPriorityAmounts = amounts.filter(
+        (a) => a.priority === topPriority,
+      );
+
+      if (topPriorityAmounts.length === 1) {
+        result.amount = topPriorityAmounts[0].value;
+      } else {
+        // If multiple amounts with same priority, use the largest (usually the final total)
+        result.amount = Math.max(...topPriorityAmounts.map((a) => a.value));
+      }
 
       // Try to find VAT/Tax - improved patterns
       const vatPatterns = [
@@ -658,7 +860,7 @@ export class OcrService {
                 const first = parseInt(standardMatch[1]);
                 const second = parseInt(standardMatch[2]);
                 const yearStr = standardMatch[3];
-                const year =
+                const parsedYear =
                   yearStr.length === 2
                     ? 2000 + parseInt(yearStr)
                     : parseInt(yearStr);
@@ -672,6 +874,7 @@ export class OcrService {
                   month = first - 1;
                   day = second;
                 }
+                year = parsedYear;
               }
               date = new Date(Date.UTC(year, month, day));
             }
@@ -703,7 +906,7 @@ export class OcrService {
             result.expenseDate = `${year}-${month}-${day}`;
             break;
           }
-        } catch (e) {
+        } catch {
           // Invalid date, continue
         }
       }
