@@ -16,15 +16,19 @@ async function bootstrap() {
     expressApp.disable('x-powered-by');
   }
   app.setGlobalPrefix('api');
-  
+
   // Configure CORS before other middleware
   const allowedOrigins = [
+    'https://selfaccounting.ai',
+    'https://www.selfaccounting.ai',
     'https://self-auditing-frontend.pages.dev',
     'https://self-auditing.com',
     'http://localhost:4200', // Local development
     'http://localhost:3000', // Local development
     // Dynamically allow additional CORS origins from environment variable, if set
-    ...(process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',').map((o) => o.trim()) : []),
+    ...(process.env.CORS_ORIGIN
+      ? process.env.CORS_ORIGIN.split(',').map((o) => o.trim())
+      : []),
   ];
 
   app.enableCors({
