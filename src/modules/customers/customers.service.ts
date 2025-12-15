@@ -87,7 +87,7 @@ export class CustomersService {
       notes: dto.notes,
       firstUsedAt: new Date(),
       lastUsedAt: new Date(),
-      isActive: true,
+      isActive: dto.isActive ?? true,
     });
 
     return this.customersRepository.save(customer);

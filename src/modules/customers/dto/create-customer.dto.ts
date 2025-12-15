@@ -3,6 +3,7 @@ import {
   IsOptional,
   IsNumber,
   IsEmail,
+  IsBoolean,
   Min,
 } from 'class-validator';
 
@@ -50,6 +51,10 @@ export class CreateCustomerDto {
   @IsNumber()
   @Min(0)
   paymentTerms?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  isActive?: boolean;
 
   @IsOptional()
   @IsString()
