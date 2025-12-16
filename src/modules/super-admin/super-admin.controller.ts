@@ -41,4 +41,3 @@ export class SuperAdminController {
     return this.superAdminService.getLatestAuditLogs(limitNum, skipNum);
   }
 }
-

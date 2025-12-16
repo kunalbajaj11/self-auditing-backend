@@ -5,4 +5,3 @@ export class ChangeOrganizationStatusDto {
   @IsEnum(OrganizationStatus)
   status: OrganizationStatus;
 }
-

@@ -47,14 +47,8 @@ export class ExpensesController {
 
   @Get(':id')
   @Roles(UserRole.ADMIN, UserRole.ACCOUNTANT, UserRole.EMPLOYEE)
-  async get(
-    @Param('id') id: string,
-    @CurrentUser() user: AuthenticatedUser,
-  ) {
-    return this.expensesService.findById(
-      id,
-      user?.organizationId as string,
-    );
+  async get(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.expensesService.findById(id, user?.organizationId as string);
   }
 
   @Post()
@@ -99,11 +93,7 @@ export class ExpensesController {
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: UpdateExpenseDto,
   ) {
-    return this.expensesService.update(
-      id,
-      user?.organizationId as string,
-      dto,
-    );
+    return this.expensesService.update(id, user?.organizationId as string, dto);
   }
 
   @Patch(':id/status')
@@ -134,4 +124,3 @@ export class ExpensesController {
     );
   }
 }
-

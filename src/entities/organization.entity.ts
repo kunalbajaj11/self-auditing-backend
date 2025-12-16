@@ -142,4 +142,3 @@ export class Organization extends AbstractEntity {
   @OneToMany(() => CreditNote, (creditNote) => creditNote.organization)
   creditNotes: CreditNote[];
 }
-

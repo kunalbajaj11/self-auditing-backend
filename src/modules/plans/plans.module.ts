@@ -11,4 +11,3 @@ import { Plan } from '../../entities/plan.entity';
   exports: [PlansService],
 })
 export class PlansModule {}
-

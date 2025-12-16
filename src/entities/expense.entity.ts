@@ -89,13 +89,31 @@ export class Expense extends AbstractEntity {
   @Column({ length: 10, default: 'AED' })
   currency: string;
 
-  @Column({ name: 'exchange_rate', type: 'decimal', precision: 12, scale: 6, nullable: true })
+  @Column({
+    name: 'exchange_rate',
+    type: 'decimal',
+    precision: 12,
+    scale: 6,
+    nullable: true,
+  })
   exchangeRate?: string | null; // Exchange rate used at time of expense
 
-  @Column({ name: 'base_amount', type: 'decimal', precision: 12, scale: 2, nullable: true })
+  @Column({
+    name: 'base_amount',
+    type: 'decimal',
+    precision: 12,
+    scale: 2,
+    nullable: true,
+  })
   baseAmount?: string | null; // Amount in organization's base currency
 
-  @Column({ name: 'fx_gain_loss', type: 'decimal', precision: 12, scale: 2, nullable: true })
+  @Column({
+    name: 'fx_gain_loss',
+    type: 'decimal',
+    precision: 12,
+    scale: 2,
+    nullable: true,
+  })
   fxGainLoss?: string | null; // FX gain/loss if settled in different currency
 
   @Column({ name: 'expense_date', type: 'date' })
@@ -146,4 +164,3 @@ export class Expense extends AbstractEntity {
   })
   accrualDetail?: Accrual | null;
 }
-

@@ -1,10 +1,4 @@
-import {
-  Column,
-  Entity,
-  JoinColumn,
-  ManyToOne,
-  Index,
-} from 'typeorm';
+import { Column, Entity, JoinColumn, ManyToOne, Index } from 'typeorm';
 import { AbstractEntity } from './abstract.entity';
 import { Organization } from './organization.entity';
 import { User } from './user.entity';
@@ -60,4 +54,3 @@ export class Notification extends AbstractEntity {
   @Column({ name: 'entity_id', type: 'uuid', nullable: true })
   entityId?: string | null; // Reference to the invoice/expense/accrual ID
 }
-

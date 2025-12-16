@@ -1,10 +1,4 @@
-import {
-  Column,
-  Entity,
-  JoinColumn,
-  ManyToOne,
-  OneToOne,
-} from 'typeorm';
+import { Column, Entity, JoinColumn, ManyToOne, OneToOne } from 'typeorm';
 import { AbstractEntity } from './abstract.entity';
 import { Expense } from './expense.entity';
 import { Organization } from './organization.entity';
@@ -49,4 +43,3 @@ export class Accrual extends AbstractEntity {
   })
   status: AccrualStatus;
 }
-

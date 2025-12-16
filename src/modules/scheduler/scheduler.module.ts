@@ -26,4 +26,3 @@ import { User } from '../../entities/user.entity';
   providers: [SchedulerService],
 })
 export class SchedulerModule {}
-

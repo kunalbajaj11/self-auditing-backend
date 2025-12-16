@@ -98,9 +98,7 @@ export class SchedulerService {
       const currentAccrual = await this.accrualsRepository.findOne({
         where: { id: accrual.id },
       });
-      if (
-        currentAccrual?.status !== AccrualStatus.PENDING_SETTLEMENT
-      ) {
+      if (currentAccrual?.status !== AccrualStatus.PENDING_SETTLEMENT) {
         continue;
       }
 
@@ -111,14 +109,15 @@ export class SchedulerService {
         const user = accrual.expense?.user;
         if (user?.email) {
           // Priority 2: Check if we already sent a reminder for this specific accrual
-          const existingNotification = await this.notificationsRepository.findOne({
-            where: {
-              organization: { id: accrual.organization.id },
-              entityType: 'accrual',
-              entityId: accrual.id,
-              type: NotificationType.ACCRUAL_REMINDER,
-            },
-          });
+          const existingNotification =
+            await this.notificationsRepository.findOne({
+              where: {
+                organization: { id: accrual.organization.id },
+                entityType: 'accrual',
+                entityId: accrual.id,
+                type: NotificationType.ACCRUAL_REMINDER,
+              },
+            });
 
           // Only send if no reminder was sent for this accrual
           if (!existingNotification) {
@@ -189,9 +188,10 @@ export class SchedulerService {
 
     for (const record of records) {
       // Check if there are unmatched transactions
-      const unmatchedCount = record.bankTransactions?.filter(
-        (t) => t.status === ReconciliationStatus.UNMATCHED,
-      ).length || 0;
+      const unmatchedCount =
+        record.bankTransactions?.filter(
+          (t) => t.status === ReconciliationStatus.UNMATCHED,
+        ).length || 0;
 
       if (unmatchedCount > 0) {
         // Find admin users for the organization
@@ -260,14 +260,16 @@ export class SchedulerService {
         (invoice.user?.email || invoice.customer?.email)
       ) {
         // Priority 2: Check if we already sent a reminder for this specific invoice
-        const existingNotification = await this.notificationsRepository.findOne({
-          where: {
-            organization: { id: invoice.organization.id },
-            entityType: 'invoice',
-            entityId: invoice.id,
-            type: NotificationType.INVOICE_DUE_SOON,
+        const existingNotification = await this.notificationsRepository.findOne(
+          {
+            where: {
+              organization: { id: invoice.organization.id },
+              entityType: 'invoice',
+              entityId: invoice.id,
+              type: NotificationType.INVOICE_DUE_SOON,
+            },
           },
-        });
+        );
 
         // Only send if no reminder was sent for this invoice
         if (!existingNotification) {
@@ -528,7 +530,10 @@ export class SchedulerService {
         todayStart.setHours(0, 0, 0, 0);
 
         // Create a unique identifier for this set of expenses
-        const expenseIds = expenses.map((e) => e.id).sort().join(',');
+        const expenseIds = expenses
+          .map((e) => e.id)
+          .sort()
+          .join(',');
         const expenseIdsHash = expenseIds.substring(0, 100); // Use first 100 chars as identifier
 
         const existingNotification = await this.notificationsRepository
@@ -579,4 +584,3 @@ export class SchedulerService {
     }
   }
 }
-

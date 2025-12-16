@@ -12,4 +12,3 @@ import { Organization } from '../../entities/organization.entity';
   exports: [CustomersService],
 })
 export class CustomersModule {}
-

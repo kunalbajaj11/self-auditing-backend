@@ -3,4 +3,3 @@ export enum PlanType {
   STANDARD = 'standard',
   ENTERPRISE = 'enterprise',
 }
-

@@ -29,4 +29,3 @@ import { AuditLogsModule } from '../audit-logs/audit-logs.module';
   exports: [CreditNotesService],
 })
 export class CreditNotesModule {}
-

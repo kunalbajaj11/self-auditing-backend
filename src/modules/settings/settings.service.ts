@@ -3,7 +3,11 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { OrganizationSettings } from '../../entities/organization-settings.entity';
 import { TaxRate, TaxRateType } from '../../entities/tax-rate.entity';
-import { NumberingSequence, NumberingSequenceType, ResetPeriod } from '../../entities/numbering-sequence.entity';
+import {
+  NumberingSequence,
+  NumberingSequenceType,
+  ResetPeriod,
+} from '../../entities/numbering-sequence.entity';
 import { ExchangeRate } from '../../entities/exchange-rate.entity';
 import { Organization } from '../../entities/organization.entity';
 import { UpdateInvoiceTemplateDto } from './dto/update-invoice-template.dto';
@@ -33,7 +37,9 @@ export class SettingsService {
   ) {}
 
   // Organization Settings
-  async getOrCreateSettings(organizationId: string): Promise<OrganizationSettings> {
+  async getOrCreateSettings(
+    organizationId: string,
+  ): Promise<OrganizationSettings> {
     let settings = await this.settingsRepository.findOne({
       where: { organization: { id: organizationId } },
       relations: ['organization'],
@@ -66,7 +72,9 @@ export class SettingsService {
     return this.settingsRepository.save(settings);
   }
 
-  async getInvoiceTemplate(organizationId: string): Promise<OrganizationSettings> {
+  async getInvoiceTemplate(
+    organizationId: string,
+  ): Promise<OrganizationSettings> {
     return this.getOrCreateSettings(organizationId);
   }
 
@@ -151,7 +159,9 @@ export class SettingsService {
     return this.settingsRepository.save(settings);
   }
 
-  async getCurrencySettings(organizationId: string): Promise<OrganizationSettings> {
+  async getCurrencySettings(
+    organizationId: string,
+  ): Promise<OrganizationSettings> {
     return this.getOrCreateSettings(organizationId);
   }
 
@@ -236,7 +246,9 @@ export class SettingsService {
     return this.settingsRepository.save(settings);
   }
 
-  async getNumberingSequences(organizationId: string): Promise<NumberingSequence[]> {
+  async getNumberingSequences(
+    organizationId: string,
+  ): Promise<NumberingSequence[]> {
     return this.numberingSequenceRepository.find({
       where: { organization: { id: organizationId } },
       order: { type: 'ASC' },
@@ -277,7 +289,10 @@ export class SettingsService {
     type: NumberingSequenceType,
     dto: UpdateNumberingSequenceDto,
   ): Promise<NumberingSequence> {
-    const sequence = await this.getOrCreateNumberingSequence(organizationId, type);
+    const sequence = await this.getOrCreateNumberingSequence(
+      organizationId,
+      type,
+    );
     Object.assign(sequence, dto);
     return this.numberingSequenceRepository.save(sequence);
   }
@@ -286,14 +301,22 @@ export class SettingsService {
     organizationId: string,
     type: NumberingSequenceType,
   ): Promise<NumberingSequence> {
-    const sequence = await this.getOrCreateNumberingSequence(organizationId, type);
+    const sequence = await this.getOrCreateNumberingSequence(
+      organizationId,
+      type,
+    );
     sequence.nextNumber = 1;
     sequence.lastResetDate = new Date().toISOString().split('T')[0];
     return this.numberingSequenceRepository.save(sequence);
   }
 
-  private getDefaultSequence(type: NumberingSequenceType): Partial<NumberingSequence> {
-    const defaults: Record<NumberingSequenceType, Partial<NumberingSequence>> = {
+  private getDefaultSequence(
+    type: NumberingSequenceType,
+  ): Partial<NumberingSequence> {
+    const defaults: Record<
+      NumberingSequenceType,
+      Partial<NumberingSequence>
+    > = {
       [NumberingSequenceType.INVOICE]: {
         prefix: 'INV',
         suffix: '',
@@ -347,4 +370,3 @@ export class SettingsService {
     return defaults[type] || {};
   }
 }
-

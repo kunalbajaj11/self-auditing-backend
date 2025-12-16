@@ -38,4 +38,3 @@ export class AuditLogsController {
     return this.auditLogsService.listForOrganization(organizationId, filters);
   }
 }
-

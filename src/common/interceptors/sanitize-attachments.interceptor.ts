@@ -36,7 +36,8 @@ export class SanitizeAttachmentsInterceptor implements NestInterceptor {
         if (sanitizedAttachment.fileUrl && sanitizedAttachment.fileKey) {
           // Keep fileUrl for backward compatibility but mark it as deprecated
           // Frontend should use fileKey with secure endpoints instead
-          sanitizedAttachment.fileUrl = '[REDACTED - Use fileKey with secure endpoints]';
+          sanitizedAttachment.fileUrl =
+            '[REDACTED - Use fileKey with secure endpoints]';
         }
         return sanitizedAttachment;
       });
@@ -44,7 +45,11 @@ export class SanitizeAttachmentsInterceptor implements NestInterceptor {
 
     // Recursively sanitize nested objects
     Object.keys(sanitized).forEach((key) => {
-      if (sanitized[key] && typeof sanitized[key] === 'object' && !Array.isArray(sanitized[key])) {
+      if (
+        sanitized[key] &&
+        typeof sanitized[key] === 'object' &&
+        !Array.isArray(sanitized[key])
+      ) {
         sanitized[key] = this.sanitizeItem(sanitized[key]);
       }
     });
@@ -52,4 +57,3 @@ export class SanitizeAttachmentsInterceptor implements NestInterceptor {
     return sanitized;
   }
 }
-

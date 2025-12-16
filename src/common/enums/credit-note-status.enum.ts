@@ -4,4 +4,3 @@ export enum CreditNoteStatus {
   APPLIED = 'applied',
   CANCELLED = 'cancelled',
 }
-

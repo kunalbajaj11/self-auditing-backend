@@ -24,9 +24,7 @@ import { CreatePaymentDto } from './dto/create-payment.dto';
 
 @Controller('sales-invoices')
 export class SalesInvoicesController {
-  constructor(
-    private readonly salesInvoicesService: SalesInvoicesService,
-  ) {}
+  constructor(private readonly salesInvoicesService: SalesInvoicesService) {}
 
   @Get()
   @UseGuards(JwtAuthGuard, RolesGuard, TenantGuard)
@@ -65,10 +63,7 @@ export class SalesInvoicesController {
   @Get(':id')
   @UseGuards(JwtAuthGuard, RolesGuard, TenantGuard)
   @Roles(UserRole.ADMIN, UserRole.ACCOUNTANT, UserRole.EMPLOYEE)
-  async get(
-    @Param('id') id: string,
-    @CurrentUser() user: AuthenticatedUser,
-  ) {
+  async get(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {
     return this.salesInvoicesService.findById(
       user?.organizationId as string,
       id,
@@ -201,7 +196,8 @@ export class SalesInvoicesController {
   async sendEmail(
     @Param('id') id: string,
     @CurrentUser() user: AuthenticatedUser,
-    @Body() emailData: {
+    @Body()
+    emailData: {
       recipientEmail: string;
       subject?: string;
       message?: string;
@@ -216,4 +212,3 @@ export class SalesInvoicesController {
     return { message: 'Invoice email sent successfully' };
   }
 }
-

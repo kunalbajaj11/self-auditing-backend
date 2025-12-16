@@ -1,10 +1,4 @@
-import {
-  Column,
-  Entity,
-  JoinColumn,
-  ManyToOne,
-  Index,
-} from 'typeorm';
+import { Column, Entity, JoinColumn, ManyToOne, Index } from 'typeorm';
 import { AbstractEntity } from './abstract.entity';
 import { Organization } from './organization.entity';
 import { User } from './user.entity';
@@ -63,4 +57,3 @@ export class BankTransaction extends AbstractEntity {
   @JoinColumn({ name: 'uploaded_by' })
   uploadedBy?: User | null;
 }
-

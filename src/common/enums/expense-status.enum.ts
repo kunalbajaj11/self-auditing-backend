@@ -4,4 +4,3 @@ export enum ExpenseStatus {
   SETTLED = 'settled',
   AUTO_SETTLED = 'auto_settled',
 }
-

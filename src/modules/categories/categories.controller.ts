@@ -79,4 +79,3 @@ export class CategoriesController {
     return { success: true };
   }
 }
-

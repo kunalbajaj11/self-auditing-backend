@@ -94,4 +94,3 @@ export class UpdateInvoiceTemplateDto {
   @IsString()
   invoiceEmailMessage?: string;
 }
-

@@ -46,4 +46,3 @@ export class Category extends AbstractEntity {
   @OneToMany(() => Expense, (expense) => expense.category)
   expenses: Expense[];
 }
-

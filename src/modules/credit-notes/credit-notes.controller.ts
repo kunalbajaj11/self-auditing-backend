@@ -37,21 +37,13 @@ export class CreditNotesController {
   @Get()
   @Roles(UserRole.ADMIN, UserRole.ACCOUNTANT)
   async list(@CurrentUser() user: AuthenticatedUser) {
-    return this.creditNotesService.findAll(
-      user?.organizationId as string,
-    );
+    return this.creditNotesService.findAll(user?.organizationId as string);
   }
 
   @Get(':id')
   @Roles(UserRole.ADMIN, UserRole.ACCOUNTANT)
-  async get(
-    @Param('id') id: string,
-    @CurrentUser() user: AuthenticatedUser,
-  ) {
-    return this.creditNotesService.findById(
-      user?.organizationId as string,
-      id,
-    );
+  async get(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.creditNotesService.findById(user?.organizationId as string, id);
   }
 
   @Post()
@@ -126,4 +118,3 @@ export class CreditNotesController {
     );
   }
 }
-

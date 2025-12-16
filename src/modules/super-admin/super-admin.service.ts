@@ -53,7 +53,8 @@ export interface OrganizationUsageItem {
 @Injectable()
 export class SuperAdminService {
   private dashboardMetricsCache: CacheItem<DashboardMetrics> | null = null;
-  private organizationUsageCache: CacheItem<OrganizationUsageItem[]> | null = null;
+  private organizationUsageCache: CacheItem<OrganizationUsageItem[]> | null =
+    null;
 
   constructor(
     @InjectRepository(Organization)
@@ -146,7 +147,9 @@ export class SuperAdminService {
     return metrics;
   }
 
-  async getOrganizationUsage(forceRefresh = false): Promise<OrganizationUsageItem[]> {
+  async getOrganizationUsage(
+    forceRefresh = false,
+  ): Promise<OrganizationUsageItem[]> {
     // Check cache first
     if (!forceRefresh && this.isCacheValid(this.organizationUsageCache)) {
       return this.organizationUsageCache!.data;
@@ -244,4 +247,3 @@ export class SuperAdminService {
     return Number((totalBytes / (1024 * 1024)).toFixed(2));
   }
 }
-

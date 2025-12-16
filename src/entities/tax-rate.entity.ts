@@ -38,4 +38,3 @@ export class TaxRate extends AbstractEntity {
   @Column({ name: 'is_active', default: true })
   isActive: boolean;
 }
-

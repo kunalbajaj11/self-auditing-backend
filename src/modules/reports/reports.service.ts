@@ -81,17 +81,30 @@ export class ReportsService {
     organizationId: string,
     userId: string,
     dto: GenerateReportDto,
-  ): Promise<{ type: ReportType; generatedAt: Date; data: any; summary?: any }> {
+  ): Promise<{
+    type: ReportType;
+    generatedAt: Date;
+    data: any;
+    summary?: any;
+  }> {
     let data: any = null;
     let summary: any = null;
     switch (dto.type) {
       case ReportType.EXPENSE_SUMMARY:
         data = await this.buildExpenseSummary(organizationId, dto.filters);
-        summary = await this.calculateExpenseSummary(data, organizationId, dto.filters);
+        summary = await this.calculateExpenseSummary(
+          data,
+          organizationId,
+          dto.filters,
+        );
         break;
       case ReportType.EXPENSE_DETAIL:
         data = await this.buildExpenseDetail(organizationId, dto.filters);
-        summary = await this.calculateExpenseSummary(data, organizationId, dto.filters);
+        summary = await this.calculateExpenseSummary(
+          data,
+          organizationId,
+          dto.filters,
+        );
         break;
       case ReportType.ACCRUAL_REPORT:
         data = await this.buildAccrualSummary(organizationId, dto.filters);
@@ -168,10 +181,17 @@ export class ReportsService {
     }
 
     const totalExpenses = expenses.length;
-    const totalAmountBeforeVat = expenses.reduce((sum, e) => sum + (e.amount || e.baseAmount || 0), 0);
-    const totalVatAmount = expenses.reduce((sum, e) => sum + (e.vat || e.vatAmount || 0), 0);
+    const totalAmountBeforeVat = expenses.reduce(
+      (sum, e) => sum + (e.amount || e.baseAmount || 0),
+      0,
+    );
+    const totalVatAmount = expenses.reduce(
+      (sum, e) => sum + (e.vat || e.vatAmount || 0),
+      0,
+    );
     const totalAmountAfterVat = totalAmountBeforeVat + totalVatAmount;
-    const averageExpenseAmount = totalExpenses > 0 ? totalAmountAfterVat / totalExpenses : 0;
+    const averageExpenseAmount =
+      totalExpenses > 0 ? totalAmountAfterVat / totalExpenses : 0;
 
     // Find highest category spend
     const categorySpend = new Map<string, number>();
@@ -202,8 +222,12 @@ export class ReportsService {
     });
 
     // Count credit notes and adjustments
-    const totalCreditNotes = expenses.filter((e) => e.type === 'CREDIT_NOTE' || e.type === 'REFUND').length;
-    const totalAdjustments = expenses.filter((e) => e.type === 'ADJUSTMENT').length;
+    const totalCreditNotes = expenses.filter(
+      (e) => e.type === 'CREDIT_NOTE' || e.type === 'REFUND',
+    ).length;
+    const totalAdjustments = expenses.filter(
+      (e) => e.type === 'ADJUSTMENT',
+    ).length;
 
     // Find user with highest upload count
     const userUploadCount = new Map<string, number>();
@@ -213,7 +237,10 @@ export class ReportsService {
     });
     let userWithHighestUploadCount: { user: string; count: number } | undefined;
     userUploadCount.forEach((count, user) => {
-      if (!userWithHighestUploadCount || count > userWithHighestUploadCount.count) {
+      if (
+        !userWithHighestUploadCount ||
+        count > userWithHighestUploadCount.count
+      ) {
         userWithHighestUploadCount = { user, count };
       }
     });
@@ -246,9 +273,9 @@ export class ReportsService {
       .select([
         'expense.id AS expenseId',
         'expense.expense_date AS date',
-        'COALESCE(category.name, \'Uncategorized\') AS category',
+        "COALESCE(category.name, 'Uncategorized') AS category",
         'expense.type AS expenseType',
-        'COALESCE(vendor.name, expense.vendor_name, \'N/A\') AS vendor',
+        "COALESCE(vendor.name, expense.vendor_name, 'N/A') AS vendor",
         'COALESCE(expense.base_amount, expense.amount) AS amount',
         'expense.vat_amount AS vat',
         'COALESCE(expense.base_amount, expense.total_amount) + expense.vat_amount AS total',
@@ -263,10 +290,10 @@ export class ReportsService {
       .where('expense.organization_id = :organizationId', { organizationId })
       .andWhere('expense.is_deleted = false')
       .andWhere('(category.is_deleted = false OR category.id IS NULL)');
-    
+
     // Apply enhanced filters
     this.applyExpenseFilters(query, filters);
-    
+
     // Apply amount range filter if provided
     if (filters?.['minAmount']) {
       query.andWhere('expense.total_amount >= :minAmount', {
@@ -278,8 +305,9 @@ export class ReportsService {
         maxAmount: filters.maxAmount,
       });
     }
-    
-    query.groupBy('expense.id')
+
+    query
+      .groupBy('expense.id')
       .addGroupBy('expense.expense_date')
       .addGroupBy('category.name')
       .addGroupBy('expense.type')
@@ -297,7 +325,7 @@ export class ReportsService {
       .addGroupBy('expense.created_at')
       .orderBy('expense.expense_date', 'DESC');
     const rows = await query.getRawMany();
-    
+
     // Return detailed rows for summary report with additional fields
     return rows.map((row) => ({
       date: row.date,
@@ -315,7 +343,9 @@ export class ReportsService {
       exchangeRate: row.exchangeRate ? Number(row.exchangeRate) : null,
       status: row.status || 'PENDING',
       uploadedBy: row.uploadedBy || 'N/A',
-      uploadedAt: row.uploadedAt ? new Date(row.uploadedAt).toISOString() : null,
+      uploadedAt: row.uploadedAt
+        ? new Date(row.uploadedAt).toISOString()
+        : null,
       notes: row.notes || '',
       invoiceNumber: this.extractInvoiceNumber(row.notes || ''), // Extract from description if possible
       paymentMode: 'N/A', // Placeholder - not stored in DB yet
@@ -340,7 +370,7 @@ export class ReportsService {
         'expense.id AS expenseId',
         'expense.expense_date AS date',
         'expense.description AS description',
-        'COALESCE(category.name, \'Uncategorized\') AS category',
+        "COALESCE(category.name, 'Uncategorized') AS category",
         'expense.type AS type',
         'expense.amount AS amount',
         'expense.vat_amount AS vat',
@@ -354,10 +384,10 @@ export class ReportsService {
       .where('expense.organization_id = :organizationId', { organizationId })
       .andWhere('expense.is_deleted = false')
       .andWhere('(category.is_deleted = false OR category.id IS NULL)');
-    
+
     // Apply enhanced filters
     this.applyExpenseFilters(query, filters);
-    
+
     // Apply amount range filter if provided
     if (filters?.['minAmount']) {
       query.andWhere('expense.total_amount >= :minAmount', {
@@ -369,8 +399,9 @@ export class ReportsService {
         maxAmount: filters.maxAmount,
       });
     }
-    
-    query.groupBy('expense.id')
+
+    query
+      .groupBy('expense.id')
       .addGroupBy('expense.expense_date')
       .addGroupBy('expense.description')
       .addGroupBy('category.name')
@@ -383,9 +414,9 @@ export class ReportsService {
       .addGroupBy('expense.vendor_name')
       .addGroupBy('expense.created_at')
       .orderBy('expense.expense_date', 'DESC');
-    
+
     const rows = await query.getRawMany();
-    
+
     // Get attachment details for each expense
     const expenseIds = rows.map((r) => r.expenseId);
     const attachments = await this.expensesRepository
@@ -399,7 +430,7 @@ export class ReportsService {
       .where('expense.id IN (:...ids)', { ids: expenseIds })
       .andWhere('expense.organization_id = :organizationId', { organizationId })
       .getRawMany();
-    
+
     const attachmentsMap = new Map<string, any[]>();
     attachments.forEach((att) => {
       if (att.fileName) {
@@ -412,7 +443,7 @@ export class ReportsService {
         });
       }
     });
-    
+
     return rows.map((row) => ({
       expenseId: `EXP-${row.expenseId.substring(0, 8).toUpperCase()}`,
       date: row.date,
@@ -433,7 +464,9 @@ export class ReportsService {
       costCenter: 'N/A', // Placeholder
       receiptAttached: Number(row.attachmentCount || 0) > 0 ? 'Yes' : 'No',
       notes: row.description || '',
-      uploadedAt: row.uploadedAt ? new Date(row.uploadedAt).toISOString() : null,
+      uploadedAt: row.uploadedAt
+        ? new Date(row.uploadedAt).toISOString()
+        : null,
     }));
   }
 
@@ -463,7 +496,7 @@ export class ReportsService {
     }
     query.groupBy('accrual.status');
     const rows = await query.getRawMany();
-    
+
     // Calculate overdue accruals separately
     const overdueQuery = this.accrualsRepository
       .createQueryBuilder('accrual')
@@ -473,20 +506,27 @@ export class ReportsService {
       ])
       .where('accrual.organization_id = :organizationId', { organizationId })
       .andWhere('accrual.is_deleted = false')
-      .andWhere('accrual.status = :status', { status: AccrualStatus.PENDING_SETTLEMENT })
+      .andWhere('accrual.status = :status', {
+        status: AccrualStatus.PENDING_SETTLEMENT,
+      })
       .andWhere('accrual.expected_payment_date < CURRENT_DATE');
-    const overdueResult = await overdueQuery.getRawOne<{ overdueCount: string; overdueAmount: string }>();
+    const overdueResult = await overdueQuery.getRawOne<{
+      overdueCount: string;
+      overdueAmount: string;
+    }>();
     const overdueCount = Number(overdueResult?.overdueCount ?? 0);
     const overdueAmount = Number(overdueResult?.overdueAmount ?? 0);
-    
+
     const summary = Object.values(AccrualStatus).map((status) => {
       const row = rows.find((r) => r.status === status);
       return {
         status,
         count: row ? Number(row.count) : 0,
         amount: row ? Number(row.amount) : 0,
-        overdueCount: status === AccrualStatus.PENDING_SETTLEMENT ? overdueCount : 0,
-        overdueAmount: status === AccrualStatus.PENDING_SETTLEMENT ? overdueAmount : 0,
+        overdueCount:
+          status === AccrualStatus.PENDING_SETTLEMENT ? overdueCount : 0,
+        overdueAmount:
+          status === AccrualStatus.PENDING_SETTLEMENT ? overdueAmount : 0,
       };
     });
     return summary;
@@ -523,12 +563,12 @@ export class ReportsService {
           ExpenseType.COST_OF_SALES,
         ],
       });
-    
+
     this.applyExpenseFilters(inputVatQuery, filters);
     const inputVatResult = await inputVatQuery.getRawOne();
     const inputVat = Number(inputVatResult?.inputVat ?? 0);
     const taxableSupplies = Number(inputVatResult?.taxableAmount ?? 0);
-    
+
     // Output VAT (VAT collected on sales/revenue - credits)
     // Calculate VAT from credit (sales) transactions
     const outputVatQuery = this.expensesRepository
@@ -541,21 +581,21 @@ export class ReportsService {
       .where('expense.organization_id = :organizationId', { organizationId })
       .andWhere('expense.is_deleted = false')
       .andWhere('expense.type = :type', { type: ExpenseType.CREDIT });
-    
+
     this.applyExpenseFilters(outputVatQuery, filters);
     const outputVatResult = await outputVatQuery.getRawOne();
     const outputVat = Number(outputVatResult?.outputVat ?? 0);
     const taxableSales = Number(outputVatResult?.taxableSales ?? 0);
-    
+
     // Net VAT Payable = Output VAT - Input VAT
     // Positive = payable to tax authority, Negative = refundable
     const netVatPayable = outputVat - inputVat;
-    
+
     // UAE VAT standard rate is 5%
     const standardVatRate = 0.05;
     const calculatedVat = taxableSupplies * standardVatRate;
     const vatDifference = inputVat - calculatedVat;
-    
+
     return {
       // Organization details for compliance
       organizationName: organization?.name || '',
@@ -567,9 +607,10 @@ export class ReportsService {
         endDate: filters?.['endDate'] || null,
       },
       // VAT summary with Input/Output breakdown
-      period: filters?.['startDate'] && filters?.['endDate'] 
-        ? `${filters.startDate} to ${filters.endDate}`
-        : 'All Time',
+      period:
+        filters?.['startDate'] && filters?.['endDate']
+          ? `${filters.startDate} to ${filters.endDate}`
+          : 'All Time',
       taxableSupplies: Number(taxableSupplies.toFixed(2)), // Expenses (input VAT base)
       taxableSales: Number(taxableSales.toFixed(2)), // Sales (output VAT base)
       outputVat: Number(outputVat.toFixed(2)), // VAT collected on sales
@@ -583,18 +624,17 @@ export class ReportsService {
       vatAmount: netVatPayable, // Net VAT payable (for dashboard display)
       totalAmount: taxableSupplies + taxableSales + inputVat + outputVat,
       vatPercentage:
-        taxableSupplies > 0
-          ? (inputVat / taxableSupplies) * 100
-          : 0, // Input VAT percentage
+        taxableSupplies > 0 ? (inputVat / taxableSupplies) * 100 : 0, // Input VAT percentage
       outputVatPercentage:
-        taxableSales > 0
-          ? (outputVat / taxableSales) * 100
-          : 0, // Output VAT percentage
+        taxableSales > 0 ? (outputVat / taxableSales) * 100 : 0, // Output VAT percentage
       standardVatRate: standardVatRate * 100, // 5%
       calculatedVat,
       vatDifference,
       // Breakdown by category for detailed reporting
-      categoryBreakdown: await this.getVatCategoryBreakdown(organizationId, filters),
+      categoryBreakdown: await this.getVatCategoryBreakdown(
+        organizationId,
+        filters,
+      ),
     };
   }
 
@@ -607,11 +647,11 @@ export class ReportsService {
       .createQueryBuilder('expense')
       .leftJoin('expense.category', 'category')
       .select([
-        'COALESCE(category.name, \'Uncategorized\') AS category',
+        "COALESCE(category.name, 'Uncategorized') AS category",
         'SUM(COALESCE(expense.base_amount, expense.amount)) AS taxableAmount',
         'SUM(expense.vat_amount) AS vatAmount',
         'COUNT(expense.id) AS count',
-        '\'expense\' AS transactionType',
+        "'expense' AS transactionType",
       ])
       .where('expense.organization_id = :organizationId', { organizationId })
       .andWhere('expense.is_deleted = false')
@@ -626,41 +666,42 @@ export class ReportsService {
           ExpenseType.COST_OF_SALES,
         ],
       });
-    
+
     this.applyExpenseFilters(expenseQuery, filters);
     expenseQuery.groupBy('category.name');
-    
+
     // Get breakdown for sales (Output VAT)
     const salesQuery = this.expensesRepository
       .createQueryBuilder('expense')
       .leftJoin('expense.category', 'category')
       .select([
-        'COALESCE(category.name, \'Sales\') AS category',
+        "COALESCE(category.name, 'Sales') AS category",
         'SUM(COALESCE(expense.base_amount, expense.amount)) AS taxableAmount',
         'SUM(expense.vat_amount) AS vatAmount',
         'COUNT(expense.id) AS count',
-        '\'credit\' AS transactionType',
+        "'credit' AS transactionType",
       ])
       .where('expense.organization_id = :organizationId', { organizationId })
       .andWhere('expense.is_deleted = false')
       .andWhere('(category.is_deleted = false OR category.id IS NULL)')
       .andWhere('expense.type = :type', { type: ExpenseType.CREDIT });
-    
+
     this.applyExpenseFilters(salesQuery, filters);
     salesQuery.groupBy('category.name');
-    
+
     const [expenseRows, salesRows] = await Promise.all([
       expenseQuery.getRawMany(),
       salesQuery.getRawMany(),
     ]);
-    
+
     // Combine and format results
     const allRows = [
       ...expenseRows.map((row) => ({
         category: row.category,
         taxableAmount: Number(row.taxableAmount || 0),
         vatAmount: Number(row.vatAmount || 0),
-        totalAmount: Number(row.taxableAmount || 0) + Number(row.vatAmount || 0),
+        totalAmount:
+          Number(row.taxableAmount || 0) + Number(row.vatAmount || 0),
         transactionCount: Number(row.count || 0),
         transactionType: row.transactionType,
         vatType: 'input' as const,
@@ -669,13 +710,14 @@ export class ReportsService {
         category: row.category,
         taxableAmount: Number(row.taxableAmount || 0),
         vatAmount: Number(row.vatAmount || 0),
-        totalAmount: Number(row.taxableAmount || 0) + Number(row.vatAmount || 0),
+        totalAmount:
+          Number(row.taxableAmount || 0) + Number(row.vatAmount || 0),
         transactionCount: Number(row.count || 0),
         transactionType: row.transactionType,
         vatType: 'output' as const,
       })),
     ];
-    
+
     return allRows;
   }
 
@@ -695,19 +737,18 @@ export class ReportsService {
       .andWhere('expense.type IN (:...types)', {
         types: [ExpenseType.EXPENSE, ExpenseType.ADVANCE],
       });
-    
+
     // Apply enhanced filters (excluding vendor filter since we're grouping by vendor)
     const filtersWithoutVendor = { ...filters };
     delete filtersWithoutVendor?.vendorName;
     this.applyExpenseFilters(query, filtersWithoutVendor);
-    
+
     // If no status filter is provided, include all statuses by default
     if (!filtersWithoutVendor?.['status']) {
       // Include all statuses
     }
-    
-    query.groupBy('expense.vendor_name')
-      .orderBy('amount', 'DESC');
+
+    query.groupBy('expense.vendor_name').orderBy('amount', 'DESC');
     const rows = await query.getRawMany();
     return rows
       .filter((row) => row.vendorName)
@@ -733,18 +774,19 @@ export class ReportsService {
       ])
       .where('expense.organization_id = :organizationId', { organizationId })
       .andWhere('expense.is_deleted = false');
-    
+
     // Apply enhanced filters (excluding userId filter since we're grouping by user)
     const filtersWithoutUser = { ...filters };
     delete filtersWithoutUser?.userId;
     this.applyExpenseFilters(query, filtersWithoutUser);
-    
+
     // If no status filter is provided, include all statuses by default
     if (!filtersWithoutUser?.['status']) {
       // Include all statuses
     }
-    
-    query.groupBy('user.name')
+
+    query
+      .groupBy('user.name')
       .addGroupBy('user.email')
       .orderBy('amount', 'DESC');
     const rows = await query.getRawMany();
@@ -768,11 +810,12 @@ export class ReportsService {
       ])
       .where('expense.organization_id = :organizationId', { organizationId })
       .andWhere('expense.is_deleted = false');
-    
+
     // Apply enhanced filters
     this.applyExpenseFilters(query, filters);
-    
-    query.groupBy("TO_CHAR(expense.expense_date, 'YYYY-MM')")
+
+    query
+      .groupBy("TO_CHAR(expense.expense_date, 'YYYY-MM')")
       .orderBy("TO_CHAR(expense.expense_date, 'YYYY-MM')", 'ASC');
     const rows = await query.getRawMany();
     return rows.map((row) => ({
@@ -784,10 +827,7 @@ export class ReportsService {
   /**
    * Helper method to apply common expense filters to query builders
    */
-  private applyExpenseFilters(
-    query: any,
-    filters?: Record<string, any>,
-  ): void {
+  private applyExpenseFilters(query: any, filters?: Record<string, any>): void {
     if (filters?.startDate) {
       query.andWhere('expense.expense_date >= :startDate', {
         startDate: filters.startDate,
@@ -925,7 +965,7 @@ export class ReportsService {
       const changes = row.changes || {};
       const oldValue = changes.oldValue || changes.before || '';
       const newValue = changes.newValue || changes.after || '';
-      
+
       return {
         id: row.id,
         timestamp: row.timestamp,
@@ -935,8 +975,14 @@ export class ReportsService {
         userName: row.userName || 'System',
         userEmail: row.userEmail || '',
         ipAddress: row.ipAddress || '',
-        oldValue: typeof oldValue === 'object' ? JSON.stringify(oldValue) : String(oldValue),
-        newValue: typeof newValue === 'object' ? JSON.stringify(newValue) : String(newValue),
+        oldValue:
+          typeof oldValue === 'object'
+            ? JSON.stringify(oldValue)
+            : String(oldValue),
+        newValue:
+          typeof newValue === 'object'
+            ? JSON.stringify(newValue)
+            : String(newValue),
         changes: changes,
       };
     });
@@ -948,9 +994,14 @@ export class ReportsService {
   ) {
     // Bank Reconciliation Summary Report
     // For now, we'll use accruals and expenses to simulate reconciliation
-    const startDate = filters?.['startDate'] || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-    const endDate = filters?.['endDate'] || new Date().toISOString().split('T')[0];
-    
+    const startDate =
+      filters?.['startDate'] ||
+      new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
+        .toISOString()
+        .split('T')[0];
+    const endDate =
+      filters?.['endDate'] || new Date().toISOString().split('T')[0];
+
     // Get all expenses in the date range
     const expensesQuery = this.expensesRepository
       .createQueryBuilder('expense')
@@ -961,14 +1012,14 @@ export class ReportsService {
         'expense.description AS description',
         'expense.total_amount AS amount',
         'expense.status AS status',
-        'CASE WHEN accrual.id IS NOT NULL THEN \'Matched\' ELSE \'Unmatched\' END AS reconciliationStatus',
+        "CASE WHEN accrual.id IS NOT NULL THEN 'Matched' ELSE 'Unmatched' END AS reconciliationStatus",
         'accrual.id AS accrualId',
       ])
       .where('expense.organization_id = :organizationId', { organizationId })
       .andWhere('expense.is_deleted = false')
       .andWhere('expense.expense_date >= :startDate', { startDate })
       .andWhere('expense.expense_date <= :endDate', { endDate });
-    
+
     if (filters?.['status']) {
       const status = filters.status;
       if (status === 'matched') {
@@ -977,21 +1028,31 @@ export class ReportsService {
         expensesQuery.andWhere('accrual.id IS NULL');
       }
     }
-    
+
     const transactions = await expensesQuery.getRawMany();
-    
-    const matched = transactions.filter((t) => t.reconciliationStatus === 'Matched');
-    const unmatched = transactions.filter((t) => t.reconciliationStatus === 'Unmatched');
-    
+
+    const matched = transactions.filter(
+      (t) => t.reconciliationStatus === 'Matched',
+    );
+    const unmatched = transactions.filter(
+      (t) => t.reconciliationStatus === 'Unmatched',
+    );
+
     // Calculate totals
     const totalTransactions = transactions.length;
     const matchedCount = matched.length;
     const unmatchedCount = unmatched.length;
-    
-    const closingBalanceBank = transactions.reduce((sum, t) => sum + Number(t.amount || 0), 0);
-    const closingBalanceSystem = transactions.reduce((sum, t) => sum + Number(t.amount || 0), 0);
+
+    const closingBalanceBank = transactions.reduce(
+      (sum, t) => sum + Number(t.amount || 0),
+      0,
+    );
+    const closingBalanceSystem = transactions.reduce(
+      (sum, t) => sum + Number(t.amount || 0),
+      0,
+    );
     const variance = closingBalanceBank - closingBalanceSystem;
-    
+
     return {
       reconciliationId: `REC-${new Date().toISOString().split('T')[0].replace(/-/g, '')}-01`,
       dateRange: {
@@ -1034,8 +1095,10 @@ export class ReportsService {
         'expense.id AS linkedRecordId',
         'user.name AS uploadedBy',
       ])
-      .where('attachment.organization_id = :organizationId', { organizationId });
-    
+      .where('attachment.organization_id = :organizationId', {
+        organizationId,
+      });
+
     if (filters?.['startDate']) {
       query.andWhere('attachment.created_at >= :startDate', {
         startDate: filters.startDate,
@@ -1062,10 +1125,10 @@ export class ReportsService {
         fileType: filters.fileType,
       });
     }
-    
+
     query.orderBy('attachment.created_at', 'DESC');
     const rows = await query.getRawMany();
-    
+
     return rows.map((row) => ({
       fileName: row.fileName,
       linkedRecord: `EXP-${row.linkedRecordId?.substring(0, 8).toUpperCase() || 'N/A'}`,
@@ -1085,27 +1148,30 @@ export class ReportsService {
     filters?: Record<string, any>,
   ) {
     // Trial Balance / Account Summary Report
-    const startDate = filters?.['startDate'] || new Date(new Date().getFullYear(), 0, 1).toISOString().split('T')[0];
-    const endDate = filters?.['endDate'] || new Date().toISOString().split('T')[0];
-    
+    const startDate =
+      filters?.['startDate'] ||
+      new Date(new Date().getFullYear(), 0, 1).toISOString().split('T')[0];
+    const endDate =
+      filters?.['endDate'] || new Date().toISOString().split('T')[0];
+
     // Get expense totals by category
     const expenseQuery = this.expensesRepository
       .createQueryBuilder('expense')
       .leftJoin('expense.category', 'category')
       .select([
-        'COALESCE(category.name, \'Uncategorized\') AS accountName',
+        "COALESCE(category.name, 'Uncategorized') AS accountName",
         'SUM(expense.amount) AS debit',
         '0 AS credit',
-        '\'Expense\' AS accountType',
+        "'Expense' AS accountType",
       ])
       .where('expense.organization_id = :organizationId', { organizationId })
       .andWhere('expense.is_deleted = false')
       .andWhere('expense.expense_date >= :startDate', { startDate })
       .andWhere('expense.expense_date <= :endDate', { endDate })
       .groupBy('category.name');
-    
+
     const expenseRows = await expenseQuery.getRawMany();
-    
+
     // Format as trial balance entries
     const accounts = expenseRows.map((row) => ({
       accountName: row.accountName,
@@ -1114,11 +1180,11 @@ export class ReportsService {
       credit: Number(row.credit || 0),
       balance: Number(row.debit || 0) - Number(row.credit || 0),
     }));
-    
+
     const totalDebit = accounts.reduce((sum, acc) => sum + acc.debit, 0);
     const totalCredit = accounts.reduce((sum, acc) => sum + acc.credit, 0);
     const totalBalance = totalDebit - totalCredit;
-    
+
     return {
       period: {
         startDate,
@@ -1134,4 +1200,3 @@ export class ReportsService {
     };
   }
 }
-

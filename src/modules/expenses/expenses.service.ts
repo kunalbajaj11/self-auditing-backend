@@ -127,7 +127,7 @@ export class ExpensesService {
   async findById(id: string, organizationId: string): Promise<Expense> {
     const expense = await this.expensesRepository.findOne({
       where: { id, organization: { id: organizationId }, isDeleted: false },
-      relations: ['category', 'user', 'attachments', 'accrualDetail'],
+      relations: ['category', 'user', 'attachments', 'accrualDetail', 'vendor'],
     });
     if (!expense) {
       throw new NotFoundException('Expense not found');
@@ -150,10 +150,7 @@ export class ExpensesService {
     if (!user) {
       throw new NotFoundException('User not found');
     }
-    if (
-      dto.type === ExpenseType.ACCRUAL &&
-      !dto.expectedPaymentDate
-    ) {
+    if (dto.type === ExpenseType.ACCRUAL && !dto.expectedPaymentDate) {
       throw new BadRequestException(
         'Accrual expenses require expected payment date',
       );
@@ -179,7 +176,10 @@ export class ExpensesService {
       dto.attachments,
     );
 
-    if (duplicates.length > 0 && this.duplicateDetectionService.shouldBlock(duplicates)) {
+    if (
+      duplicates.length > 0 &&
+      this.duplicateDetectionService.shouldBlock(duplicates)
+    ) {
       throw new ConflictException({
         message: 'Potential duplicate expense detected',
         duplicates: duplicates.map((d) => ({
@@ -216,7 +216,8 @@ export class ExpensesService {
 
     // Handle currency and conversion
     const expenseCurrency = dto.currency || organization.currency || 'AED';
-    const baseCurrency = organization.baseCurrency || organization.currency || 'AED';
+    const baseCurrency =
+      organization.baseCurrency || organization.currency || 'AED';
     let exchangeRate: string | null = null;
     let baseAmount: string | null = null;
 
@@ -279,9 +280,7 @@ export class ExpensesService {
       status: ExpenseStatus.PENDING,
       source: dto.source ?? ExpenseSource.MANUAL,
       ocrConfidence:
-        dto.ocrConfidence !== undefined
-          ? dto.ocrConfidence.toFixed(2)
-          : null,
+        dto.ocrConfidence !== undefined ? dto.ocrConfidence.toFixed(2) : null,
       linkedAccrual: linkedAccrualExpense ?? null,
     });
 
@@ -294,9 +293,11 @@ export class ExpensesService {
         // Extract fileKey from fileUrl if not provided
         let fileKey = attachment.fileKey;
         if (!fileKey && attachment.fileUrl) {
-          fileKey = this.fileStorageService.extractFileKeyFromUrl(attachment.fileUrl);
+          fileKey = this.fileStorageService.extractFileKeyFromUrl(
+            attachment.fileUrl,
+          );
         }
-        
+
         return this.attachmentsRepository.create({
           organization,
           fileName: attachment.fileName,
@@ -347,7 +348,7 @@ export class ExpensesService {
       dto.amount
     ) {
       // Try to auto-match with pending accruals (works for both expenses and credits)
-      await this.autoMatchAccrual(saved, organizationId      );
+      await this.autoMatchAccrual(saved, organizationId);
     }
 
     // Update vendor last used date if linked
@@ -390,6 +391,28 @@ export class ExpensesService {
   }
 
   /**
+   * Clean vendor name by removing common prefixes like "To: ", "From: ", etc.
+   */
+  private cleanVendorName(vendorName: string | null | undefined): string {
+    if (!vendorName) {
+      return '';
+    }
+
+    let cleaned = vendorName.trim();
+
+    // Remove common prefixes
+    const prefixes = ['To:', 'From:', 'Vendor:', 'Supplier:', 'Company:'];
+    for (const prefix of prefixes) {
+      if (cleaned.toLowerCase().startsWith(prefix.toLowerCase())) {
+        cleaned = cleaned.substring(prefix.length).trim();
+        break; // Only remove one prefix
+      }
+    }
+
+    return cleaned;
+  }
+
+  /**
    * Link expense to existing vendor or create new vendor
    */
   private async linkOrCreateVendor(
@@ -398,6 +421,12 @@ export class ExpensesService {
     vendorTrn?: string,
   ): Promise<Vendor | null> {
     if (!vendorName) {
+      return null;
+    }
+
+    // Clean vendor name before processing
+    const cleanedVendorName = this.cleanVendorName(vendorName);
+    if (!cleanedVendorName) {
       return null;
     }
 
@@ -411,7 +440,7 @@ export class ExpensesService {
 
     const matchedVendor = existingVendors.find((v) => {
       const v1 = v.name.toLowerCase().trim();
-      const v2 = vendorName.toLowerCase().trim();
+      const v2 = cleanedVendorName.toLowerCase().trim();
       return (
         v1 === v2 ||
         v1.includes(v2) ||
@@ -424,10 +453,10 @@ export class ExpensesService {
       return matchedVendor;
     }
 
-    // Create new vendor
+    // Create new vendor with cleaned name
     const vendor = this.vendorsRepository.create({
       organization,
-      name: vendorName,
+      name: cleanedVendorName,
       vendorTrn: vendorTrn || null,
       preferredCurrency: organization.currency || 'AED',
       firstUsedAt: new Date(),
@@ -584,7 +613,10 @@ export class ExpensesService {
       if (normalized1 === normalized2) {
         return true;
       }
-      if (normalized1.includes(normalized2) || normalized2.includes(normalized1)) {
+      if (
+        normalized1.includes(normalized2) ||
+        normalized2.includes(normalized1)
+      ) {
         return true;
       }
     }
@@ -646,19 +678,20 @@ export class ExpensesService {
     }
 
     await this.expensesRepository.save(expense);
-    
+
     // Try auto-matching accrual if vendor or amount was updated and expense is not already linked
     if (
       (dto.vendorName !== undefined || dto.amount !== undefined) &&
       expense.type !== ExpenseType.ACCRUAL &&
-      (expense.type === ExpenseType.EXPENSE || expense.type === ExpenseType.CREDIT) &&
+      (expense.type === ExpenseType.EXPENSE ||
+        expense.type === ExpenseType.CREDIT) &&
       expense.vendorName &&
       expense.amount &&
       !expense.linkedAccrual // Only if not already linked
     ) {
       await this.autoMatchAccrual(expense, organizationId);
     }
-    
+
     return this.findById(id, organizationId);
   }
 
@@ -714,10 +747,7 @@ export class ExpensesService {
 
     const accrualAmount = Number(accrual.amount);
     const expenseAmount = Number(expense.amount);
-    if (
-      Math.abs(accrualAmount - expenseAmount) >
-      DEFAULT_ACCRUAL_TOLERANCE
-    ) {
+    if (Math.abs(accrualAmount - expenseAmount) > DEFAULT_ACCRUAL_TOLERANCE) {
       throw new BadRequestException(
         `Settlement amount differs by more than ${DEFAULT_ACCRUAL_TOLERANCE}`,
       );
@@ -726,12 +756,12 @@ export class ExpensesService {
     expense.linkedAccrual = accrualExpense;
     accrual.settlementExpense = expense;
     accrual.settlementDate = expense.expenseDate;
-    
+
     // Mark as AUTO_SETTLED if auto-matched, otherwise SETTLED
     accrual.status = isAutoMatched
       ? AccrualStatus.AUTO_SETTLED
       : AccrualStatus.SETTLED;
-    
+
     expense.status = ExpenseStatus.SETTLED;
 
     await Promise.all([
@@ -744,4 +774,3 @@ export class ExpensesService {
     );
   }
 }
-

@@ -30,7 +30,8 @@ export class FileStorageService {
 
   constructor(
     private readonly configService: ConfigService,
-    @Optional() @Inject(ImageOptimizationService)
+    @Optional()
+    @Inject(ImageOptimizationService)
     private readonly imageOptimizationService?: ImageOptimizationService,
   ) {
     // Support both AWS S3 and Cloudflare R2
@@ -39,9 +40,8 @@ export class FileStorageService {
       this.configService.get<string>('R2_ACCESS_KEY_ID') &&
       this.configService.get<string>('R2_SECRET_ACCESS_KEY') &&
       this.configService.get<string>('R2_ACCOUNT_ID');
-    this.storageType =
-      (this.configService.get<string>('STORAGE_TYPE') ||
-        (hasR2Credentials ? 'r2' : 's3')) as 's3' | 'r2';
+    this.storageType = (this.configService.get<string>('STORAGE_TYPE') ||
+      (hasR2Credentials ? 'r2' : 's3')) as 's3' | 'r2';
     this.bucketName =
       this.configService.get<string>('AWS_S3_BUCKET') ||
       this.configService.get<string>('R2_BUCKET_NAME') ||
@@ -76,7 +76,7 @@ export class FileStorageService {
         // Using the simplest configuration - let AWS SDK handle SSL negotiation
         // Note: Server environment (Alpine Linux) requires CA certificates to be installed
         // See Dockerfile for ca-certificates installation
-        
+
         try {
           this.s3Client = new S3Client({
             region: this.region,
@@ -95,7 +95,7 @@ export class FileStorageService {
         } catch (error) {
           this.logger.error(
             `Failed to configure R2 client: ${(error as Error)?.message}. ` +
-            `Ensure CA certificates are installed in the container (see Dockerfile).`,
+              `Ensure CA certificates are installed in the container (see Dockerfile).`,
           );
           throw error;
         }
@@ -139,19 +139,25 @@ export class FileStorageService {
     const uploadMimeType = file.mimetype;
     let uploadSize = file.size;
 
-    if (this.imageOptimizationService && this.imageOptimizationService.isImageFile(file.mimetype)) {
+    if (
+      this.imageOptimizationService &&
+      this.imageOptimizationService.isImageFile(file.mimetype)
+    ) {
       try {
-        this.logger.debug(`Optimizing image before upload: ${file.originalname} (${file.size} bytes)`);
-        const optimizationResult = await this.imageOptimizationService.optimizeImage(
-          file.buffer,
-          file.mimetype,
+        this.logger.debug(
+          `Optimizing image before upload: ${file.originalname} (${file.size} bytes)`,
         );
+        const optimizationResult =
+          await this.imageOptimizationService.optimizeImage(
+            file.buffer,
+            file.mimetype,
+          );
 
         if (optimizationResult.optimized) {
           uploadBuffer = optimizationResult.buffer;
           uploadSize = optimizationResult.optimizedSize;
           this.logger.log(
-            `Image optimized before upload: ${optimizationResult.originalSize} bytes -> ${optimizationResult.optimizedSize} bytes (${((optimizationResult.originalSize - optimizationResult.optimizedSize) / optimizationResult.originalSize * 100).toFixed(1)}% reduction)`,
+            `Image optimized before upload: ${optimizationResult.originalSize} bytes -> ${optimizationResult.optimizedSize} bytes (${(((optimizationResult.originalSize - optimizationResult.optimizedSize) / optimizationResult.originalSize) * 100).toFixed(1)}% reduction)`,
           );
         }
       } catch (error) {
@@ -164,7 +170,9 @@ export class FileStorageService {
 
     if (!this.s3Client) {
       // Local development mode - return mock URL
-      this.logger.warn(`S3 client not configured, returning local mock URL for upload. key=${fileKey}`);
+      this.logger.warn(
+        `S3 client not configured, returning local mock URL for upload. key=${fileKey}`,
+      );
       return {
         fileName: file.originalname,
         fileUrl: `/uploads/${fileKey}`,
@@ -176,7 +184,9 @@ export class FileStorageService {
 
     try {
       const storageName = this.storageType === 'r2' ? 'R2' : 'S3';
-      this.logger.debug(`Uploading to ${storageName} bucket=${this.bucketName} key=${fileKey} size=${uploadSize} type=${uploadMimeType}`);
+      this.logger.debug(
+        `Uploading to ${storageName} bucket=${this.bucketName} key=${fileKey} size=${uploadSize} type=${uploadMimeType}`,
+      );
       const command = new PutObjectCommand({
         Bucket: this.bucketName,
         Key: fileKey,
@@ -204,28 +214,34 @@ export class FileStorageService {
       const storageName = this.storageType === 'r2' ? 'R2' : 'S3';
       const errorMessage = (error as Error)?.message || 'Unknown error';
       const errorStack = (error as Error)?.stack;
-      
+
       // Log detailed error information for debugging SSL issues
       this.logger.error(
         `Error uploading file to ${storageName}: ${errorMessage}`,
         errorStack,
       );
-      
+
       // If it's an SSL/TLS error, log additional context
-      if (errorMessage.includes('SSL') || errorMessage.includes('TLS') || errorMessage.includes('handshake')) {
-        const endpoint = this.storageType === 'r2' 
-          ? (this.configService.get<string>('R2_ENDPOINT') || `https://${this.configService.get<string>('R2_ACCOUNT_ID')}.r2.cloudflarestorage.com`)
-          : 'S3';
+      if (
+        errorMessage.includes('SSL') ||
+        errorMessage.includes('TLS') ||
+        errorMessage.includes('handshake')
+      ) {
+        const endpoint =
+          this.storageType === 'r2'
+            ? this.configService.get<string>('R2_ENDPOINT') ||
+              `https://${this.configService.get<string>('R2_ACCOUNT_ID')}.r2.cloudflarestorage.com`
+            : 'S3';
         this.logger.error(
           `SSL/TLS error detected. This may indicate: ` +
-          `1) Container Node.js/OpenSSL version incompatibility, ` +
-          `2) Network/proxy interference, or ` +
-          `3) Cloudflare R2 SSL requirements changed. ` +
-          `Endpoint: ${endpoint}, Region: ${this.region}, Bucket: ${this.bucketName}. ` +
-          `Please check container Node.js version (node --version) and OpenSSL version (openssl version).`,
+            `1) Container Node.js/OpenSSL version incompatibility, ` +
+            `2) Network/proxy interference, or ` +
+            `3) Cloudflare R2 SSL requirements changed. ` +
+            `Endpoint: ${endpoint}, Region: ${this.region}, Bucket: ${this.bucketName}. ` +
+            `Please check container Node.js version (node --version) and OpenSSL version (openssl version).`,
         );
       }
-      
+
       throw new Error('Failed to upload file to storage');
     }
   }
@@ -235,12 +251,16 @@ export class FileStorageService {
     expiresIn: number = 3600,
   ): Promise<string> {
     if (!this.s3Client) {
-      this.logger.warn(`S3 client not configured, returning local mock path for signed URL. key=${fileKey}`);
+      this.logger.warn(
+        `S3 client not configured, returning local mock path for signed URL. key=${fileKey}`,
+      );
       return `/uploads/${fileKey}`;
     }
 
     try {
-      this.logger.debug(`Generating signed URL for key=${fileKey} expiresIn=${expiresIn}`);
+      this.logger.debug(
+        `Generating signed URL for key=${fileKey} expiresIn=${expiresIn}`,
+      );
       const command = new GetObjectCommand({
         Bucket: this.bucketName,
         Key: fileKey,
@@ -250,7 +270,10 @@ export class FileStorageService {
       this.logger.debug(`Signed URL generated for key=${fileKey}`);
       return url;
     } catch (error) {
-      this.logger.error(`Error generating signed URL: ${(error as Error)?.message}`, (error as Error)?.stack);
+      this.logger.error(
+        `Error generating signed URL: ${(error as Error)?.message}`,
+        (error as Error)?.stack,
+      );
       throw new Error('Failed to generate signed URL');
     }
   }
@@ -268,14 +291,22 @@ export class FileStorageService {
         Key: fileKey,
       });
       const result: any = await this.s3Client.send(command);
-      this.logger.debug(`Fetched object head key=${fileKey} contentType=${result?.ContentType} contentLength=${result?.ContentLength}`);
+      this.logger.debug(
+        `Fetched object head key=${fileKey} contentType=${result?.ContentType} contentLength=${result?.ContentLength}`,
+      );
       return {
         body: result.Body,
         contentType: result.ContentType,
-        contentLength: typeof result.ContentLength === 'number' ? result.ContentLength : undefined,
+        contentLength:
+          typeof result.ContentLength === 'number'
+            ? result.ContentLength
+            : undefined,
       };
     } catch (error) {
-      this.logger.error(`Error getting object from S3: ${(error as Error)?.message}`, (error as Error)?.stack);
+      this.logger.error(
+        `Error getting object from S3: ${(error as Error)?.message}`,
+        (error as Error)?.stack,
+      );
       throw new Error('Failed to fetch file from storage');
     }
   }

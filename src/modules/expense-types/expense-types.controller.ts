@@ -70,11 +70,7 @@ export class ExpenseTypesController {
     @Param('id') id: string,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    await this.expenseTypesService.remove(
-      id,
-      user?.organizationId as string,
-    );
+    await this.expenseTypesService.remove(id, user?.organizationId as string);
     return { success: true };
   }
 }
-

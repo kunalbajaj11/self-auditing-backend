@@ -5,4 +5,3 @@ export class ActivateOrganizationWithExpiryDto {
   @IsDateString()
   expiryDate: string;
 }
-

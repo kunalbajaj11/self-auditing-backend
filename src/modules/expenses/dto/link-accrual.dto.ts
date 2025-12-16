@@ -5,4 +5,3 @@ export class LinkAccrualDto {
   @IsString()
   accrualExpenseId: string;
 }
-

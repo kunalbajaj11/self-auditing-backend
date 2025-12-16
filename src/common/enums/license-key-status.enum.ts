@@ -4,4 +4,3 @@ export enum LicenseKeyStatus {
   EXPIRED = 'expired',
   REVOKED = 'revoked',
 }
-

@@ -24,4 +24,3 @@ import { EnterpriseLicenseGuard } from '../../common/guards/enterprise-license.g
   exports: [NotificationsService, EmailService, EmailTemplateService],
 })
 export class NotificationsModule {}
-

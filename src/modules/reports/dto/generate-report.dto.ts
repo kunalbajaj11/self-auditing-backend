@@ -1,4 +1,9 @@
-import { IsEnum, IsNotEmptyObject, IsOptional, IsString } from 'class-validator';
+import {
+  IsEnum,
+  IsNotEmptyObject,
+  IsOptional,
+  IsString,
+} from 'class-validator';
 import { ReportType } from '../../../common/enums/report-type.enum';
 
 export class GenerateReportDto {
@@ -13,4 +18,3 @@ export class GenerateReportDto {
   @IsString()
   format?: 'json' | 'csv' | 'xlsx' | 'pdf';
 }
-

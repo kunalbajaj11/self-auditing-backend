@@ -11,4 +11,3 @@ export enum ReportType {
   ATTACHMENTS_REPORT = 'attachments_report',
   TRIAL_BALANCE = 'trial_balance',
 }
-

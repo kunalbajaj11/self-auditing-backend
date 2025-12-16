@@ -37,4 +37,3 @@ import { Vendor } from '../vendors/vendor.entity';
   exports: [ExpensesService],
 })
 export class ExpensesModule {}
-

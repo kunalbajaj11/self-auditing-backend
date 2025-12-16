@@ -4,7 +4,3 @@ export enum VatTaxType {
   EXEMPT = 'exempt',
   REVERSE_CHARGE = 'reverse_charge',
 }
-
-
-
-

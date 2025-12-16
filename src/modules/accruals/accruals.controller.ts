@@ -39,14 +39,7 @@ export class AccrualsController {
 
   @Get(':id')
   @Roles(UserRole.ADMIN, UserRole.ACCOUNTANT)
-  async get(
-    @Param('id') id: string,
-    @CurrentUser() user: AuthenticatedUser,
-  ) {
-    return this.accrualsService.findById(
-      user?.organizationId as string,
-      id,
-    );
+  async get(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.accrualsService.findById(user?.organizationId as string, id);
   }
 }
-

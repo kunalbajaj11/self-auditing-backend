@@ -5,4 +5,3 @@ export enum CreditNoteReason {
   DISCOUNT = 'discount',
   OTHER = 'other',
 }
-

@@ -1,4 +1,12 @@
-import { IsNotEmpty, IsNumber, IsString, IsDateString, IsEnum, IsOptional, Min } from 'class-validator';
+import {
+  IsNotEmpty,
+  IsNumber,
+  IsString,
+  IsDateString,
+  IsEnum,
+  IsOptional,
+  Min,
+} from 'class-validator';
 import { PaymentMethod } from '../../../common/enums/payment-method.enum';
 
 export class CreatePaymentDto {
@@ -23,4 +31,3 @@ export class CreatePaymentDto {
   @IsString()
   notes?: string;
 }
-

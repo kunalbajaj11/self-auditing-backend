@@ -16,7 +16,10 @@ import { TransactionType } from '../../common/enums/transaction-type.enum';
 import { ReconciliationStatus } from '../../common/enums/reconciliation-status.enum';
 import { MatchTransactionsDto } from './dto/match-transactions.dto';
 import { ManualEntryDto } from './dto/manual-entry.dto';
-import { BankStatementParserService, ParsedTransaction } from './bank-statement-parser.service';
+import {
+  BankStatementParserService,
+  ParsedTransaction,
+} from './bank-statement-parser.service';
 import { FileStorageService } from '../attachments/file-storage.service';
 import { ExpensesService } from '../expenses/expenses.service';
 import { CreateExpenseDto } from '../expenses/dto/create-expense.dto';
@@ -84,8 +87,16 @@ export class ReconciliationService {
     // Determine statement period from transactions if not provided
     if (!statementPeriodStart || !statementPeriodEnd) {
       const dates = parsedTransactions.map((t) => new Date(t.transactionDate));
-      statementPeriodStart = statementPeriodStart || new Date(Math.min(...dates.map(d => d.getTime()))).toISOString().split('T')[0];
-      statementPeriodEnd = statementPeriodEnd || new Date(Math.max(...dates.map(d => d.getTime()))).toISOString().split('T')[0];
+      statementPeriodStart =
+        statementPeriodStart ||
+        new Date(Math.min(...dates.map((d) => d.getTime())))
+          .toISOString()
+          .split('T')[0];
+      statementPeriodEnd =
+        statementPeriodEnd ||
+        new Date(Math.max(...dates.map((d) => d.getTime())))
+          .toISOString()
+          .split('T')[0];
     }
 
     // Create reconciliation record
@@ -97,7 +108,8 @@ export class ReconciliationService {
       createdBy: user,
     });
 
-    const savedRecord = await this.reconciliationRecordsRepository.save(reconciliationRecord);
+    const savedRecord =
+      await this.reconciliationRecordsRepository.save(reconciliationRecord);
 
     // Create bank transactions
     const bankTransactions = parsedTransactions.map((parsed) =>
@@ -120,7 +132,7 @@ export class ReconciliationService {
     // Calculate totals with validation
     // decimal(18, 2) max value: 9999999999999999.99
     const MAX_DECIMAL_VALUE = 9999999999999999.99;
-    
+
     const totalCredits = bankTransactions
       .filter((t) => t.type === TransactionType.CREDIT)
       .reduce((sum, t) => {
@@ -132,7 +144,7 @@ export class ReconciliationService {
         }
         return sum + amount;
       }, 0);
-      
+
     const totalDebits = bankTransactions
       .filter((t) => t.type === TransactionType.DEBIT)
       .reduce((sum, t) => {
@@ -165,14 +177,24 @@ export class ReconciliationService {
     await this.reconciliationRecordsRepository.save(savedRecord);
 
     // Load system transactions for the period
-    await this.loadSystemTransactions(organizationId, statementPeriodStart, statementPeriodEnd, savedRecord.id);
+    await this.loadSystemTransactions(
+      organizationId,
+      statementPeriodStart,
+      statementPeriodEnd,
+      savedRecord.id,
+    );
 
     // Auto-match transactions
     await this.autoMatchTransactions(savedRecord.id);
 
     return this.reconciliationRecordsRepository.findOne({
       where: { id: savedRecord.id },
-      relations: ['bankTransactions', 'systemTransactions', 'organization', 'createdBy'],
+      relations: [
+        'bankTransactions',
+        'systemTransactions',
+        'organization',
+        'createdBy',
+      ],
     }) as Promise<ReconciliationRecord>;
   }
 
@@ -214,9 +236,10 @@ export class ReconciliationService {
     }
 
     if (systemTransactions.length > 0) {
-      const reconciliationRecord = await this.reconciliationRecordsRepository.findOne({
-        where: { id: reconciliationRecordId },
-      });
+      const reconciliationRecord =
+        await this.reconciliationRecordsRepository.findOne({
+          where: { id: reconciliationRecordId },
+        });
       if (reconciliationRecord) {
         systemTransactions.forEach((t) => {
           t.reconciliationRecord = reconciliationRecord;
@@ -227,10 +250,11 @@ export class ReconciliationService {
   }
 
   async autoMatchTransactions(reconciliationRecordId: string): Promise<void> {
-    const reconciliationRecord = await this.reconciliationRecordsRepository.findOne({
-      where: { id: reconciliationRecordId },
-      relations: ['bankTransactions', 'systemTransactions'],
-    });
+    const reconciliationRecord =
+      await this.reconciliationRecordsRepository.findOne({
+        where: { id: reconciliationRecordId },
+        relations: ['bankTransactions', 'systemTransactions'],
+      });
 
     if (!reconciliationRecord) {
       throw new NotFoundException('Reconciliation record not found');
@@ -243,7 +267,11 @@ export class ReconciliationService {
       (t) => t.status === ReconciliationStatus.UNMATCHED,
     );
 
-    const matches: Array<{ bank: BankTransaction; system: SystemTransaction; score: number }> = [];
+    const matches: Array<{
+      bank: BankTransaction;
+      system: SystemTransaction;
+      score: number;
+    }> = [];
 
     for (const bankTxn of bankTransactions) {
       for (const systemTxn of systemTransactions) {
@@ -261,7 +289,10 @@ export class ReconciliationService {
     const matchedSystemIds = new Set<string>();
 
     for (const match of matches) {
-      if (!matchedBankIds.has(match.bank.id) && !matchedSystemIds.has(match.system.id)) {
+      if (
+        !matchedBankIds.has(match.bank.id) &&
+        !matchedSystemIds.has(match.system.id)
+      ) {
         match.bank.status = ReconciliationStatus.MATCHED;
         match.system.status = ReconciliationStatus.MATCHED;
         match.bank.reconciliationRecord = reconciliationRecord;
@@ -302,7 +333,9 @@ export class ReconciliationService {
     let score = 0;
 
     // Amount match (40% weight)
-    const amountDiff = Math.abs(parseFloat(bankTxn.amount) - parseFloat(systemTxn.amount));
+    const amountDiff = Math.abs(
+      parseFloat(bankTxn.amount) - parseFloat(systemTxn.amount),
+    );
     if (amountDiff <= AMOUNT_TOLERANCE) {
       const amountScore = 1 - amountDiff / AMOUNT_TOLERANCE;
       score += amountScore * 0.4;
@@ -311,7 +344,9 @@ export class ReconciliationService {
     // Date match (30% weight)
     const bankDate = new Date(bankTxn.transactionDate);
     const systemDate = new Date(systemTxn.transactionDate);
-    const dateDiffDays = Math.abs((bankDate.getTime() - systemDate.getTime()) / (1000 * 60 * 60 * 24));
+    const dateDiffDays = Math.abs(
+      (bankDate.getTime() - systemDate.getTime()) / (1000 * 60 * 60 * 24),
+    );
     if (dateDiffDays <= DATE_TOLERANCE_DAYS) {
       const dateScore = 1 - dateDiffDays / DATE_TOLERANCE_DAYS;
       score += dateScore * 0.3;
@@ -353,14 +388,20 @@ export class ReconciliationService {
     dto: MatchTransactionsDto,
   ): Promise<void> {
     const bankTxn = await this.bankTransactionsRepository.findOne({
-      where: { id: dto.bankTransactionId, organization: { id: organizationId } },
+      where: {
+        id: dto.bankTransactionId,
+        organization: { id: organizationId },
+      },
     });
     if (!bankTxn) {
       throw new NotFoundException('Bank transaction not found');
     }
 
     const systemTxn = await this.systemTransactionsRepository.findOne({
-      where: { id: dto.systemTransactionId, organization: { id: organizationId } },
+      where: {
+        id: dto.systemTransactionId,
+        organization: { id: organizationId },
+      },
     });
     if (!systemTxn) {
       throw new NotFoundException('System transaction not found');
@@ -410,9 +451,10 @@ export class ReconciliationService {
       throw new NotFoundException('Organization not found');
     }
 
-    const reconciliationRecord = await this.reconciliationRecordsRepository.findOne({
-      where: { id: reconciliationRecordId },
-    });
+    const reconciliationRecord =
+      await this.reconciliationRecordsRepository.findOne({
+        where: { id: reconciliationRecordId },
+      });
     if (!reconciliationRecord) {
       throw new NotFoundException('Reconciliation record not found');
     }
@@ -430,7 +472,11 @@ export class ReconciliationService {
         source: ExpenseSource.MANUAL,
       };
 
-      expense = await this.expensesService.create(organizationId, userId, createExpenseDto);
+      expense = await this.expensesService.create(
+        organizationId,
+        userId,
+        createExpenseDto,
+      );
     }
 
     // Create system transaction
@@ -496,4 +542,3 @@ export class ReconciliationService {
     return record;
   }
 }
-

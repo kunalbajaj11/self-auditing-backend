@@ -66,7 +66,20 @@ export class ReportGeneratorService {
     const date =
       typeof dateString === 'string' ? new Date(dateString) : dateString;
     const day = date.getDate().toString().padStart(2, '0');
-    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const monthNames = [
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
+    ];
     const month = monthNames[date.getMonth()];
     const year = date.getFullYear().toString().slice(-2);
     return `${day}-${month}-${year}`;
@@ -280,15 +293,7 @@ export class ReportGeneratorService {
       const possiblePaths = [
         // SVG logo paths (preferred)
         path.join(process.cwd(), 'assets', 'images', 'logo.svg'),
-        path.join(
-          __dirname,
-          '..',
-          '..',
-          '..',
-          'assets',
-          'images',
-          'logo.svg',
-        ),
+        path.join(__dirname, '..', '..', '..', 'assets', 'images', 'logo.svg'),
         path.join(__dirname, '..', '..', 'assets', 'images', 'logo.svg'),
         // JPG logo paths (fallback)
         path.join(process.cwd(), 'assets', 'images', 'app-logo.jpg'),
@@ -1132,7 +1137,7 @@ export class ReportGeneratorService {
         // Draw row border for clean professional look
         doc.strokeColor('#e0e0e0').lineWidth(0.5);
         doc.rect(margin, rowY, availableWidth, 20).stroke();
-        
+
         // Alternate row background
         if (index % 2 === 0) {
           doc
@@ -1581,7 +1586,7 @@ export class ReportGeneratorService {
       // Draw row borders for clean professional look
       doc.strokeColor('#e0e0e0').lineWidth(0.5);
       doc.rect(margin, rowY, availableWidth, 20).stroke();
-      
+
       if (index % 2 === 0) {
         doc.rect(margin, rowY, availableWidth, 20).fillColor('#fafafa').fill();
       }
@@ -2174,8 +2179,8 @@ export class ReportGeneratorService {
 
         const pageWidth = doc.page.width;
         const margin = 50;
-        const contentWidth = pageWidth - (2 * margin);
-        
+        const contentWidth = pageWidth - 2 * margin;
+
         // Color scheme - professional and clean
         const colors = {
           text: '#1a1a1a',
@@ -2189,7 +2194,11 @@ export class ReportGeneratorService {
         // ============================================================================
         // HEADER: TAX INVOICE TITLE
         // ============================================================================
-        doc.fontSize(24).font('Helvetica-Bold').fillColor(colors.text).text('TAX INVOICE', { align: 'center' });
+        doc
+          .fontSize(24)
+          .font('Helvetica-Bold')
+          .fillColor(colors.text)
+          .text('TAX INVOICE', { align: 'center' });
         doc.moveDown(1.5);
 
         // ============================================================================
@@ -2208,7 +2217,9 @@ export class ReportGeneratorService {
         doc.fontSize(9).font('Helvetica').fillColor(colors.text);
         const orgAddress = organization?.address || metadata.address || '';
         if (orgAddress) {
-          doc.text(orgAddress, leftX, currentY, { width: contentWidth / 2 - 10 });
+          doc.text(orgAddress, leftX, currentY, {
+            width: contentWidth / 2 - 10,
+          });
           currentY += 13;
         }
 
@@ -2246,7 +2257,7 @@ export class ReportGeneratorService {
           doc.fillColor(colors.text).text(orgWebsite, leftX + 55, currentY);
           currentY += 13;
         }
-        
+
         doc.fillColor(colors.text);
 
         // ============================================================================
@@ -2256,7 +2267,7 @@ export class ReportGeneratorService {
         const invoiceDetailsWidth = 200;
         const labelWidth = 110;
         const valueWidth = 90;
-        
+
         // Helper function to draw invoice detail row
         const drawDetailRow = (label: string, value: string, y: number) => {
           doc.fontSize(9).font('Helvetica').fillColor(colors.textLight);
@@ -2264,23 +2275,29 @@ export class ReportGeneratorService {
           doc.fillColor(colors.text);
           doc.text(value || '', rightX + labelWidth, y, { width: valueWidth });
         };
-        
+
         drawDetailRow('Invoice No.:', invoice.invoiceNumber || '', invoiceY);
         invoiceY += 14;
-        drawDetailRow('Dated:', this.formatDateForInvoice(invoice.invoiceDate || ''), invoiceY);
+        drawDetailRow(
+          'Dated:',
+          this.formatDateForInvoice(invoice.invoiceDate || ''),
+          invoiceY,
+        );
         invoiceY += 14;
         drawDetailRow('Delivery Note:', '', invoiceY);
         invoiceY += 14;
-        const paymentTerms = customer?.paymentTerms ? `${customer.paymentTerms} days` : '';
+        const paymentTerms = customer?.paymentTerms
+          ? `${customer.paymentTerms} days`
+          : '';
         drawDetailRow('Mode/Terms of Payment:', paymentTerms, invoiceY);
         invoiceY += 14;
-        drawDetailRow('Supplier\'s Ref.:', '', invoiceY);
+        drawDetailRow("Supplier's Ref.:", '', invoiceY);
         invoiceY += 14;
         drawDetailRow('Other Reference(s):', '', invoiceY);
         invoiceY += 14;
-        drawDetailRow('Buyer\'s Order No.:', '', invoiceY);
+        drawDetailRow("Buyer's Order No.:", '', invoiceY);
         invoiceY += 14;
-        drawDetailRow('Dated (for Buyer\'s Order):', '', invoiceY);
+        drawDetailRow("Dated (for Buyer's Order):", '', invoiceY);
         invoiceY += 14;
         drawDetailRow('Despatch Document No.:', '', invoiceY);
         invoiceY += 14;
@@ -2291,7 +2308,7 @@ export class ReportGeneratorService {
         drawDetailRow('Destination:', '', invoiceY);
         invoiceY += 14;
         drawDetailRow('Terms of Delivery:', '', invoiceY);
-        
+
         doc.fillColor(colors.text);
 
         // ============================================================================
@@ -2301,14 +2318,27 @@ export class ReportGeneratorService {
         const recipientStartY = doc.y;
 
         const customerName = customer?.name || invoice.customerName || '';
-        
+
         // Consignee section
-        doc.fontSize(10).font('Helvetica-Bold').fillColor(colors.text).text('Consignee:', leftX, recipientStartY);
-        doc.fontSize(9).font('Helvetica').text(customerName, leftX, recipientStartY + 14);
-        
+        doc
+          .fontSize(10)
+          .font('Helvetica-Bold')
+          .fillColor(colors.text)
+          .text('Consignee:', leftX, recipientStartY);
+        doc
+          .fontSize(9)
+          .font('Helvetica')
+          .text(customerName, leftX, recipientStartY + 14);
+
         // Buyer section (right side)
-        doc.fontSize(10).font('Helvetica-Bold').text('Buyer:', leftX + (contentWidth / 2), recipientStartY);
-        doc.fontSize(9).font('Helvetica').text(customerName, leftX + (contentWidth / 2), recipientStartY + 14);
+        doc
+          .fontSize(10)
+          .font('Helvetica-Bold')
+          .text('Buyer:', leftX + contentWidth / 2, recipientStartY);
+        doc
+          .fontSize(9)
+          .font('Helvetica')
+          .text(customerName, leftX + contentWidth / 2, recipientStartY + 14);
 
         let recipientY = recipientStartY + 28;
         const customerAddress = customer?.address || '';
@@ -2320,20 +2350,28 @@ export class ReportGeneratorService {
         const customerCity = customer?.city || '';
         const customerCountry = customer?.country || '';
         if (customerCity || customerCountry) {
-          doc.text(`${customerCity || ''}${customerCity && customerCountry ? ', ' : ''}${customerCountry || ''}`, leftX, recipientY);
+          doc.text(
+            `${customerCity || ''}${customerCity && customerCountry ? ', ' : ''}${customerCountry || ''}`,
+            leftX,
+            recipientY,
+          );
           recipientY += 13;
         }
 
         const customerEmirate = customer?.emirate || '';
         if (customerEmirate) {
           doc.fillColor(colors.textLight).text(`Emirate: `, leftX, recipientY);
-          doc.fillColor(colors.text).text(customerEmirate, leftX + 55, recipientY);
+          doc
+            .fillColor(colors.text)
+            .text(customerEmirate, leftX + 55, recipientY);
           recipientY += 13;
         }
 
         const customerCountryFull = customer?.country || 'UAE';
         doc.fillColor(colors.textLight).text(`Country: `, leftX, recipientY);
-        doc.fillColor(colors.text).text(customerCountryFull, leftX + 55, recipientY);
+        doc
+          .fillColor(colors.text)
+          .text(customerCountryFull, leftX + 55, recipientY);
 
         doc.moveDown(1.5);
 
@@ -2352,55 +2390,99 @@ export class ReportGeneratorService {
           amount: 80,
           vatPercent: 55,
         };
-        const tableWidth = Object.values(colWidths).reduce((sum, w) => sum + w, 0);
+        const tableWidth = Object.values(colWidths).reduce(
+          (sum, w) => sum + w,
+          0,
+        );
         const rowHeight = 26; // Increased to accommodate VAT amount below percentage
 
         // Draw table border
         doc.strokeColor(colors.border).lineWidth(0.5);
         doc.rect(tableStartX, tableTop, tableWidth, rowHeight).stroke();
-        
+
         // Table Header - Clean with subtle background
         let tableX = tableStartX;
-        doc.fillColor(colors.backgroundLight).rect(tableStartX, tableTop, tableWidth, rowHeight).fill();
+        doc
+          .fillColor(colors.backgroundLight)
+          .rect(tableStartX, tableTop, tableWidth, rowHeight)
+          .fill();
         doc.strokeColor(colors.border).lineWidth(0.5);
         doc.rect(tableStartX, tableTop, tableWidth, rowHeight).stroke();
-        
+
         doc.fontSize(9).font('Helvetica-Bold').fillColor(colors.text);
-        
+
         // Draw column dividers
         let dividerX = tableStartX;
-        doc.moveTo(dividerX + colWidths.siNo, tableTop).lineTo(dividerX + colWidths.siNo, tableTop + rowHeight).stroke();
+        doc
+          .moveTo(dividerX + colWidths.siNo, tableTop)
+          .lineTo(dividerX + colWidths.siNo, tableTop + rowHeight)
+          .stroke();
         dividerX += colWidths.siNo;
-        doc.moveTo(dividerX + colWidths.particulars, tableTop).lineTo(dividerX + colWidths.particulars, tableTop + rowHeight).stroke();
+        doc
+          .moveTo(dividerX + colWidths.particulars, tableTop)
+          .lineTo(dividerX + colWidths.particulars, tableTop + rowHeight)
+          .stroke();
         dividerX += colWidths.particulars;
-        doc.moveTo(dividerX + colWidths.quantity, tableTop).lineTo(dividerX + colWidths.quantity, tableTop + rowHeight).stroke();
+        doc
+          .moveTo(dividerX + colWidths.quantity, tableTop)
+          .lineTo(dividerX + colWidths.quantity, tableTop + rowHeight)
+          .stroke();
         dividerX += colWidths.quantity;
-        doc.moveTo(dividerX + colWidths.rate, tableTop).lineTo(dividerX + colWidths.rate, tableTop + rowHeight).stroke();
+        doc
+          .moveTo(dividerX + colWidths.rate, tableTop)
+          .lineTo(dividerX + colWidths.rate, tableTop + rowHeight)
+          .stroke();
         dividerX += colWidths.rate;
-        doc.moveTo(dividerX + colWidths.per, tableTop).lineTo(dividerX + colWidths.per, tableTop + rowHeight).stroke();
+        doc
+          .moveTo(dividerX + colWidths.per, tableTop)
+          .lineTo(dividerX + colWidths.per, tableTop + rowHeight)
+          .stroke();
         dividerX += colWidths.per;
-        doc.moveTo(dividerX + colWidths.amount, tableTop).lineTo(dividerX + colWidths.amount, tableTop + rowHeight).stroke();
+        doc
+          .moveTo(dividerX + colWidths.amount, tableTop)
+          .lineTo(dividerX + colWidths.amount, tableTop + rowHeight)
+          .stroke();
         dividerX += colWidths.amount;
-        
-        doc.text('SI No.', tableX + 8, tableTop + 7, { width: colWidths.siNo - 16, align: 'center' });
+
+        doc.text('SI No.', tableX + 8, tableTop + 7, {
+          width: colWidths.siNo - 16,
+          align: 'center',
+        });
         tableX += colWidths.siNo;
-        
-        doc.text('Particulars', tableX + 8, tableTop + 7, { width: colWidths.particulars - 16 });
+
+        doc.text('Particulars', tableX + 8, tableTop + 7, {
+          width: colWidths.particulars - 16,
+        });
         tableX += colWidths.particulars;
-        
-        doc.text('Quantity', tableX + 8, tableTop + 7, { width: colWidths.quantity - 16, align: 'center' });
+
+        doc.text('Quantity', tableX + 8, tableTop + 7, {
+          width: colWidths.quantity - 16,
+          align: 'center',
+        });
         tableX += colWidths.quantity;
-        
-        doc.text('Rate', tableX + 8, tableTop + 7, { width: colWidths.rate - 16, align: 'right' });
+
+        doc.text('Rate', tableX + 8, tableTop + 7, {
+          width: colWidths.rate - 16,
+          align: 'right',
+        });
         tableX += colWidths.rate;
-        
-        doc.text('per', tableX + 8, tableTop + 7, { width: colWidths.per - 16, align: 'center' });
+
+        doc.text('per', tableX + 8, tableTop + 7, {
+          width: colWidths.per - 16,
+          align: 'center',
+        });
         tableX += colWidths.per;
-        
-        doc.text('Amount', tableX + 8, tableTop + 7, { width: colWidths.amount - 16, align: 'right' });
+
+        doc.text('Amount', tableX + 8, tableTop + 7, {
+          width: colWidths.amount - 16,
+          align: 'right',
+        });
         tableX += colWidths.amount;
-        
-        doc.text('VAT %', tableX + 8, tableTop + 7, { width: colWidths.vatPercent - 16, align: 'center' });
+
+        doc.text('VAT %', tableX + 8, tableTop + 7, {
+          width: colWidths.vatPercent - 16,
+          align: 'center',
+        });
 
         // Table Rows - Clean styling with subtle borders
         let rowY = tableTop + rowHeight;
@@ -2410,108 +2492,195 @@ export class ReportGeneratorService {
             doc.addPage();
             rowY = margin + 20;
             // Redraw table header on new page
-            doc.fillColor(colors.backgroundLight).rect(tableStartX, rowY, tableWidth, rowHeight).fill();
+            doc
+              .fillColor(colors.backgroundLight)
+              .rect(tableStartX, rowY, tableWidth, rowHeight)
+              .fill();
             doc.strokeColor(colors.border).lineWidth(0.5);
             doc.rect(tableStartX, rowY, tableWidth, rowHeight).stroke();
-            
+
             // Redraw column dividers for header
             let headerDividerX = tableStartX;
-            doc.moveTo(headerDividerX + colWidths.siNo, rowY).lineTo(headerDividerX + colWidths.siNo, rowY + rowHeight).stroke();
+            doc
+              .moveTo(headerDividerX + colWidths.siNo, rowY)
+              .lineTo(headerDividerX + colWidths.siNo, rowY + rowHeight)
+              .stroke();
             headerDividerX += colWidths.siNo;
-            doc.moveTo(headerDividerX + colWidths.particulars, rowY).lineTo(headerDividerX + colWidths.particulars, rowY + rowHeight).stroke();
+            doc
+              .moveTo(headerDividerX + colWidths.particulars, rowY)
+              .lineTo(headerDividerX + colWidths.particulars, rowY + rowHeight)
+              .stroke();
             headerDividerX += colWidths.particulars;
-            doc.moveTo(headerDividerX + colWidths.quantity, rowY).lineTo(headerDividerX + colWidths.quantity, rowY + rowHeight).stroke();
+            doc
+              .moveTo(headerDividerX + colWidths.quantity, rowY)
+              .lineTo(headerDividerX + colWidths.quantity, rowY + rowHeight)
+              .stroke();
             headerDividerX += colWidths.quantity;
-            doc.moveTo(headerDividerX + colWidths.rate, rowY).lineTo(headerDividerX + colWidths.rate, rowY + rowHeight).stroke();
+            doc
+              .moveTo(headerDividerX + colWidths.rate, rowY)
+              .lineTo(headerDividerX + colWidths.rate, rowY + rowHeight)
+              .stroke();
             headerDividerX += colWidths.rate;
-            doc.moveTo(headerDividerX + colWidths.per, rowY).lineTo(headerDividerX + colWidths.per, rowY + rowHeight).stroke();
+            doc
+              .moveTo(headerDividerX + colWidths.per, rowY)
+              .lineTo(headerDividerX + colWidths.per, rowY + rowHeight)
+              .stroke();
             headerDividerX += colWidths.per;
-            doc.moveTo(headerDividerX + colWidths.amount, rowY).lineTo(headerDividerX + colWidths.amount, rowY + rowHeight).stroke();
-            
+            doc
+              .moveTo(headerDividerX + colWidths.amount, rowY)
+              .lineTo(headerDividerX + colWidths.amount, rowY + rowHeight)
+              .stroke();
+
             doc.fontSize(9).font('Helvetica-Bold').fillColor(colors.text);
             tableX = tableStartX;
-            doc.text('SI No.', tableX + 8, rowY + 7, { width: colWidths.siNo - 16, align: 'center' });
+            doc.text('SI No.', tableX + 8, rowY + 7, {
+              width: colWidths.siNo - 16,
+              align: 'center',
+            });
             tableX += colWidths.siNo;
-            doc.text('Particulars', tableX + 8, rowY + 7, { width: colWidths.particulars - 16 });
+            doc.text('Particulars', tableX + 8, rowY + 7, {
+              width: colWidths.particulars - 16,
+            });
             tableX += colWidths.particulars;
-            doc.text('Quantity', tableX + 8, rowY + 7, { width: colWidths.quantity - 16, align: 'center' });
+            doc.text('Quantity', tableX + 8, rowY + 7, {
+              width: colWidths.quantity - 16,
+              align: 'center',
+            });
             tableX += colWidths.quantity;
-            doc.text('Rate', tableX + 8, rowY + 7, { width: colWidths.rate - 16, align: 'right' });
+            doc.text('Rate', tableX + 8, rowY + 7, {
+              width: colWidths.rate - 16,
+              align: 'right',
+            });
             tableX += colWidths.rate;
-            doc.text('per', tableX + 8, rowY + 7, { width: colWidths.per - 16, align: 'center' });
+            doc.text('per', tableX + 8, rowY + 7, {
+              width: colWidths.per - 16,
+              align: 'center',
+            });
             tableX += colWidths.per;
-            doc.text('Amount', tableX + 8, rowY + 7, { width: colWidths.amount - 16, align: 'right' });
+            doc.text('Amount', tableX + 8, rowY + 7, {
+              width: colWidths.amount - 16,
+              align: 'right',
+            });
             tableX += colWidths.amount;
-            doc.text('VAT %', tableX + 8, rowY + 7, { width: colWidths.vatPercent - 16, align: 'center' });
+            doc.text('VAT %', tableX + 8, rowY + 7, {
+              width: colWidths.vatPercent - 16,
+              align: 'center',
+            });
             rowY += rowHeight;
           }
 
           // Draw row border
           doc.strokeColor(colors.border).lineWidth(0.5);
           doc.rect(tableStartX, rowY, tableWidth, rowHeight).stroke();
-          
+
           // Draw column dividers for this row
           dividerX = tableStartX;
-          doc.moveTo(dividerX + colWidths.siNo, rowY).lineTo(dividerX + colWidths.siNo, rowY + rowHeight).stroke();
+          doc
+            .moveTo(dividerX + colWidths.siNo, rowY)
+            .lineTo(dividerX + colWidths.siNo, rowY + rowHeight)
+            .stroke();
           dividerX += colWidths.siNo;
-          doc.moveTo(dividerX + colWidths.particulars, rowY).lineTo(dividerX + colWidths.particulars, rowY + rowHeight).stroke();
+          doc
+            .moveTo(dividerX + colWidths.particulars, rowY)
+            .lineTo(dividerX + colWidths.particulars, rowY + rowHeight)
+            .stroke();
           dividerX += colWidths.particulars;
-          doc.moveTo(dividerX + colWidths.quantity, rowY).lineTo(dividerX + colWidths.quantity, rowY + rowHeight).stroke();
+          doc
+            .moveTo(dividerX + colWidths.quantity, rowY)
+            .lineTo(dividerX + colWidths.quantity, rowY + rowHeight)
+            .stroke();
           dividerX += colWidths.quantity;
-          doc.moveTo(dividerX + colWidths.rate, rowY).lineTo(dividerX + colWidths.rate, rowY + rowHeight).stroke();
+          doc
+            .moveTo(dividerX + colWidths.rate, rowY)
+            .lineTo(dividerX + colWidths.rate, rowY + rowHeight)
+            .stroke();
           dividerX += colWidths.rate;
-          doc.moveTo(dividerX + colWidths.per, rowY).lineTo(dividerX + colWidths.per, rowY + rowHeight).stroke();
+          doc
+            .moveTo(dividerX + colWidths.per, rowY)
+            .lineTo(dividerX + colWidths.per, rowY + rowHeight)
+            .stroke();
           dividerX += colWidths.per;
-          doc.moveTo(dividerX + colWidths.amount, rowY).lineTo(dividerX + colWidths.amount, rowY + rowHeight).stroke();
+          doc
+            .moveTo(dividerX + colWidths.amount, rowY)
+            .lineTo(dividerX + colWidths.amount, rowY + rowHeight)
+            .stroke();
           dividerX += colWidths.amount;
 
           tableX = tableStartX;
           doc.fontSize(9).font('Helvetica').fillColor(colors.text);
 
           // SI No.
-          doc.text((index + 1).toString(), tableX + 8, rowY + 7, { width: colWidths.siNo - 16, align: 'center' });
+          doc.text((index + 1).toString(), tableX + 8, rowY + 7, {
+            width: colWidths.siNo - 16,
+            align: 'center',
+          });
           tableX += colWidths.siNo;
 
           // Particulars
-          doc.text(item.itemName || '', tableX + 8, rowY + 7, { width: colWidths.particulars - 16 });
+          doc.text(item.itemName || '', tableX + 8, rowY + 7, {
+            width: colWidths.particulars - 16,
+          });
           tableX += colWidths.particulars;
 
           // Quantity
-          doc.text(parseFloat(item.quantity || '0').toString(), tableX + 8, rowY + 7, { width: colWidths.quantity - 16, align: 'center' });
+          doc.text(
+            parseFloat(item.quantity || '0').toString(),
+            tableX + 8,
+            rowY + 7,
+            { width: colWidths.quantity - 16, align: 'center' },
+          );
           tableX += colWidths.quantity;
 
           // Rate
           const unitPrice = parseFloat(item.unitPrice || '0');
-          doc.text(unitPrice.toFixed(2), tableX + 8, rowY + 7, { width: colWidths.rate - 16, align: 'right' });
+          doc.text(unitPrice.toFixed(2), tableX + 8, rowY + 7, {
+            width: colWidths.rate - 16,
+            align: 'right',
+          });
           tableX += colWidths.rate;
 
           // per
-          doc.text(item.unitOfMeasure || 'unit', tableX + 8, rowY + 7, { width: colWidths.per - 16, align: 'center' });
+          doc.text(item.unitOfMeasure || 'unit', tableX + 8, rowY + 7, {
+            width: colWidths.per - 16,
+            align: 'center',
+          });
           tableX += colWidths.per;
 
           // Amount
           const itemAmount = parseFloat(item.amount || '0');
-          doc.text(itemAmount.toFixed(2), tableX + 8, rowY + 7, { width: colWidths.amount - 16, align: 'right' });
+          doc.text(itemAmount.toFixed(2), tableX + 8, rowY + 7, {
+            width: colWidths.amount - 16,
+            align: 'right',
+          });
           tableX += colWidths.amount;
 
           // VAT % and VAT Amount
           const vatRate = parseFloat(item.vatRate || '0');
           const vatAmount = parseFloat(item.vatAmount || '0');
-          
+
           // VAT % on first line
           doc.fontSize(9).fillColor(colors.text);
-          doc.text(`${vatRate.toFixed(2)}%`, tableX + 8, rowY + 5, { width: colWidths.vatPercent - 16, align: 'center' });
+          doc.text(`${vatRate.toFixed(2)}%`, tableX + 8, rowY + 5, {
+            width: colWidths.vatPercent - 16,
+            align: 'center',
+          });
           // VAT Amount on second line (below) - matching sample format
           doc.fontSize(8).fillColor(colors.textLight);
-          doc.text(vatAmount.toFixed(2), tableX + 8, rowY + 16, { width: colWidths.vatPercent - 16, align: 'center' });
+          doc.text(vatAmount.toFixed(2), tableX + 8, rowY + 16, {
+            width: colWidths.vatPercent - 16,
+            align: 'center',
+          });
           doc.fontSize(9).fillColor(colors.text);
 
           rowY += rowHeight;
         });
-        
+
         // Close table bottom border
         doc.strokeColor(colors.border).lineWidth(0.5);
-        doc.moveTo(tableStartX, rowY).lineTo(tableStartX + tableWidth, rowY).stroke();
+        doc
+          .moveTo(tableStartX, rowY)
+          .lineTo(tableStartX + tableWidth, rowY)
+          .stroke();
 
         doc.y = rowY + 20;
 
@@ -2528,28 +2697,49 @@ export class ReportGeneratorService {
         let vatY = totalsY;
 
         // Table header with subtle background
-        doc.fillColor(colors.backgroundLight).rect(vatSummaryX, vatY, vatTableWidth, vatRowHeight).fill();
+        doc
+          .fillColor(colors.backgroundLight)
+          .rect(vatSummaryX, vatY, vatTableWidth, vatRowHeight)
+          .fill();
         doc.strokeColor(colors.border).lineWidth(0.5);
         doc.rect(vatSummaryX, vatY, vatTableWidth, vatRowHeight).stroke();
-        
+
         // Column dividers
-        doc.moveTo(vatSummaryX + 50, vatY).lineTo(vatSummaryX + 50, vatY + vatRowHeight).stroke();
-        doc.moveTo(vatSummaryX + 125, vatY).lineTo(vatSummaryX + 125, vatY + vatRowHeight).stroke();
-        
+        doc
+          .moveTo(vatSummaryX + 50, vatY)
+          .lineTo(vatSummaryX + 50, vatY + vatRowHeight)
+          .stroke();
+        doc
+          .moveTo(vatSummaryX + 125, vatY)
+          .lineTo(vatSummaryX + 125, vatY + vatRowHeight)
+          .stroke();
+
         doc.fontSize(9).font('Helvetica-Bold').fillColor(colors.text);
-        doc.text('VAT %', vatSummaryX + 8, vatY + 7, { width: 42, align: 'center' });
-        doc.text('Assessable Value', vatSummaryX + 58, vatY + 7, { width: 67, align: 'right' });
-        doc.text('Tax Amount', vatSummaryX + 133, vatY + 7, { width: 67, align: 'right' });
+        doc.text('VAT %', vatSummaryX + 8, vatY + 7, {
+          width: 42,
+          align: 'center',
+        });
+        doc.text('Assessable Value', vatSummaryX + 58, vatY + 7, {
+          width: 67,
+          align: 'right',
+        });
+        doc.text('Tax Amount', vatSummaryX + 133, vatY + 7, {
+          width: 67,
+          align: 'right',
+        });
 
         vatY += 20;
 
         // Group line items by VAT rate
-        const vatGroups = new Map<number, { assessable: number; tax: number }>();
+        const vatGroups = new Map<
+          number,
+          { assessable: number; tax: number }
+        >();
         lineItems.forEach((item: any) => {
           const vatRate = parseFloat(item.vatRate || '0');
           const assessable = parseFloat(item.amount || '0');
           const tax = parseFloat(item.vatAmount || '0');
-          
+
           if (!vatGroups.has(vatRate)) {
             vatGroups.set(vatRate, { assessable: 0, tax: 0 });
           }
@@ -2559,7 +2749,7 @@ export class ReportGeneratorService {
         });
 
         vatY += vatRowHeight;
-        
+
         vatGroups.forEach((group, vatRate) => {
           if (vatY + vatRowHeight > doc.page.height - 100) {
             doc.addPage();
@@ -2569,20 +2759,35 @@ export class ReportGeneratorService {
           // Draw row border
           doc.strokeColor(colors.border).lineWidth(0.5);
           doc.rect(vatSummaryX, vatY, vatTableWidth, vatRowHeight).stroke();
-          doc.moveTo(vatSummaryX + 50, vatY).lineTo(vatSummaryX + 50, vatY + vatRowHeight).stroke();
-          doc.moveTo(vatSummaryX + 125, vatY).lineTo(vatSummaryX + 125, vatY + vatRowHeight).stroke();
+          doc
+            .moveTo(vatSummaryX + 50, vatY)
+            .lineTo(vatSummaryX + 50, vatY + vatRowHeight)
+            .stroke();
+          doc
+            .moveTo(vatSummaryX + 125, vatY)
+            .lineTo(vatSummaryX + 125, vatY + vatRowHeight)
+            .stroke();
 
           doc.fontSize(9).font('Helvetica').fillColor(colors.text);
-          doc.text(`${vatRate.toFixed(2)}%`, vatSummaryX + 8, vatY + 7, { width: 42, align: 'center' });
-          doc.text(group.assessable.toFixed(2), vatSummaryX + 58, vatY + 7, { width: 67, align: 'right' });
-          doc.text(group.tax.toFixed(2), vatSummaryX + 133, vatY + 7, { width: 67, align: 'right' });
+          doc.text(`${vatRate.toFixed(2)}%`, vatSummaryX + 8, vatY + 7, {
+            width: 42,
+            align: 'center',
+          });
+          doc.text(group.assessable.toFixed(2), vatSummaryX + 58, vatY + 7, {
+            width: 67,
+            align: 'right',
+          });
+          doc.text(group.tax.toFixed(2), vatSummaryX + 133, vatY + 7, {
+            width: 67,
+            align: 'right',
+          });
           vatY += vatRowHeight;
         });
 
         // VAT Summary Total Row - Bold with top border
         const totalAssessable = parseFloat(invoice.amount || '0');
         const totalVat = parseFloat(invoice.vatAmount || '0');
-        
+
         if (vatY + vatRowHeight > doc.page.height - 100) {
           doc.addPage();
           vatY = margin + 20;
@@ -2590,18 +2795,36 @@ export class ReportGeneratorService {
 
         // Top border (thicker for emphasis)
         doc.strokeColor(colors.border).lineWidth(1);
-        doc.moveTo(vatSummaryX, vatY).lineTo(vatSummaryX + vatTableWidth, vatY).stroke();
-        
+        doc
+          .moveTo(vatSummaryX, vatY)
+          .lineTo(vatSummaryX + vatTableWidth, vatY)
+          .stroke();
+
         // Row border and dividers
         doc.strokeColor(colors.border).lineWidth(0.5);
         doc.rect(vatSummaryX, vatY, vatTableWidth, vatRowHeight).stroke();
-        doc.moveTo(vatSummaryX + 50, vatY).lineTo(vatSummaryX + 50, vatY + vatRowHeight).stroke();
-        doc.moveTo(vatSummaryX + 125, vatY).lineTo(vatSummaryX + 125, vatY + vatRowHeight).stroke();
+        doc
+          .moveTo(vatSummaryX + 50, vatY)
+          .lineTo(vatSummaryX + 50, vatY + vatRowHeight)
+          .stroke();
+        doc
+          .moveTo(vatSummaryX + 125, vatY)
+          .lineTo(vatSummaryX + 125, vatY + vatRowHeight)
+          .stroke();
 
         doc.fontSize(9).font('Helvetica-Bold').fillColor(colors.text);
-        doc.text('Total', vatSummaryX + 8, vatY + 7, { width: 42, align: 'center' });
-        doc.text(totalAssessable.toFixed(2), vatSummaryX + 58, vatY + 7, { width: 67, align: 'right' });
-        doc.text(totalVat.toFixed(2), vatSummaryX + 133, vatY + 7, { width: 67, align: 'right' });
+        doc.text('Total', vatSummaryX + 8, vatY + 7, {
+          width: 42,
+          align: 'center',
+        });
+        doc.text(totalAssessable.toFixed(2), vatSummaryX + 58, vatY + 7, {
+          width: 67,
+          align: 'right',
+        });
+        doc.text(totalVat.toFixed(2), vatSummaryX + 133, vatY + 7, {
+          width: 67,
+          align: 'right',
+        });
 
         // Total Amount (Left side)
         const totalAmountX = margin;
@@ -2614,7 +2837,11 @@ export class ReportGeneratorService {
 
         const totalAmount = parseFloat(invoice.totalAmount || '0');
         doc.fontSize(12).font('Helvetica-Bold').fillColor(colors.text);
-        doc.text(`Total: ${this.formatCurrency(totalAmount, currency)}`, totalAmountX, totalY);
+        doc.text(
+          `Total: ${this.formatCurrency(totalAmount, currency)}`,
+          totalAmountX,
+          totalY,
+        );
 
         // Amount in words
         totalY += 18;
@@ -2622,18 +2849,37 @@ export class ReportGeneratorService {
         doc.fontSize(9).font('Helvetica').fillColor(colors.text);
         doc.text(`Amount Chargeable (in words):`, totalAmountX, totalY);
         totalY += 14;
-        doc.font('Helvetica-Bold').text(`UAE Dirham ${amountInWords} Only (${this.formatCurrency(totalAmount, currency)})`, totalAmountX, totalY);
+        doc
+          .font('Helvetica-Bold')
+          .text(
+            `UAE Dirham ${amountInWords} Only (${this.formatCurrency(totalAmount, currency)})`,
+            totalAmountX,
+            totalY,
+          );
 
         // VAT Amount in words
         totalY += 18;
         const vatInWords = this.numberToWords(totalVat);
-        doc.fontSize(9).font('Helvetica').text(`VAT Amount (in words):`, totalAmountX, totalY);
+        doc
+          .fontSize(9)
+          .font('Helvetica')
+          .text(`VAT Amount (in words):`, totalAmountX, totalY);
         totalY += 14;
-        doc.font('Helvetica-Bold').text(`UAE Dirham ${vatInWords} Only (${this.formatCurrency(totalVat, currency)})`, totalAmountX, totalY);
+        doc
+          .font('Helvetica-Bold')
+          .text(
+            `UAE Dirham ${vatInWords} Only (${this.formatCurrency(totalVat, currency)})`,
+            totalAmountX,
+            totalY,
+          );
 
         // E. & O.E.
         totalY += 18;
-        doc.fontSize(8).font('Helvetica').fillColor(colors.textLight).text('E. & O.E.', totalAmountX + 220, totalY);
+        doc
+          .fontSize(8)
+          .font('Helvetica')
+          .fillColor(colors.textLight)
+          .text('E. & O.E.', totalAmountX + 220, totalY);
 
         doc.moveDown(1);
 
@@ -2642,15 +2888,23 @@ export class ReportGeneratorService {
         // ============================================================================
         doc.moveDown(1.5);
         if (invoice.description || invoice.notes) {
-          doc.fontSize(10).font('Helvetica-Bold').fillColor(colors.text).text('Remarks:', margin, doc.y);
+          doc
+            .fontSize(10)
+            .font('Helvetica-Bold')
+            .fillColor(colors.text)
+            .text('Remarks:', margin, doc.y);
           doc.moveDown(0.5);
           doc.fontSize(9).font('Helvetica').fillColor(colors.text);
           if (invoice.description) {
-            doc.text(invoice.description, margin, doc.y, { width: contentWidth - 100 });
+            doc.text(invoice.description, margin, doc.y, {
+              width: contentWidth - 100,
+            });
           }
           if (invoice.notes) {
             if (invoice.description) doc.moveDown(0.5);
-            doc.text(invoice.notes, margin, doc.y, { width: contentWidth - 100 });
+            doc.text(invoice.notes, margin, doc.y, {
+              width: contentWidth - 100,
+            });
           }
           doc.moveDown(1.5);
         }
@@ -2659,34 +2913,50 @@ export class ReportGeneratorService {
         // BANK DETAILS SECTION
         // ============================================================================
         if (organization?.bankAccountNumber || organization?.bankIban) {
-          doc.fontSize(10).font('Helvetica-Bold').fillColor(colors.text).text('Company\'s Bank Details:', margin, doc.y);
+          doc
+            .fontSize(10)
+            .font('Helvetica-Bold')
+            .fillColor(colors.text)
+            .text("Company's Bank Details:", margin, doc.y);
           doc.moveDown(0.5);
           doc.fontSize(9).font('Helvetica').fillColor(colors.text);
 
           let bankY = doc.y;
           if (organization.bankAccountHolder) {
-            doc.fillColor(colors.textLight).text(`A/c Holder's Name: `, margin, bankY);
-            doc.fillColor(colors.text).text(organization.bankAccountHolder, margin + 100, bankY);
+            doc
+              .fillColor(colors.textLight)
+              .text(`A/c Holder's Name: `, margin, bankY);
+            doc
+              .fillColor(colors.text)
+              .text(organization.bankAccountHolder, margin + 100, bankY);
             bankY += 14;
           }
           if (organization.bankName) {
             doc.fillColor(colors.textLight).text(`Bank Name: `, margin, bankY);
-            doc.fillColor(colors.text).text(organization.bankName, margin + 72, bankY);
+            doc
+              .fillColor(colors.text)
+              .text(organization.bankName, margin + 72, bankY);
             bankY += 14;
           }
           if (organization.bankAccountNumber) {
             doc.fillColor(colors.textLight).text(`A/c No.: `, margin, bankY);
-            doc.fillColor(colors.text).text(organization.bankAccountNumber, margin + 58, bankY);
+            doc
+              .fillColor(colors.text)
+              .text(organization.bankAccountNumber, margin + 58, bankY);
             bankY += 14;
           }
           if (organization.bankIban) {
             doc.fillColor(colors.textLight).text(`IBAN: `, margin, bankY);
-            doc.fillColor(colors.text).text(organization.bankIban, margin + 42, bankY);
+            doc
+              .fillColor(colors.text)
+              .text(organization.bankIban, margin + 42, bankY);
             bankY += 14;
           }
           if (organization.bankBranch || organization.bankSwiftCode) {
             const branchInfo = `${organization.bankBranch || ''}${organization.bankBranch && organization.bankSwiftCode ? ' & ' : ''}${organization.bankSwiftCode || ''}`;
-            doc.fillColor(colors.textLight).text(`Branch & SWIFT Code: `, margin, bankY);
+            doc
+              .fillColor(colors.textLight)
+              .text(`Branch & SWIFT Code: `, margin, bankY);
             doc.fillColor(colors.text).text(branchInfo, margin + 125, bankY);
             bankY += 14;
           }
@@ -2700,9 +2970,14 @@ export class ReportGeneratorService {
         // ============================================================================
         const footerY = doc.page.height - 70;
         doc.fontSize(8).font('Helvetica').fillColor(colors.textLight);
-        doc.text('This is a Computer Generated Invoice', margin, footerY, { align: 'center', width: contentWidth });
+        doc.text('This is a Computer Generated Invoice', margin, footerY, {
+          align: 'center',
+          width: contentWidth,
+        });
         doc.fontSize(9).font('Helvetica').fillColor(colors.text);
-        doc.text('Authorised Signatory', margin, footerY + 20, { align: 'left' });
+        doc.text('Authorised Signatory', margin, footerY + 20, {
+          align: 'left',
+        });
 
         doc.end();
       } catch (error) {

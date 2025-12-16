@@ -91,17 +91,29 @@ export class ReconciliationReportService {
 
         doc.fontSize(10).font('Helvetica');
         const summaryY = doc.y;
-        doc.text(`Total Bank Credits: ${this.formatCurrency(record.totalBankCredits)}`, 50);
-        doc.text(`Total Bank Debits: ${this.formatCurrency(record.totalBankDebits)}`, 50);
+        doc.text(
+          `Total Bank Credits: ${this.formatCurrency(record.totalBankCredits)}`,
+          50,
+        );
+        doc.text(
+          `Total Bank Debits: ${this.formatCurrency(record.totalBankDebits)}`,
+          50,
+        );
         doc.text(`Matched Transactions: ${record.totalMatched}`, 50);
         doc.text(`Unmatched Transactions: ${record.totalUnmatched}`, 50);
         doc.text(`Adjustments: ${record.adjustmentsCount}`, 50);
 
         if (record.closingBalance) {
-          doc.text(`Closing Balance (Bank): ${this.formatCurrency(record.closingBalance)}`, 50);
+          doc.text(
+            `Closing Balance (Bank): ${this.formatCurrency(record.closingBalance)}`,
+            50,
+          );
         }
         if (record.systemClosingBalance) {
-          doc.text(`Closing Balance (System): ${this.formatCurrency(record.systemClosingBalance)}`, 50);
+          doc.text(
+            `Closing Balance (System): ${this.formatCurrency(record.systemClosingBalance)}`,
+            50,
+          );
         }
 
         doc.moveDown(1);
@@ -192,8 +204,10 @@ export class ReconciliationReportService {
     worksheet.getCell('A1').alignment = { horizontal: 'center' };
 
     worksheet.getCell('A2').value = `Organization: ${record.organization.name}`;
-    worksheet.getCell('A3').value = `Period: ${this.formatDate(record.statementPeriodStart)} to ${this.formatDate(record.statementPeriodEnd)}`;
-    worksheet.getCell('A4').value = `Reconciliation Date: ${this.formatDate(record.reconciliationDate)}`;
+    worksheet.getCell('A3').value =
+      `Period: ${this.formatDate(record.statementPeriodStart)} to ${this.formatDate(record.statementPeriodEnd)}`;
+    worksheet.getCell('A4').value =
+      `Reconciliation Date: ${this.formatDate(record.reconciliationDate)}`;
 
     // Summary
     let row = 6;
@@ -292,4 +306,3 @@ export class ReconciliationReportService {
     });
   }
 }
-

@@ -37,9 +37,7 @@ export class ContactService {
     return savedContact;
   }
 
-  private async sendContactNotificationEmail(
-    contact: Contact,
-  ): Promise<void> {
+  private async sendContactNotificationEmail(contact: Contact): Promise<void> {
     const adminEmail = this.configService.get<string>(
       'CONTACT_ADMIN_EMAIL',
       this.configService.get<string>('SMTP_FROM', 'admin@smartexpense-uae.com'),
@@ -126,12 +124,16 @@ export class ContactService {
                 <div class="label">Phone:</div>
                 <div class="value">${this.escapeHtml(contact.phone || 'Not provided')}</div>
               </div>
-              ${contact.company ? `
+              ${
+                contact.company
+                  ? `
               <div class="field">
                 <div class="label">Company:</div>
                 <div class="value">${this.escapeHtml(contact.company)}</div>
               </div>
-              ` : ''}
+              `
+                  : ''
+              }
               <div class="field">
                 <div class="label">Message:</div>
                 <div class="value">${this.escapeHtml(contact.message).replace(/\n/g, '<br>')}</div>
@@ -233,4 +235,3 @@ The SelfAccounting.AI Team
     return text.replace(/[&<>"']/g, (m) => map[m]);
   }
 }
-

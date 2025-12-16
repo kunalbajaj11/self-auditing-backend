@@ -12,7 +12,10 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { UserRole } from '../../common/enums/user-role.enum';
-import { CurrentUser, AuthenticatedUser } from '../../common/decorators/current-user.decorator';
+import {
+  CurrentUser,
+  AuthenticatedUser,
+} from '../../common/decorators/current-user.decorator';
 import { TenantGuard } from '../../common/guards/tenant.guard';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
@@ -129,4 +132,3 @@ export class UsersController {
     };
   }
 }
-

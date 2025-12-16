@@ -3,4 +3,3 @@ export enum PaymentStatus {
   PARTIAL = 'partial',
   PAID = 'paid',
 }
-

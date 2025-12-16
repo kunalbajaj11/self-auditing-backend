@@ -9,7 +9,7 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-  import { ExpenseType } from '../../../common/enums/expense-type.enum';
+import { ExpenseType } from '../../../common/enums/expense-type.enum';
 import { AttachmentInputDto } from './attachment-input.dto';
 
 export class UpdateExpenseDto {
@@ -57,4 +57,3 @@ export class UpdateExpenseDto {
   @Type(() => AttachmentInputDto)
   attachments?: AttachmentInputDto[];
 }
-

@@ -10,4 +10,3 @@ export class NotificationFilterDto {
   @IsEnum(NotificationType)
   type?: NotificationType;
 }
-

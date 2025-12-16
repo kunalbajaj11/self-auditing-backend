@@ -21,4 +21,3 @@ export class AttachmentInputDto {
   @Min(1)
   fileSize: number;
 }
-

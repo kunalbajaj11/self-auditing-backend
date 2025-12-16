@@ -13,4 +13,3 @@ import { User } from '../../entities/user.entity';
   exports: [CategoriesService],
 })
 export class CategoriesModule {}
-

@@ -46,10 +46,7 @@ export class CreditNotesService {
     });
   }
 
-  async findById(
-    organizationId: string,
-    id: string,
-  ): Promise<CreditNote> {
+  async findById(organizationId: string, id: string): Promise<CreditNote> {
     const creditNote = await this.creditNotesRepository.findOne({
       where: { id, organization: { id: organizationId }, isDeleted: false },
       relations: ['customer', 'invoice', 'applications'],
@@ -95,9 +92,7 @@ export class CreditNotesService {
       description: dto.description,
       notes: dto.notes,
       status: CreditNoteStatus.DRAFT,
-      customer: dto.customerId
-        ? { id: dto.customerId }
-        : undefined,
+      customer: dto.customerId ? { id: dto.customerId } : undefined,
       customerName: dto.customerName,
       customerTrn: dto.customerTrn,
       invoice: dto.invoiceId ? { id: dto.invoiceId } : undefined,
@@ -147,8 +142,7 @@ export class CreditNotesService {
 
     // Check if credit note has enough remaining amount
     const totalApplied = await this.getTotalAppliedAmount(creditNoteId);
-    const remainingAmount =
-      parseFloat(creditNote.totalAmount) - totalApplied;
+    const remainingAmount = parseFloat(creditNote.totalAmount) - totalApplied;
 
     if (appliedAmount > remainingAmount) {
       throw new BadRequestException(
@@ -330,12 +324,22 @@ export class CreditNotesService {
     const creditNote = await this.findById(organizationId, creditNoteId);
 
     // Validate status transition
-    if (creditNote.status === CreditNoteStatus.APPLIED && status !== CreditNoteStatus.APPLIED) {
-      throw new BadRequestException('Cannot change status of applied credit note');
+    if (
+      creditNote.status === CreditNoteStatus.APPLIED &&
+      status !== CreditNoteStatus.APPLIED
+    ) {
+      throw new BadRequestException(
+        'Cannot change status of applied credit note',
+      );
     }
 
-    if (creditNote.status === CreditNoteStatus.CANCELLED && status !== CreditNoteStatus.CANCELLED) {
-      throw new BadRequestException('Cannot change status of cancelled credit note');
+    if (
+      creditNote.status === CreditNoteStatus.CANCELLED &&
+      status !== CreditNoteStatus.CANCELLED
+    ) {
+      throw new BadRequestException(
+        'Cannot change status of cancelled credit note',
+      );
     }
 
     if (status === CreditNoteStatus.APPLIED && !creditNote.appliedToInvoice) {
@@ -389,4 +393,3 @@ export class CreditNotesService {
     });
   }
 }
-

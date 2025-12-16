@@ -16,13 +16,9 @@ export class PlansService {
     const plan = this.plansRepository.create({
       ...dto,
       priceMonthly:
-        dto.priceMonthly !== undefined
-          ? dto.priceMonthly.toFixed(2)
-          : null,
+        dto.priceMonthly !== undefined ? dto.priceMonthly.toFixed(2) : null,
       priceYearly:
-        dto.priceYearly !== undefined
-          ? dto.priceYearly.toFixed(2)
-          : null,
+        dto.priceYearly !== undefined ? dto.priceYearly.toFixed(2) : null,
     });
     return this.plansRepository.save(plan);
   }
@@ -62,4 +58,3 @@ export class PlansService {
     await this.plansRepository.remove(plan);
   }
 }
-

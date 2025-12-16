@@ -86,10 +86,7 @@ export class OrganizationsService {
     return organization;
   }
 
-  async update(
-    id: string,
-    dto: UpdateOrganizationDto,
-  ): Promise<Organization> {
+  async update(id: string, dto: UpdateOrganizationDto): Promise<Organization> {
     const organization = await this.findById(id);
     if (dto.name && dto.name !== organization.name) {
       const exists = await this.organizationsRepository.findOne({
@@ -161,10 +158,7 @@ export class OrganizationsService {
     const expiryDate = new Date(dto.expiryDate);
 
     // Renew the license key with the new expiry date
-    await this.licenseKeysService.findAndRenewByOrganizationId(
-      id,
-      expiryDate,
-    );
+    await this.licenseKeysService.findAndRenewByOrganizationId(id, expiryDate);
 
     // Activate the organization
     organization.status = OrganizationStatus.ACTIVE;
@@ -179,9 +173,8 @@ export class OrganizationsService {
     const organization = await this.findById(organizationId);
 
     // Get current license to track the upgrade
-    const currentLicense = await this.licenseKeysService.findByOrganizationId(
-      organizationId,
-    );
+    const currentLicense =
+      await this.licenseKeysService.findByOrganizationId(organizationId);
 
     // Validate the new license key for upgrade
     const newLicense = await this.licenseKeysService.validateForUpgrade(
@@ -196,14 +189,16 @@ export class OrganizationsService {
     organization.planType = newPlanType;
 
     // Update storage quota if the new license has one
-    if (newLicense.storageQuotaMb !== null && newLicense.storageQuotaMb !== undefined) {
+    if (
+      newLicense.storageQuotaMb !== null &&
+      newLicense.storageQuotaMb !== undefined
+    ) {
       organization.storageQuotaMb = newLicense.storageQuotaMb;
     }
 
     // Save organization first
-    const updatedOrganization = await this.organizationsRepository.save(
-      organization,
-    );
+    const updatedOrganization =
+      await this.organizationsRepository.save(organization);
 
     // Mark the new license as consumed and link it to the organization
     await this.licenseKeysService.markAsConsumed(
@@ -240,4 +235,3 @@ export class OrganizationsService {
     return updatedOrganization;
   }
 }
-

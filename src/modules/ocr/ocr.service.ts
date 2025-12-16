@@ -320,20 +320,619 @@ export class OcrService {
 
   /**
    * Process PDF files with Google Vision API
-   * Note: Google Vision API's textDetection can handle PDFs, but for better results
-   * with multi-page PDFs, asyncBatchAnnotateFiles is recommended (async operation)
-   * For now, we use the same textDetection method which works for single-page PDFs
-   * or the first page of multi-page PDFs
+   * Note: Google Vision API's textDetection does NOT support PDFs directly.
+   * We first try to extract text using pdf-parse, then use Google Vision API
+   * on the first page converted to image if available, or fall back to text extraction.
    */
   private async processPdfWithGoogleVision(
     file: Express.Multer.File,
     organizationId?: string,
   ): Promise<OcrResult> {
-    // For PDFs, we can use the same processWithGoogleVision method
-    // Google Vision API textDetection supports PDFs, though results may vary
-    // For production, consider implementing asyncBatchAnnotateFiles for better PDF support
-    console.log('[OCR] Processing PDF file with Google Vision API');
-    return this.processWithGoogleVision(file, organizationId);
+    console.log('[OCR] Processing PDF file');
+
+    // First, try to extract text directly from PDF using pdf-parse
+    let pdfText = '';
+    let isScannedPdf = false;
+
+    try {
+      pdfText = await this.extractTextFromPdf(file.buffer);
+      if (pdfText && pdfText.trim().length > 0) {
+        // Check if the extracted text is meaningful (not just page markers or minimal text)
+        const trimmedText = pdfText.trim();
+        const isOnlyPageMarkers = this.isOnlyPageMarkers(trimmedText);
+        const hasMinimalText = trimmedText.length < 50; // Less than 50 characters is likely not useful
+
+        if (isOnlyPageMarkers || hasMinimalText) {
+          console.log(
+            '[OCR] PDF appears to be scanned (only page markers or minimal text extracted)',
+          );
+          isScannedPdf = true;
+        } else {
+          console.log(
+            '[OCR] Successfully extracted meaningful text from PDF using pdf-parse',
+          );
+          // Parse the extracted text
+          const parsed = this.parseOcrText(pdfText);
+
+          // Detect category if organizationId is provided
+          let suggestedCategoryId: string | undefined;
+          if (organizationId) {
+            const detectedCategory =
+              await this.categoryDetectionService.detectCategoryWithAI(
+                pdfText,
+                parsed.vendorName,
+                organizationId,
+              );
+            if (detectedCategory) {
+              suggestedCategoryId = detectedCategory.id;
+            }
+          }
+
+          // Create description from full text
+          const description = this.buildDescription(pdfText, parsed);
+
+          return {
+            vendorName: parsed.vendorName,
+            vendorTrn: parsed.vendorTrn,
+            invoiceNumber: parsed.invoiceNumber,
+            amount: parsed.amount,
+            vatAmount: parsed.vatAmount,
+            expenseDate:
+              parsed.expenseDate || new Date().toISOString().substring(0, 10),
+            description: description,
+            suggestedCategoryId,
+            confidence: 0.75, // Lower confidence for PDF text extraction
+            fields: {
+              fullText: pdfText.substring(0, 500),
+              originalFileName: file.originalname,
+              mimeType: file.mimetype,
+              size: file.size,
+              provider: 'pdf-parse',
+              extractionMethod: 'pdf-parse',
+            },
+          };
+        }
+      } else {
+        isScannedPdf = true;
+      }
+    } catch (pdfError: any) {
+      console.warn(
+        '[OCR] Failed to extract text from PDF using pdf-parse:',
+        pdfError.message,
+      );
+      isScannedPdf = true;
+    }
+
+    // If PDF is scanned (image-based), convert pages to images and process with Google Vision API
+    if (isScannedPdf) {
+      console.log('[OCR] Converting PDF pages to images for OCR processing');
+      try {
+        return await this.processScannedPdf(file, organizationId);
+      } catch (error: any) {
+        console.warn('[OCR] Failed to process scanned PDF:', error.message);
+        // Fallback to mock
+        console.log('[OCR] Falling back to mock OCR for PDF');
+        return this.processMock(file, organizationId);
+      }
+    }
+
+    // Final fallback to mock
+    console.log('[OCR] Falling back to mock OCR for PDF');
+    return this.processMock(file, organizationId);
+  }
+
+  /**
+   * Check if extracted text is only page markers (e.g., "-- 1 of 3 --")
+   */
+  private isOnlyPageMarkers(text: string): boolean {
+    // Remove common page marker patterns
+    const pageMarkerPatterns = [
+      /--\s*\d+\s+of\s+\d+\s+--/gi,
+      /Page\s+\d+\s+of\s+\d+/gi,
+      /^\s*[\d\s\-]+\s*$/gm, // Lines with only numbers, spaces, and dashes
+    ];
+
+    let cleanedText = text;
+    for (const pattern of pageMarkerPatterns) {
+      cleanedText = cleanedText.replace(pattern, '');
+    }
+
+    // If after removing page markers, there's very little text left, it's likely only page markers
+    const remainingText = cleanedText.trim();
+    return remainingText.length < 20; // Less than 20 characters after removing markers
+  }
+
+  /**
+   * Process scanned PDF by converting pages to images and using Google Vision API
+   * Prioritizes invoice/tax invoice pages over delivery notes and purchase orders
+   */
+  private async processScannedPdf(
+    file: Express.Multer.File,
+    organizationId?: string,
+  ): Promise<OcrResult> {
+    // Convert PDF pages to images
+    const pageImages = await this.convertPdfPagesToImages(file.buffer);
+
+    if (pageImages.length === 0) {
+      throw new Error('Failed to convert PDF pages to images');
+    }
+
+    console.log(`[OCR] Converted ${pageImages.length} PDF page(s) to images`);
+
+    // Step 1: Identify which page is the invoice/tax invoice
+    const invoicePageIndex = await this.identifyInvoicePage(
+      pageImages,
+      file.originalname,
+    );
+
+    if (invoicePageIndex === -1) {
+      console.warn(
+        '[OCR] Could not identify invoice page, processing all pages',
+      );
+    } else {
+      console.log(
+        `[OCR] Identified page ${invoicePageIndex + 1} as invoice/tax invoice`,
+      );
+    }
+
+    // Step 2: Process pages in priority order (invoice first, then others if needed)
+    let primaryText = '';
+    let primaryResult: OcrResult | null = null;
+    const allDetections: any[] = [];
+    let totalConfidence = 0;
+    const processedPages = new Set<number>();
+
+    // First, process the invoice page if identified
+    if (invoicePageIndex !== -1) {
+      const imageBuffer = pageImages[invoicePageIndex];
+      console.log(
+        `[OCR] Processing invoice page ${invoicePageIndex + 1} (priority)`,
+      );
+
+      try {
+        const imageFile: Express.Multer.File = {
+          fieldname: 'file',
+          originalname: `${file.originalname}_page_${invoicePageIndex + 1}.png`,
+          encoding: '7bit',
+          mimetype: 'image/png',
+          buffer: imageBuffer,
+          size: imageBuffer.length,
+          destination: '',
+          filename: '',
+          path: '',
+          stream: null as any,
+        };
+
+        primaryResult = await this.processWithGoogleVision(
+          imageFile,
+          organizationId,
+        );
+        primaryText = primaryResult.fields?.fullText || '';
+        totalConfidence = primaryResult.confidence || 0;
+        processedPages.add(invoicePageIndex);
+
+        allDetections.push({
+          page: invoicePageIndex + 1,
+          confidence: primaryResult.confidence,
+          pageType: 'invoice',
+          isPrimary: true,
+        });
+
+        console.log(
+          `[OCR] Successfully processed invoice page with ${primaryText.length} characters`,
+        );
+      } catch (pageError: any) {
+        console.warn(
+          `[OCR] Failed to process invoice page:`,
+          pageError.message,
+        );
+      }
+    }
+
+    // Step 3: If invoice page didn't yield good results, process other pages as fallback
+    // But only if we didn't get meaningful data from invoice page
+    const hasGoodInvoiceData = primaryText && primaryText.trim().length > 100;
+
+    if (!hasGoodInvoiceData && invoicePageIndex === -1) {
+      // No invoice page identified, process all pages
+      console.log('[OCR] Processing all pages (no invoice page identified)');
+      for (let i = 0; i < pageImages.length; i++) {
+        if (processedPages.has(i)) continue;
+
+        const imageBuffer = pageImages[i];
+        console.log(`[OCR] Processing page ${i + 1} of ${pageImages.length}`);
+
+        try {
+          const imageFile: Express.Multer.File = {
+            fieldname: 'file',
+            originalname: `${file.originalname}_page_${i + 1}.png`,
+            encoding: '7bit',
+            mimetype: 'image/png',
+            buffer: imageBuffer,
+            size: imageBuffer.length,
+            destination: '',
+            filename: '',
+            path: '',
+            stream: null as any,
+          };
+
+          const pageResult = await this.processWithGoogleVision(
+            imageFile,
+            organizationId,
+          );
+
+          if (pageResult.fields?.fullText) {
+            if (!primaryText) {
+              primaryText = pageResult.fields.fullText;
+              primaryResult = pageResult;
+            } else {
+              primaryText += '\n\n' + pageResult.fields.fullText;
+            }
+          }
+
+          totalConfidence += pageResult.confidence || 0;
+          processedPages.add(i);
+
+          allDetections.push({
+            page: i + 1,
+            confidence: pageResult.confidence,
+            pageType: 'unknown',
+            isPrimary: false,
+          });
+        } catch (pageError: any) {
+          console.warn(
+            `[OCR] Failed to process page ${i + 1}:`,
+            pageError.message,
+          );
+        }
+      }
+    }
+
+    if (!primaryText || primaryText.trim().length === 0) {
+      throw new Error('No text extracted from PDF pages');
+    }
+
+    // Parse the text (prioritizing invoice page if available)
+    const parsed = this.parseOcrText(primaryText);
+
+    // Detect category if organizationId is provided
+    let suggestedCategoryId: string | undefined;
+    if (organizationId) {
+      const detectedCategory =
+        await this.categoryDetectionService.detectCategoryWithAI(
+          primaryText,
+          parsed.vendorName,
+          organizationId,
+        );
+      if (detectedCategory) {
+        suggestedCategoryId = detectedCategory.id;
+      }
+    }
+
+    // Create description from primary text
+    const description = this.buildDescription(primaryText, parsed);
+
+    const avgConfidence =
+      allDetections.length > 0
+        ? totalConfidence / allDetections.length
+        : primaryResult?.confidence || 0.75;
+
+    return {
+      vendorName: parsed.vendorName,
+      vendorTrn: parsed.vendorTrn,
+      invoiceNumber: parsed.invoiceNumber,
+      amount: parsed.amount,
+      vatAmount: parsed.vatAmount,
+      expenseDate:
+        parsed.expenseDate || new Date().toISOString().substring(0, 10),
+      description: description,
+      suggestedCategoryId,
+      confidence: avgConfidence,
+      fields: {
+        fullText: primaryText.substring(0, 1000), // Limit to 1000 chars
+        originalFileName: file.originalname,
+        mimeType: file.mimetype,
+        size: file.size,
+        provider: 'google-vision',
+        extractionMethod: 'pdf-to-image-then-ocr',
+        pagesProcessed: processedPages.size,
+        invoicePageIndex: invoicePageIndex !== -1 ? invoicePageIndex + 1 : null,
+        pageDetections: allDetections,
+      },
+    };
+  }
+
+  /**
+   * Identify which page is the invoice/tax invoice by scanning page content
+   * Returns the 0-based index of the invoice page, or -1 if not found
+   */
+  private async identifyInvoicePage(
+    pageImages: Buffer[],
+    originalFileName: string,
+  ): Promise<number> {
+    // Keywords that indicate an invoice page
+    const invoiceKeywords = [
+      'tax invoice',
+      'invoice',
+      'tax inv',
+      'bill',
+      'billing',
+      'amount due',
+      'total amount',
+      'vat amount',
+      'tax amount',
+      'invoice number',
+      'invoice no',
+      'inv no',
+      'inv#',
+    ];
+
+    // Keywords that indicate non-invoice pages (to exclude)
+    const nonInvoiceKeywords = [
+      'delivery note',
+      'delivery',
+      'purchase order',
+      'p.o.',
+      'po number',
+      'purchase order number',
+      'goods received',
+      'grn',
+    ];
+
+    const pageScores: Array<{ index: number; score: number; text: string }> =
+      [];
+
+    // Quick scan of each page to identify invoice
+    for (let i = 0; i < pageImages.length; i++) {
+      const imageBuffer = pageImages[i];
+
+      try {
+        // Create a mock file object for quick OCR
+        const imageFile: Express.Multer.File = {
+          fieldname: 'file',
+          originalname: `${originalFileName}_page_${i + 1}.png`,
+          encoding: '7bit',
+          mimetype: 'image/png',
+          buffer: imageBuffer,
+          size: imageBuffer.length,
+          destination: '',
+          filename: '',
+          path: '',
+          stream: null as any,
+        };
+
+        // Do a quick OCR to get text (we'll use the full OCR method)
+        // Pass undefined for organizationId for quick scan (category detection not needed)
+        const result = await this.processWithGoogleVision(imageFile, undefined);
+        const pageText = (result.fields?.fullText || '').toLowerCase();
+
+        if (pageText.length === 0) {
+          continue; // Skip pages with no text
+        }
+
+        // Calculate score: positive for invoice keywords, negative for non-invoice keywords
+        let score = 0;
+
+        // Check for invoice keywords
+        for (const keyword of invoiceKeywords) {
+          const matches = (pageText.match(new RegExp(keyword, 'gi')) || [])
+            .length;
+          score += matches * 10; // Higher weight for invoice keywords
+        }
+
+        // Check for non-invoice keywords (reduce score)
+        for (const keyword of nonInvoiceKeywords) {
+          const matches = (pageText.match(new RegExp(keyword, 'gi')) || [])
+            .length;
+          score -= matches * 15; // Higher penalty for non-invoice keywords
+        }
+
+        // Bonus for first page (often the invoice)
+        if (i === 0) {
+          score += 5;
+        }
+
+        pageScores.push({
+          index: i,
+          score: score,
+          text: pageText.substring(0, 200), // Store first 200 chars for debugging
+        });
+
+        console.log(
+          `[OCR] Page ${i + 1} score: ${score} (${pageText.substring(0, 50)}...)`,
+        );
+      } catch (error: any) {
+        console.warn(
+          `[OCR] Failed to scan page ${i + 1} for identification:`,
+          error.message,
+        );
+        continue;
+      }
+    }
+
+    // Find page with highest score
+    if (pageScores.length === 0) {
+      return -1;
+    }
+
+    // Sort by score (descending)
+    pageScores.sort((a, b) => b.score - a.score);
+
+    // Return the page with highest score, but only if score is positive
+    // (negative scores indicate non-invoice pages)
+    const bestPage = pageScores[0];
+    if (bestPage.score > 0) {
+      console.log(
+        `[OCR] Identified page ${bestPage.index + 1} as invoice (score: ${bestPage.score})`,
+      );
+      return bestPage.index;
+    }
+
+    // If no page has positive score, return first page as fallback
+    console.log(
+      '[OCR] No clear invoice page identified, using first page as fallback',
+    );
+    return 0;
+  }
+
+  /**
+   * Convert PDF pages to image buffers using pdfjs-dist
+   */
+  private async convertPdfPagesToImages(pdfBuffer: Buffer): Promise<Buffer[]> {
+    try {
+      // Dynamically import pdfjs-dist
+      let pdfjsLib: any;
+      try {
+        const pdfjsModule = await import('pdfjs-dist');
+        pdfjsLib = pdfjsModule.default || pdfjsModule;
+      } catch {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        pdfjsLib = require('pdfjs-dist');
+      }
+
+      // Import canvas for rendering (@napi-rs/canvas is available via pdfjs-dist dependency)
+      let createCanvas: any;
+      try {
+        // Try @napi-rs/canvas first (available as dependency of pdfjs-dist)
+        const napiCanvas = await import('@napi-rs/canvas');
+        createCanvas =
+          napiCanvas.createCanvas || napiCanvas.default?.createCanvas;
+      } catch {
+        try {
+          // Fallback: use require for @napi-rs/canvas
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          const canvas = require('@napi-rs/canvas');
+          createCanvas = canvas.createCanvas || canvas.default?.createCanvas;
+        } catch {
+          throw new Error(
+            'Canvas library not available for PDF rendering. Please ensure @napi-rs/canvas is installed.',
+          );
+        }
+      }
+
+      if (!createCanvas) {
+        throw new Error(
+          'Canvas library not available for PDF rendering. Please ensure @napi-rs/canvas is installed.',
+        );
+      }
+
+      // Set up pdfjs-dist worker (required for Node.js)
+      // Note: pdfjs-dist needs to be configured for Node.js environment
+      const pdfjsWorker = pdfjsLib.GlobalWorkerOptions;
+      if (pdfjsWorker && !pdfjsWorker.workerSrc) {
+        // Set worker source (pdfjs-dist includes worker files)
+        try {
+          // Try to set worker from pdfjs-dist package
+          const pdfjsPath = require.resolve('pdfjs-dist');
+          const workerPath = path.join(pdfjsPath, '../build/pdf.worker.mjs');
+          pdfjsWorker.workerSrc = workerPath;
+        } catch {
+          console.warn('[OCR] Could not set pdfjs worker, continuing anyway');
+        }
+      }
+
+      // Load the PDF document
+      const loadingTask = pdfjsLib.getDocument({
+        data: new Uint8Array(pdfBuffer),
+        verbosity: 0, // Suppress console warnings
+        useSystemFonts: true, // Use system fonts for better compatibility
+      });
+
+      const pdfDocument = await loadingTask.promise;
+      const numPages = pdfDocument.numPages;
+
+      console.log(`[OCR] PDF has ${numPages} page(s)`);
+
+      const imageBuffers: Buffer[] = [];
+
+      // Process each page (limit to first 5 pages for performance)
+      const maxPages = Math.min(numPages, 5);
+      for (let pageNum = 1; pageNum <= maxPages; pageNum++) {
+        const page = await pdfDocument.getPage(pageNum);
+        const viewport = page.getViewport({ scale: 2.0 }); // 2x scale for better OCR quality
+
+        // Create canvas
+        const canvas = createCanvas(viewport.width, viewport.height);
+        const context = canvas.getContext('2d');
+
+        // Render PDF page to canvas
+        const renderContext = {
+          canvasContext: context,
+          viewport: viewport,
+        };
+
+        await page.render(renderContext).promise;
+
+        // Convert canvas to buffer
+        const imageBuffer = canvas.toBuffer('image/png');
+        imageBuffers.push(imageBuffer);
+
+        console.log(
+          `[OCR] Converted page ${pageNum} to image (${imageBuffer.length} bytes)`,
+        );
+      }
+
+      return imageBuffers;
+    } catch (error: any) {
+      console.error('[OCR] Error converting PDF to images:', error.message);
+      throw new Error(
+        `Failed to convert PDF pages to images: ${error.message}`,
+      );
+    }
+  }
+
+  /**
+   * Extract text from PDF buffer using pdf-parse
+   */
+  private async extractTextFromPdf(buffer: Buffer): Promise<string> {
+    let pdfParse: any;
+
+    try {
+      // Try dynamic import first (ES modules)
+      try {
+        const pdfParseModule = await import('pdf-parse');
+        pdfParse = pdfParseModule.default || pdfParseModule;
+      } catch {
+        // Fallback to require (CommonJS)
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        pdfParse = require('pdf-parse');
+      }
+    } catch (error) {
+      throw new Error(
+        `Failed to load pdf-parse module: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      );
+    }
+
+    // pdf-parse v2.4.5 exports an object with PDFParse class constructor
+    const PDFParseClass = pdfParse.PDFParse || pdfParse.default?.PDFParse;
+
+    if (!PDFParseClass || typeof PDFParseClass !== 'function') {
+      throw new Error(
+        `PDFParse class not found in pdf-parse module. Please ensure pdf-parse package is properly installed.`,
+      );
+    }
+
+    // Convert buffer to Uint8Array (pdf-parse v2.4.5 requires Uint8Array)
+    const uint8Array = new Uint8Array(buffer);
+
+    // Create a new instance of PDFParse with the Uint8Array
+    const parser = new PDFParseClass(uint8Array);
+
+    // Call getText() method to extract text from PDF
+    // The result can be an object with a 'text' property or the text directly
+    const result = await parser.getText();
+    let text = '';
+
+    if (typeof result === 'string') {
+      text = result;
+    } else if (result && typeof result === 'object' && 'text' in result) {
+      text = result.text || '';
+    } else if (result) {
+      // Try to convert to string if it's something else
+      text = String(result);
+    }
+
+    return text || '';
   }
 
   private parseOcrText(text: string): {
@@ -484,6 +1083,7 @@ export class OcrService {
       value: number;
       priority: number;
       lineIndex: number;
+      context: string; // Store context for debugging
     }
 
     const amounts: AmountMatch[] = [];
@@ -503,6 +1103,16 @@ export class OcrService {
       {
         pattern:
           /total\s*(?:amount|due|payable)?\s*[:\s]*(?:AED\s*)?([\d,]+\.?\d*)/gi,
+        priority: 8,
+      },
+      // Add pattern for "Total:" or "Total " followed by amount on same or next line
+      {
+        pattern: /total\s*[:\s]+([\d,]+\.?\d*)/gi,
+        priority: 8,
+      },
+      // Pattern for amounts in table format (common in invoices)
+      {
+        pattern: /(?:total|amount)\s*[\s:]*([\d,]+\.?\d{2})/gi,
         priority: 8,
       },
     ];
@@ -528,6 +1138,7 @@ export class OcrService {
                 value: amount,
                 priority: lowerLine.includes('grand') ? 10 : 8,
                 lineIndex: i,
+                context: line,
               });
             }
           }
@@ -548,6 +1159,7 @@ export class OcrService {
               value: amount,
               priority: lowerLine.includes('grand') ? 10 : 8,
               lineIndex: i,
+              context: line,
             });
           }
         }
@@ -565,7 +1177,12 @@ export class OcrService {
               // Find line index for this match
               const matchIndex =
                 text.substring(0, match.index || 0).split('\n').length - 1;
-              amounts.push({ value: amount, priority, lineIndex: matchIndex });
+              amounts.push({
+                value: amount,
+                priority,
+                lineIndex: matchIndex,
+                context: '',
+              });
             }
           }
         }
@@ -575,7 +1192,12 @@ export class OcrService {
         if (match && match[1]) {
           const amount = parseFloat(match[1].replace(/,/g, ''));
           if (!isNaN(amount) && amount > 0 && amount < 1000000) {
-            amounts.push({ value: amount, priority, lineIndex: 0 });
+            amounts.push({
+              value: amount,
+              priority,
+              lineIndex: 0,
+              context: '',
+            });
           }
         }
       }
@@ -604,7 +1226,12 @@ export class OcrService {
             if (!isNaN(amount) && amount > 0 && amount < 1000000) {
               const matchIndex =
                 text.substring(0, match.index || 0).split('\n').length - 1;
-              amounts.push({ value: amount, priority, lineIndex: matchIndex });
+              amounts.push({
+                value: amount,
+                priority,
+                lineIndex: matchIndex,
+                context: '',
+              });
             }
           }
         }
@@ -613,13 +1240,54 @@ export class OcrService {
         if (match && match[1]) {
           const amount = parseFloat(match[1].replace(/,/g, ''));
           if (!isNaN(amount) && amount > 0 && amount < 1000000) {
-            amounts.push({ value: amount, priority, lineIndex: 0 });
+            amounts.push({
+              value: amount,
+              priority,
+              lineIndex: 0,
+              context: '',
+            });
           }
         }
       }
     }
 
-    // Priority 4: Currency patterns (AED, USD, etc.) - lower priority
+    // Priority 4: Look for amounts in table-like structures (common in invoices)
+    // Look for lines that have numbers with 2 decimal places (likely amounts)
+    const tableAmountPattern = /^[\s]*([\d,]+\.\d{2})[\s]*$/gm;
+    try {
+      const matches = text.matchAll(tableAmountPattern);
+      for (const match of matches) {
+        if (match[1]) {
+          const amount = parseFloat(match[1].replace(/,/g, ''));
+          // Only consider substantial amounts (likely not line items)
+          if (!isNaN(amount) && amount >= 10 && amount < 1000000) {
+            const matchIndex =
+              text.substring(0, match.index || 0).split('\n').length - 1;
+            // Check if this line is near "total" keywords (higher priority)
+            const lineContext = allLines[Math.max(0, matchIndex - 2)]
+              .concat(' ', allLines[matchIndex] || '')
+              .concat(
+                ' ',
+                allLines[Math.min(allLines.length - 1, matchIndex + 2)] || '',
+              )
+              .toLowerCase();
+            const priority = /total|amount|due|payable/.test(lineContext)
+              ? 6
+              : 2;
+            amounts.push({
+              value: amount,
+              priority: priority,
+              lineIndex: matchIndex,
+              context: lineContext.substring(0, 50),
+            });
+          }
+        }
+      }
+    } catch {
+      // Fallback if matchAll fails
+    }
+
+    // Priority 5: Currency patterns (AED, USD, etc.) - lower priority
     const currencyPatterns = [
       /(?:AED|USD|\$|€|£|SAR)\s*([\d,]+\.?\d*)/gi,
       /([\d,]+\.?\d*)\s*(?:AED|USD|SAR)/gi,
@@ -638,6 +1306,7 @@ export class OcrService {
                 value: amount,
                 priority: 1,
                 lineIndex: matchIndex,
+                context: '',
               });
             }
           }
@@ -647,7 +1316,12 @@ export class OcrService {
         if (match && match[1]) {
           const amount = parseFloat(match[1].replace(/,/g, ''));
           if (!isNaN(amount) && amount > 0 && amount < 1000000) {
-            amounts.push({ value: amount, priority: 1, lineIndex: 0 });
+            amounts.push({
+              value: amount,
+              priority: 1,
+              lineIndex: 0,
+              context: '',
+            });
           }
         }
       }
@@ -675,7 +1349,33 @@ export class OcrService {
         result.amount = Math.max(...topPriorityAmounts.map((a) => a.value));
       }
 
-      // Try to find VAT/Tax - improved patterns
+      console.log(
+        `[OCR] Extracted amount: ${result.amount} from ${amounts.length} potential amounts`,
+      );
+    } else {
+      // Fallback: Look for any substantial number in the text (last resort)
+      console.log(
+        '[OCR] No amounts found with patterns, trying fallback extraction',
+      );
+      const allNumbers = text.match(/([\d,]+\.?\d{0,2})/g);
+      if (allNumbers) {
+        const parsedNumbers = allNumbers
+          .map((n) => parseFloat(n.replace(/,/g, '')))
+          .filter((n) => !isNaN(n) && n >= 10 && n < 1000000)
+          .sort((a, b) => b - a); // Sort descending
+
+        if (parsedNumbers.length > 0) {
+          // Use the largest number found (likely the total)
+          result.amount = parsedNumbers[0];
+          console.log(
+            `[OCR] Fallback: Using largest number found: ${result.amount}`,
+          );
+        }
+      }
+    }
+
+    // Try to find VAT/Tax - improved patterns (only if amount was found)
+    if (result.amount) {
       const vatPatterns = [
         // "Tax (5.00%)" or "VAT: 5.00"
         /(?:vat|tax)[\s:]*\(?(\d+\.?\d*)%\)?/i,

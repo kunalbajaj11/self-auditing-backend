@@ -9,7 +9,11 @@ import {
   Body,
   UseGuards,
 } from '@nestjs/common';
-import { VendorsService, VendorFilterDto, DateFilterDto } from './vendors.service';
+import {
+  VendorsService,
+  VendorFilterDto,
+  DateFilterDto,
+} from './vendors.service';
 import { Vendor } from './vendor.entity';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -34,10 +38,7 @@ export class VendorsController {
     @CurrentUser() user: AuthenticatedUser,
     @Query() filters: VendorFilterDto,
   ) {
-    return this.vendorsService.findAll(
-      user?.organizationId as string,
-      filters,
-    );
+    return this.vendorsService.findAll(user?.organizationId as string, filters);
   }
 
   @Get('search')
@@ -51,10 +52,7 @@ export class VendorsController {
     @CurrentUser() user: AuthenticatedUser,
     @Query('q') query: string,
   ) {
-    return this.vendorsService.search(
-      user?.organizationId as string,
-      query,
-    );
+    return this.vendorsService.search(user?.organizationId as string, query);
   }
 
   @Get('top')
@@ -74,14 +72,8 @@ export class VendorsController {
 
   @Get(':id')
   @Roles(UserRole.ADMIN, UserRole.ACCOUNTANT, UserRole.APPROVER)
-  async get(
-    @CurrentUser() user: AuthenticatedUser,
-    @Param('id') id: string,
-  ) {
-    return this.vendorsService.findById(
-      user?.organizationId as string,
-      id,
-    );
+  async get(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
+    return this.vendorsService.findById(user?.organizationId as string, id);
   }
 
   @Get(':id/spend')
@@ -105,10 +97,7 @@ export class VendorsController {
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: CreateVendorDto,
   ) {
-    return this.vendorsService.create(
-      user?.organizationId as string,
-      dto,
-    );
+    return this.vendorsService.create(user?.organizationId as string, dto);
   }
 
   @Patch(':id')
@@ -118,11 +107,7 @@ export class VendorsController {
     @Param('id') id: string,
     @Body() dto: UpdateVendorDto,
   ) {
-    return this.vendorsService.update(
-      user?.organizationId as string,
-      id,
-      dto,
-    );
+    return this.vendorsService.update(user?.organizationId as string, id, dto);
   }
 
   @Delete(':id')
@@ -131,11 +116,7 @@ export class VendorsController {
     @CurrentUser() user: AuthenticatedUser,
     @Param('id') id: string,
   ) {
-    await this.vendorsService.delete(
-      user?.organizationId as string,
-      id,
-    );
+    await this.vendorsService.delete(user?.organizationId as string, id);
     return { message: 'Vendor deleted successfully' };
   }
 }
-

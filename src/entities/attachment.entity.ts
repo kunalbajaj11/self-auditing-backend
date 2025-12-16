@@ -38,4 +38,3 @@ export class Attachment extends AbstractEntity {
   @JoinColumn({ name: 'uploaded_by' })
   uploadedBy?: User | null;
 }
-

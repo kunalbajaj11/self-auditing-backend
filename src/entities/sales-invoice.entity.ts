@@ -156,4 +156,3 @@ export class SalesInvoice extends AbstractEntity {
   @Column({ name: 'public_token', length: 64, nullable: true, unique: true })
   publicToken?: string | null; // Token for public invoice viewing
 }
-

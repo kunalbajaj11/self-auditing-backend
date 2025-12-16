@@ -24,4 +24,3 @@ export class Contact extends AbstractEntity {
   @Column({ name: 'replied_at', type: 'timestamp', nullable: true })
   repliedAt?: Date | null;
 }
-

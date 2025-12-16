@@ -5,4 +5,3 @@ export enum InvoiceStatus {
   OVERDUE = 'overdue',
   CANCELLED = 'cancelled',
 }
-

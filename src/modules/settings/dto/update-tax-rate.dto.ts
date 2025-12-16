@@ -1,4 +1,13 @@
-import { IsString, IsNumber, IsOptional, IsBoolean, IsIn, Min, Max, Length } from 'class-validator';
+import {
+  IsString,
+  IsNumber,
+  IsOptional,
+  IsBoolean,
+  IsIn,
+  Min,
+  Max,
+  Length,
+} from 'class-validator';
 import { TaxRateType } from '../../../entities/tax-rate.entity';
 
 export class UpdateTaxRateDto {
@@ -31,4 +40,3 @@ export class UpdateTaxRateDto {
   @IsBoolean()
   isActive?: boolean;
 }
-

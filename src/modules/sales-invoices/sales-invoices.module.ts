@@ -37,4 +37,3 @@ import { AuditLogsModule } from '../audit-logs/audit-logs.module';
   exports: [SalesInvoicesService],
 })
 export class SalesInvoicesModule {}
-

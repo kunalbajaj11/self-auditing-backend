@@ -35,4 +35,3 @@ export class ManualEntryDto {
   @IsString()
   notes?: string;
 }
-

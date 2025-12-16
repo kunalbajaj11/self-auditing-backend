@@ -15,7 +15,16 @@ import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Expense, Accrual, Report, AuditLog, Organization, Attachment, Vendor, User]),
+    TypeOrmModule.forFeature([
+      Expense,
+      Accrual,
+      Report,
+      AuditLog,
+      Organization,
+      Attachment,
+      Vendor,
+      User,
+    ]),
     NotificationsModule,
   ],
   providers: [ReportsService, ReportGeneratorService],
@@ -23,4 +32,3 @@ import { NotificationsModule } from '../notifications/notifications.module';
   exports: [ReportsService, ReportGeneratorService],
 })
 export class ReportsModule {}
-

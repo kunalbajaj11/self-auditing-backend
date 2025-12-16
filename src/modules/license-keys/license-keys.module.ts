@@ -6,13 +6,9 @@ import { LicenseKey } from '../../entities/license-key.entity';
 import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
-  imports: [
-    TypeOrmModule.forFeature([LicenseKey]),
-    NotificationsModule,
-  ],
+  imports: [TypeOrmModule.forFeature([LicenseKey]), NotificationsModule],
   providers: [LicenseKeysService],
   controllers: [LicenseKeysController],
   exports: [LicenseKeysService],
 })
 export class LicenseKeysModule {}
-

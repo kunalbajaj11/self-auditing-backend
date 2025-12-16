@@ -13,4 +13,3 @@ export class UpdateNumberingSettingsDto {
   @IsBoolean()
   numberingWarnDuplicates?: boolean;
 }
-

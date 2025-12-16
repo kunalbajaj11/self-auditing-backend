@@ -7,4 +7,3 @@ export enum NotificationType {
   INVOICE_OVERDUE = 'invoice_overdue',
   EXPENSE_APPROVAL_PENDING = 'expense_approval_pending',
 }
-

@@ -5,4 +5,3 @@ export class UpdateExpenseStatusDto {
   @IsEnum(ExpenseStatus)
   status: ExpenseStatus;
 }
-

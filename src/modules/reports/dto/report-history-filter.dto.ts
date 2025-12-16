@@ -6,4 +6,3 @@ export class ReportHistoryFilterDto {
   @IsEnum(ReportType)
   type?: ReportType;
 }
-

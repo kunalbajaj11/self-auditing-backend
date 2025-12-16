@@ -54,7 +54,9 @@ export class EmailService {
       this.transporter.verify((error) => {
         if (error) {
           console.warn('SMTP connection failed:', error.message);
-          console.warn('Email service will be disabled. Configure SMTP settings to enable.');
+          console.warn(
+            'Email service will be disabled. Configure SMTP settings to enable.',
+          );
         } else {
           console.log('Email service configured successfully');
         }
@@ -131,7 +133,10 @@ export class EmailService {
           });
         }
       } catch (error) {
-        console.warn('Failed to use email template, falling back to default:', error);
+        console.warn(
+          'Failed to use email template, falling back to default:',
+          error,
+        );
       }
     }
 
@@ -257,18 +262,35 @@ export class EmailService {
       // The PDF is located in the backend assets directory for production compatibility
       // Try multiple possible paths to handle both development and production
       let pdfPath: string | null = null;
-      
+
       // Try path from compiled dist directory (production) - assets folder
-      const distAssetsPath = path.resolve(__dirname, '../../../assets', 'USER-MANUAL.pdf');
+      const distAssetsPath = path.resolve(
+        __dirname,
+        '../../../assets',
+        'USER-MANUAL.pdf',
+      );
       // Try path from source directory (development) - assets folder
-      const srcAssetsPath = path.resolve(__dirname, '../../../assets', 'USER-MANUAL.pdf');
+      const srcAssetsPath = path.resolve(
+        __dirname,
+        '../../../assets',
+        'USER-MANUAL.pdf',
+      );
       // Try path from compiled dist directory (legacy - docs folder at project root)
-      const distPath = path.resolve(__dirname, '../../../../..', 'docs', 'USER-MANUAL.pdf');
+      const distPath = path.resolve(
+        __dirname,
+        '../../../../..',
+        'docs',
+        'USER-MANUAL.pdf',
+      );
       // Try path from source directory (legacy - docs folder at project root)
-      const srcPath = path.resolve(__dirname, '../../../../../docs', 'USER-MANUAL.pdf');
+      const srcPath = path.resolve(
+        __dirname,
+        '../../../../../docs',
+        'USER-MANUAL.pdf',
+      );
       // Try using environment variable if set
       const envPath = this.configService.get<string>('USER_MANUAL_PDF_PATH');
-      
+
       if (envPath && fs.existsSync(envPath)) {
         pdfPath = envPath;
       } else if (fs.existsSync(distAssetsPath)) {
@@ -409,4 +431,3 @@ This is an automated welcome email from SmartExpense UAE.`;
     return this.transporter !== null;
   }
 }
-

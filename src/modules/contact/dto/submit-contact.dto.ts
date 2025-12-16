@@ -29,4 +29,3 @@ export class SubmitContactDto {
   @MinLength(10)
   message: string;
 }
-

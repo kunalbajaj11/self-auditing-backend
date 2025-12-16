@@ -6,4 +6,3 @@ export enum UserRole {
   AUDITOR = 'auditor',
   EMPLOYEE = 'employee',
 }
-

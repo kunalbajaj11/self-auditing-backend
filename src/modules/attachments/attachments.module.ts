@@ -9,9 +9,12 @@ import { ImageOptimizationService } from './image-optimization.service';
 
 @Module({
   imports: [TypeOrmModule.forFeature([Attachment, Organization])],
-  providers: [ImageOptimizationService, FileStorageService, EnterpriseLicenseGuard],
+  providers: [
+    ImageOptimizationService,
+    FileStorageService,
+    EnterpriseLicenseGuard,
+  ],
   controllers: [AttachmentsController],
   exports: [FileStorageService, ImageOptimizationService],
 })
 export class AttachmentsModule {}
-

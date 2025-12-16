@@ -152,4 +152,3 @@ export class BankReconciliationController {
     res.send(excelBuffer);
   }
 }
-

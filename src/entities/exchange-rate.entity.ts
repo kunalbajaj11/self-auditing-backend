@@ -1,10 +1,4 @@
-import {
-  Column,
-  Entity,
-  JoinColumn,
-  ManyToOne,
-  Index,
-} from 'typeorm';
+import { Column, Entity, JoinColumn, ManyToOne, Index } from 'typeorm';
 import { AbstractEntity } from './abstract.entity';
 import { Organization } from './organization.entity';
 
@@ -38,4 +32,3 @@ export class ExchangeRate extends AbstractEntity {
   @Column({ name: 'is_manual', default: false })
   isManual: boolean; // If true, was manually set and shouldn't be overwritten
 }
-

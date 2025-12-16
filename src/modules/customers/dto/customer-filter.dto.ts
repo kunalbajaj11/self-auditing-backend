@@ -11,4 +11,3 @@ export class CustomerFilterDto {
   @IsBoolean()
   isActive?: boolean;
 }
-

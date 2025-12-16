@@ -66,7 +66,13 @@ export class ForexRateService {
     // If not found, fetch from API and store
     try {
       const rate = await this.fetchRateFromAPI(fromCurrency, toCurrency, date);
-      await this.saveRate(organization, fromCurrency, toCurrency, dateString, rate);
+      await this.saveRate(
+        organization,
+        fromCurrency,
+        toCurrency,
+        dateString,
+        rate,
+      );
       return rate;
     } catch (error) {
       this.logger.error(`Failed to fetch exchange rate: ${error.message}`);
@@ -85,7 +91,12 @@ export class ForexRateService {
     toCurrency: string,
     date: Date = new Date(),
   ): Promise<number> {
-    const rate = await this.getRate(organization, fromCurrency, toCurrency, date);
+    const rate = await this.getRate(
+      organization,
+      fromCurrency,
+      toCurrency,
+      date,
+    );
     return Number((amount * rate).toFixed(2));
   }
 
@@ -160,7 +171,9 @@ export class ForexRateService {
       });
 
       if (!response.data.success) {
-        throw new Error(response.data.error?.info || 'Failed to fetch exchange rate');
+        throw new Error(
+          response.data.error?.info || 'Failed to fetch exchange rate',
+        );
       }
 
       return response.data.rates[toCurrency];
@@ -193,7 +206,9 @@ export class ForexRateService {
       }
       throw new Error('Failed to fetch exchange rate');
     } catch (error) {
-      this.logger.error(`Error fetching from ExchangeRate-API: ${error.message}`);
+      this.logger.error(
+        `Error fetching from ExchangeRate-API: ${error.message}`,
+      );
       throw error;
     }
   }
@@ -203,17 +218,32 @@ export class ForexRateService {
    */
   async updateRates(organization: Organization): Promise<void> {
     const currencies = ['USD', 'EUR', 'GBP', 'INR', 'SAR', 'AED'];
-    const baseCurrency = organization.baseCurrency || organization.currency || 'AED';
+    const baseCurrency =
+      organization.baseCurrency || organization.currency || 'AED';
     const today = new Date().toISOString().split('T')[0];
 
     for (const currency of currencies) {
       if (currency === baseCurrency) continue;
 
       try {
-        const rate = await this.fetchRateFromAPI(baseCurrency, currency, new Date());
-        await this.saveRate(organization, baseCurrency, currency, today, rate, 'api', false);
+        const rate = await this.fetchRateFromAPI(
+          baseCurrency,
+          currency,
+          new Date(),
+        );
+        await this.saveRate(
+          organization,
+          baseCurrency,
+          currency,
+          today,
+          rate,
+          'api',
+          false,
+        );
       } catch (error) {
-        this.logger.error(`Failed to update rate for ${currency}: ${error.message}`);
+        this.logger.error(
+          `Failed to update rate for ${currency}: ${error.message}`,
+        );
       }
     }
   }
@@ -230,7 +260,8 @@ export class ForexRateService {
     settlementCurrency: string,
     settlementDate: Date,
   ): Promise<number> {
-    const baseCurrency = organization.baseCurrency || organization.currency || 'AED';
+    const baseCurrency =
+      organization.baseCurrency || organization.currency || 'AED';
 
     // Convert expense to base currency at expense date
     const expenseInBase = await this.convert(
@@ -254,4 +285,3 @@ export class ForexRateService {
     return Number((settlementInBase - expenseInBase).toFixed(2));
   }
 }
-

@@ -20,7 +20,8 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
         (request) => {
           try {
             // Support access_token in query for fallback open-in-new-tab flows
-            const tokenFromQuery = (request?.query?.access_token as string) || undefined;
+            const tokenFromQuery =
+              (request?.query?.access_token as string) || undefined;
             if (tokenFromQuery && typeof tokenFromQuery === 'string') {
               return tokenFromQuery;
             }
@@ -42,4 +43,3 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     };
   }
 }
-

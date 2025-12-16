@@ -24,4 +24,3 @@ import { AuditLog } from '../../entities/audit-log.entity';
   providers: [SuperAdminService],
 })
 export class SuperAdminModule {}
-

@@ -11,4 +11,3 @@ import { Accrual } from '../../entities/accrual.entity';
   exports: [AccrualsService],
 })
 export class AccrualsModule {}
-

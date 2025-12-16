@@ -15,4 +15,3 @@ export class CreateExpenseTypeDto {
   @MaxLength(100)
   displayLabel?: string;
 }
-

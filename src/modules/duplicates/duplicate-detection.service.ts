@@ -6,7 +6,11 @@ import { Expense } from '../../entities/expense.entity';
 export interface DuplicateMatch {
   expense: Expense;
   similarityScore: number; // 0-100
-  matchReason: 'amount_vendor_date' | 'ocr_confidence' | 'receipt_hash' | 'fuzzy';
+  matchReason:
+    | 'amount_vendor_date'
+    | 'ocr_confidence'
+    | 'receipt_hash'
+    | 'fuzzy';
   confidence: 'high' | 'medium' | 'low';
 }
 
@@ -291,4 +295,3 @@ export class DuplicateDetectionService {
     return matches.some((match) => match.confidence === 'high');
   }
 }
-

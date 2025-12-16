@@ -30,4 +30,3 @@ export class InvoiceNumberSequence {
   @JoinColumn({ name: 'organization_id' })
   organization: Organization;
 }
-

@@ -60,4 +60,3 @@ export class RegisterWithLicenseDto {
   @IsOptional()
   adminPhone?: string;
 }
-

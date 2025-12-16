@@ -10,4 +10,3 @@ export enum ExpenseType {
   SHAREHOLDER_ACCOUNT = 'shareholder_account',
   COST_OF_SALES = 'cost_of_sales',
 }
-

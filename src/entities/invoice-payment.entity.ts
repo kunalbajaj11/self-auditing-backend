@@ -1,10 +1,4 @@
-import {
-  Column,
-  Entity,
-  JoinColumn,
-  ManyToOne,
-  Index,
-} from 'typeorm';
+import { Column, Entity, JoinColumn, ManyToOne, Index } from 'typeorm';
 import { AbstractEntity } from './abstract.entity';
 import { SalesInvoice } from './sales-invoice.entity';
 import { Organization } from './organization.entity';
@@ -51,4 +45,3 @@ export class InvoicePayment extends AbstractEntity {
   @Column({ type: 'text', nullable: true })
   notes?: string | null;
 }
-

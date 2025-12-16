@@ -76,7 +76,9 @@ export class AttachmentsController {
     @Req() req: Request,
     @Res({ passthrough: true }) res?: Response,
   ) {
-    this.logger.debug(`viewFile called: attachmentId=${attachmentId}, userId=${user?.userId}, orgId=${user?.organizationId}, role=${user?.role}`);
+    this.logger.debug(
+      `viewFile called: attachmentId=${attachmentId}, userId=${user?.userId}, orgId=${user?.organizationId}, role=${user?.role}`,
+    );
     // Find attachment and verify access
     const attachment = await this.attachmentsRepository.findOne({
       where: { id: attachmentId, isDeleted: false },
@@ -90,14 +92,18 @@ export class AttachmentsController {
 
     // Verify organization access
     if (attachment.organization.id !== user?.organizationId) {
-      this.logger.warn(`Forbidden: org mismatch. attachment.org=${attachment.organization.id} user.org=${user?.organizationId}`);
+      this.logger.warn(
+        `Forbidden: org mismatch. attachment.org=${attachment.organization.id} user.org=${user?.organizationId}`,
+      );
       throw new ForbiddenException('Access denied to this file');
     }
 
     // Verify user has access to the expense (employees can only see their own)
     if (user?.role === UserRole.EMPLOYEE) {
       if (attachment.expense.user.id !== user?.userId) {
-        this.logger.warn(`Forbidden: employee tried to access another user's attachment. expense.user=${attachment.expense.user.id} user=${user?.userId}`);
+        this.logger.warn(
+          `Forbidden: employee tried to access another user's attachment. expense.user=${attachment.expense.user.id} user=${user?.userId}`,
+        );
         throw new ForbiddenException('Access denied to this file');
       }
     }
@@ -113,8 +119,13 @@ export class AttachmentsController {
       req?.headers?.['x-requested-with'] === 'XMLHttpRequest';
     const wantsJson = acceptsJson || req?.query?.['json'] === '1';
     if (wantsJson) {
-      this.logger.debug(`XHR detected, returning JSON signed URL for view key=${attachment.fileKey}`);
-      const signedUrl = await this.fileStorageService.getSignedUrl(attachment.fileKey, 300);
+      this.logger.debug(
+        `XHR detected, returning JSON signed URL for view key=${attachment.fileKey}`,
+      );
+      const signedUrl = await this.fileStorageService.getSignedUrl(
+        attachment.fileKey,
+        300,
+      );
       res?.setHeader?.('Content-Type', 'application/json');
       return { url: signedUrl };
     }
@@ -122,7 +133,9 @@ export class AttachmentsController {
     // Otherwise, stream for direct browser navigation
     if (res) {
       try {
-        this.logger.debug(`Attempting to stream object inline: key=${attachment.fileKey}`);
+        this.logger.debug(
+          `Attempting to stream object inline: key=${attachment.fileKey}`,
+        );
         const obj = await this.fileStorageService.getObject(attachment.fileKey);
         if (obj.contentType) {
           res.setHeader('Content-Type', obj.contentType);
@@ -135,16 +148,26 @@ export class AttachmentsController {
         }
       } catch (e) {
         // Fallback to signed URL redirect if streaming fails
-        this.logger.error(`Streaming failed for key=${attachment.fileKey}. Falling back to signed URL. Error=${(e as Error)?.message}`);
-        const signedUrl = await this.fileStorageService.getSignedUrl(attachment.fileKey, 300);
+        this.logger.error(
+          `Streaming failed for key=${attachment.fileKey}. Falling back to signed URL. Error=${(e as Error)?.message}`,
+        );
+        const signedUrl = await this.fileStorageService.getSignedUrl(
+          attachment.fileKey,
+          300,
+        );
         res.redirect(signedUrl);
         return;
       }
     }
 
     // Fallback API usage: return signed URL
-    this.logger.debug(`Returning signed URL for API usage: key=${attachment.fileKey}`);
-    const signedUrl = await this.fileStorageService.getSignedUrl(attachment.fileKey, 300);
+    this.logger.debug(
+      `Returning signed URL for API usage: key=${attachment.fileKey}`,
+    );
+    const signedUrl = await this.fileStorageService.getSignedUrl(
+      attachment.fileKey,
+      300,
+    );
     return { url: signedUrl };
   }
 
@@ -156,7 +179,9 @@ export class AttachmentsController {
     @Req() req: Request,
     @Res({ passthrough: true }) res?: Response,
   ) {
-    this.logger.debug(`downloadFile called: attachmentId=${attachmentId}, userId=${user?.userId}, orgId=${user?.organizationId}, role=${user?.role}`);
+    this.logger.debug(
+      `downloadFile called: attachmentId=${attachmentId}, userId=${user?.userId}, orgId=${user?.organizationId}, role=${user?.role}`,
+    );
     // Find attachment and verify access
     const attachment = await this.attachmentsRepository.findOne({
       where: { id: attachmentId, isDeleted: false },
@@ -170,14 +195,18 @@ export class AttachmentsController {
 
     // Verify organization access
     if (attachment.organization.id !== user?.organizationId) {
-      this.logger.warn(`Forbidden: org mismatch. attachment.org=${attachment.organization.id} user.org=${user?.organizationId}`);
+      this.logger.warn(
+        `Forbidden: org mismatch. attachment.org=${attachment.organization.id} user.org=${user?.organizationId}`,
+      );
       throw new ForbiddenException('Access denied to this file');
     }
 
     // Verify user has access to the expense (employees can only see their own)
     if (user?.role === UserRole.EMPLOYEE) {
       if (attachment.expense.user.id !== user?.userId) {
-        this.logger.warn(`Forbidden: employee tried to download another user's attachment. expense.user=${attachment.expense.user.id} user=${user?.userId}`);
+        this.logger.warn(
+          `Forbidden: employee tried to download another user's attachment. expense.user=${attachment.expense.user.id} user=${user?.userId}`,
+        );
         throw new ForbiddenException('Access denied to this file');
       }
     }
@@ -193,42 +222,78 @@ export class AttachmentsController {
       req?.headers?.['x-requested-with'] === 'XMLHttpRequest';
     const wantsJson = acceptsJson || req?.query?.['json'] === '1';
     if (wantsJson) {
-      this.logger.debug(`XHR detected, returning JSON signed URL for download key=${attachment.fileKey}`);
-      const signedUrl = await this.fileStorageService.getSignedUrl(attachment.fileKey, 300);
+      this.logger.debug(
+        `XHR detected, returning JSON signed URL for download key=${attachment.fileKey}`,
+      );
+      const signedUrl = await this.fileStorageService.getSignedUrl(
+        attachment.fileKey,
+        300,
+      );
       res?.setHeader?.('Content-Type', 'application/json');
-      return { url: signedUrl, fileName: attachment.fileName, fileType: attachment.fileType };
+      return {
+        url: signedUrl,
+        fileName: attachment.fileName,
+        fileType: attachment.fileType,
+      };
     }
 
     // Otherwise, stream for direct browser navigation
     if (res) {
       try {
-        this.logger.debug(`Attempting to stream object as attachment: key=${attachment.fileKey}`);
+        this.logger.debug(
+          `Attempting to stream object as attachment: key=${attachment.fileKey}`,
+        );
         const obj = await this.fileStorageService.getObject(attachment.fileKey);
-        res.setHeader('Content-Disposition', `attachment; filename="${attachment.fileName}"`);
+        res.setHeader(
+          'Content-Disposition',
+          `attachment; filename="${attachment.fileName}"`,
+        );
         res.setHeader('Cache-Control', 'private, max-age=300'); // 5 minutes
-        res.setHeader('Content-Type', attachment.fileType || obj.contentType || 'application/octet-stream');
+        res.setHeader(
+          'Content-Type',
+          attachment.fileType || obj.contentType || 'application/octet-stream',
+        );
         if (obj.contentLength) {
           res.setHeader('Content-Length', obj.contentLength.toString());
         }
         if (obj.body?.pipe) {
-          this.logger.debug(`Streaming download started for key=${attachment.fileKey}`);
+          this.logger.debug(
+            `Streaming download started for key=${attachment.fileKey}`,
+          );
           obj.body.pipe(res);
           return;
         }
       } catch (e) {
         // Fallback to signed URL redirect if streaming fails
-        this.logger.error(`Streaming download failed for key=${attachment.fileKey}. Falling back to signed URL. Error=${(e as Error)?.message}`);
-        const signedUrl = await this.fileStorageService.getSignedUrl(attachment.fileKey, 300);
-        res.setHeader('Content-Disposition', `attachment; filename="${attachment.fileName}"`);
+        this.logger.error(
+          `Streaming download failed for key=${attachment.fileKey}. Falling back to signed URL. Error=${(e as Error)?.message}`,
+        );
+        const signedUrl = await this.fileStorageService.getSignedUrl(
+          attachment.fileKey,
+          300,
+        );
+        res.setHeader(
+          'Content-Disposition',
+          `attachment; filename="${attachment.fileName}"`,
+        );
         res.redirect(signedUrl);
         return;
       }
     }
 
     // API usage: return signed URL + suggested filename/type
-    this.logger.debug(`Returning signed URL for API usage (download): key=${attachment.fileKey}`);
-    const signedUrl = await this.fileStorageService.getSignedUrl(attachment.fileKey, 300);
-    return { url: signedUrl, fileName: attachment.fileName, fileType: attachment.fileType };
+    this.logger.debug(
+      `Returning signed URL for API usage (download): key=${attachment.fileKey}`,
+    );
+    const signedUrl = await this.fileStorageService.getSignedUrl(
+      attachment.fileKey,
+      300,
+    );
+    return {
+      url: signedUrl,
+      fileName: attachment.fileName,
+      fileType: attachment.fileType,
+    };
   }
 
   @Get('signed-url')
@@ -271,4 +336,3 @@ export class AttachmentsController {
     return { success: true };
   }
 }
-

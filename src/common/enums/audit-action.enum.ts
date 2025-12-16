@@ -5,4 +5,3 @@ export enum AuditAction {
   LOGIN = 'login',
   EXPORT = 'export',
 }
-

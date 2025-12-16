@@ -1,4 +1,12 @@
-import { IsOptional, IsString, IsBoolean, IsNumber, IsIn, Min, Max } from 'class-validator';
+import {
+  IsOptional,
+  IsString,
+  IsBoolean,
+  IsNumber,
+  IsIn,
+  Min,
+  Max,
+} from 'class-validator';
 
 export class UpdateCurrencySettingsDto {
   @IsOptional()
@@ -47,4 +55,3 @@ export class UpdateCurrencySettingsDto {
   @IsBoolean()
   currencyShowExchangeRate?: boolean;
 }
-

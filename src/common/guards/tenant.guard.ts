@@ -30,4 +30,3 @@ export class TenantGuard implements CanActivate {
     return true;
   }
 }
-

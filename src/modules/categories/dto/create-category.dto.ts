@@ -17,4 +17,3 @@ export class CreateCategoryDto {
   @IsString()
   expenseTypeId?: string; // For custom expense types
 }
-

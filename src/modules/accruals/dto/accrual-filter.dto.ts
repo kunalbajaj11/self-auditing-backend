@@ -14,4 +14,3 @@ export class AccrualFilterDto {
   @IsDateString()
   endDate?: string;
 }
-

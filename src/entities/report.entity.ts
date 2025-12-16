@@ -1,9 +1,4 @@
-import {
-  Column,
-  Entity,
-  JoinColumn,
-  ManyToOne,
-} from 'typeorm';
+import { Column, Entity, JoinColumn, ManyToOne } from 'typeorm';
 import { AbstractEntity } from './abstract.entity';
 import { Organization } from './organization.entity';
 import { ReportType } from '../common/enums/report-type.enum';
@@ -33,4 +28,3 @@ export class Report extends AbstractEntity {
   @JoinColumn({ name: 'generated_by' })
   generatedBy?: User | null;
 }
-

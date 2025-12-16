@@ -17,4 +17,3 @@ export class AuditLogFilterDto {
   @IsDateString()
   endDate?: string;
 }
-

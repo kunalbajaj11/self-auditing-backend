@@ -57,9 +57,9 @@ export class EmailTemplateService {
     template: EmailTemplate,
     variables: TemplateVariables,
   ): { subject: string; html: string; text?: string } {
-    let subject = template.subject;
-    let html = template.htmlBody;
-    let text = template.textBody || '';
+    const subject = template.subject;
+    const html = template.htmlBody;
+    const text = template.textBody || '';
 
     // Replace variables in format {{variableName}}
     const replaceVariables = (str: string): string => {
@@ -280,4 +280,3 @@ export class EmailTemplateService {
     ];
   }
 }
-

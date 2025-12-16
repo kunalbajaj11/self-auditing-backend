@@ -13,7 +13,10 @@ import { BankTransaction } from './bank-transaction.entity';
 import { SystemTransaction } from './system-transaction.entity';
 
 @Entity({ name: 'reconciliation_records' })
-@Index('idx_reconciliation_records_org_date', ['organization', 'reconciliationDate'])
+@Index('idx_reconciliation_records_org_date', [
+  'organization',
+  'reconciliationDate',
+])
 export class ReconciliationRecord extends AbstractEntity {
   @ManyToOne(() => Organization, {
     nullable: false,
@@ -30,10 +33,22 @@ export class ReconciliationRecord extends AbstractEntity {
   @Column({ name: 'statement_period_end', type: 'date' })
   statementPeriodEnd: string;
 
-  @Column({ name: 'total_bank_credits', type: 'decimal', precision: 18, scale: 2, default: 0 })
+  @Column({
+    name: 'total_bank_credits',
+    type: 'decimal',
+    precision: 18,
+    scale: 2,
+    default: 0,
+  })
   totalBankCredits: string;
 
-  @Column({ name: 'total_bank_debits', type: 'decimal', precision: 18, scale: 2, default: 0 })
+  @Column({
+    name: 'total_bank_debits',
+    type: 'decimal',
+    precision: 18,
+    scale: 2,
+    default: 0,
+  })
   totalBankDebits: string;
 
   @Column({ name: 'total_matched', type: 'int', default: 0 })
@@ -45,10 +60,22 @@ export class ReconciliationRecord extends AbstractEntity {
   @Column({ name: 'adjustments_count', type: 'int', default: 0 })
   adjustmentsCount: number;
 
-  @Column({ name: 'closing_balance', type: 'decimal', precision: 18, scale: 2, nullable: true })
+  @Column({
+    name: 'closing_balance',
+    type: 'decimal',
+    precision: 18,
+    scale: 2,
+    nullable: true,
+  })
   closingBalance?: string | null;
 
-  @Column({ name: 'system_closing_balance', type: 'decimal', precision: 18, scale: 2, nullable: true })
+  @Column({
+    name: 'system_closing_balance',
+    type: 'decimal',
+    precision: 18,
+    scale: 2,
+    nullable: true,
+  })
   systemClosingBalance?: string | null;
 
   @Column({ type: 'text', nullable: true })
@@ -58,10 +85,15 @@ export class ReconciliationRecord extends AbstractEntity {
   @JoinColumn({ name: 'created_by' })
   createdBy?: User | null;
 
-  @OneToMany(() => BankTransaction, (transaction) => transaction.reconciliationRecord)
+  @OneToMany(
+    () => BankTransaction,
+    (transaction) => transaction.reconciliationRecord,
+  )
   bankTransactions: BankTransaction[];
 
-  @OneToMany(() => SystemTransaction, (transaction) => transaction.reconciliationRecord)
+  @OneToMany(
+    () => SystemTransaction,
+    (transaction) => transaction.reconciliationRecord,
+  )
   systemTransactions: SystemTransaction[];
 }
-

@@ -47,4 +47,3 @@ export class AppBootstrapService implements OnModuleInit {
     this.logger.log(`Super admin ${email} created successfully.`);
   }
 }
-

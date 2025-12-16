@@ -3,4 +3,3 @@ export enum AccrualStatus {
   SETTLED = 'settled',
   AUTO_SETTLED = 'auto_settled',
 }
-

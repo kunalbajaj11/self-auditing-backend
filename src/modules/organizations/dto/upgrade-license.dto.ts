@@ -6,4 +6,3 @@ export class UpgradeLicenseDto {
   @MinLength(8)
   licenseKey: string;
 }
-

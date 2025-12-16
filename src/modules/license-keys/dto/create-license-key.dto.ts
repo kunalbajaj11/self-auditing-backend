@@ -39,4 +39,3 @@ export class CreateLicenseKeyDto {
   @IsEmail()
   email: string;
 }
-

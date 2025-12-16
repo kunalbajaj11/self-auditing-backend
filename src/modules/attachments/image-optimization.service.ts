@@ -14,7 +14,7 @@ export interface OptimizationResult {
 @Injectable()
 export class ImageOptimizationService {
   private readonly logger = new Logger(ImageOptimizationService.name);
-  
+
   // Maximum width for images (preserves aspect ratio)
   private readonly maxWidth: number;
   // JPEG quality (1-100, higher = better quality but larger file)
@@ -37,12 +37,27 @@ export class ImageOptimizationService {
   constructor(private readonly configService: ConfigService) {
     // Configuration from environment variables with sensible defaults
     // Parse as numbers since env vars are strings
-    this.maxWidth = parseInt(this.configService.get<string>('IMAGE_MAX_WIDTH', '2000'), 10);
-    this.jpegQuality = parseInt(this.configService.get<string>('IMAGE_JPEG_QUALITY', '85'), 10);
-    this.pngQuality = parseInt(this.configService.get<string>('IMAGE_PNG_QUALITY', '90'), 10);
-    this.webpQuality = parseInt(this.configService.get<string>('IMAGE_WEBP_QUALITY', '85'), 10);
-    this.enabled = this.configService.get<string>('IMAGE_OPTIMIZATION_ENABLED', 'true').toLowerCase() === 'true';
-    
+    this.maxWidth = parseInt(
+      this.configService.get<string>('IMAGE_MAX_WIDTH', '2000'),
+      10,
+    );
+    this.jpegQuality = parseInt(
+      this.configService.get<string>('IMAGE_JPEG_QUALITY', '85'),
+      10,
+    );
+    this.pngQuality = parseInt(
+      this.configService.get<string>('IMAGE_PNG_QUALITY', '90'),
+      10,
+    );
+    this.webpQuality = parseInt(
+      this.configService.get<string>('IMAGE_WEBP_QUALITY', '85'),
+      10,
+    );
+    this.enabled =
+      this.configService
+        .get<string>('IMAGE_OPTIMIZATION_ENABLED', 'true')
+        .toLowerCase() === 'true';
+
     this.logger.log(
       `Image optimization service initialized: enabled=${this.enabled}, maxWidth=${this.maxWidth}, jpegQuality=${this.jpegQuality}`,
     );
@@ -71,7 +86,9 @@ export class ImageOptimizationService {
 
     // If optimization is disabled, return original
     if (!this.enabled) {
-      this.logger.debug('Image optimization is disabled, skipping optimization');
+      this.logger.debug(
+        'Image optimization is disabled, skipping optimization',
+      );
       return {
         buffer,
         optimized: false,
@@ -82,7 +99,9 @@ export class ImageOptimizationService {
 
     // Check if it's an image file
     if (!this.isImageFile(mimeType)) {
-      this.logger.debug(`File is not an image type (${mimeType}), skipping optimization`);
+      this.logger.debug(
+        `File is not an image type (${mimeType}), skipping optimization`,
+      );
       return {
         buffer,
         optimized: false,
@@ -110,7 +129,9 @@ export class ImageOptimizationService {
           withoutEnlargement: true,
           fit: 'inside',
         });
-        this.logger.debug(`Resizing image from ${originalWidth}px to max ${this.maxWidth}px width`);
+        this.logger.debug(
+          `Resizing image from ${originalWidth}px to max ${this.maxWidth}px width`,
+        );
       }
 
       // Apply format-specific optimizations
@@ -119,37 +140,40 @@ export class ImageOptimizationService {
       let finalWidth: number | undefined;
       let finalHeight: number | undefined;
 
-      if (normalizedMimeType === 'image/jpeg' || normalizedMimeType === 'image/jpg') {
+      if (
+        normalizedMimeType === 'image/jpeg' ||
+        normalizedMimeType === 'image/jpg'
+      ) {
         optimizedBuffer = await sharpInstance
-          .jpeg({ 
+          .jpeg({
             quality: this.jpegQuality,
             progressive: true, // Progressive JPEG for better perceived performance
             mozjpeg: true, // Use mozjpeg for better compression
           })
           .toBuffer();
-        
+
         const finalMetadata = await sharp(optimizedBuffer).metadata();
         finalWidth = finalMetadata.width;
         finalHeight = finalMetadata.height;
       } else if (normalizedMimeType === 'image/png') {
         optimizedBuffer = await sharpInstance
-          .png({ 
+          .png({
             compressionLevel: 9, // Maximum compression (0-9, higher = better compression)
             adaptiveFiltering: true, // Better compression
           })
           .toBuffer();
-        
+
         const finalMetadata = await sharp(optimizedBuffer).metadata();
         finalWidth = finalMetadata.width;
         finalHeight = finalMetadata.height;
       } else if (normalizedMimeType === 'image/webp') {
         optimizedBuffer = await sharpInstance
-          .webp({ 
+          .webp({
             quality: this.webpQuality,
             effort: 6, // Higher effort = better compression (0-6)
           })
           .toBuffer();
-        
+
         const finalMetadata = await sharp(optimizedBuffer).metadata();
         finalWidth = finalMetadata.width;
         finalHeight = finalMetadata.height;
@@ -165,7 +189,8 @@ export class ImageOptimizationService {
       }
 
       const optimizedSize = optimizedBuffer.length;
-      const savingsPercent = ((originalSize - optimizedSize) / originalSize) * 100;
+      const savingsPercent =
+        ((originalSize - optimizedSize) / originalSize) * 100;
 
       this.logger.log(
         `Image optimized: ${originalSize} bytes -> ${optimizedSize} bytes (${savingsPercent.toFixed(1)}% reduction), dimensions=${finalWidth}x${finalHeight}`,
@@ -210,5 +235,3 @@ export class ImageOptimizationService {
     };
   }
 }
-
-

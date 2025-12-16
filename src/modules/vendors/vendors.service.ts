@@ -110,10 +110,7 @@ export class VendorsService {
     });
   }
 
-  async create(
-    organizationId: string,
-    dto: Partial<Vendor>,
-  ): Promise<Vendor> {
+  async create(organizationId: string, dto: Partial<Vendor>): Promise<Vendor> {
     const vendor = this.vendorsRepository.create({
       organization: { id: organizationId } as Organization,
       name: dto.name!,
@@ -200,21 +197,20 @@ export class VendorsService {
       const categoryName = exp.category?.name || 'Uncategorized';
       const existing = byCategory.get(categoryName) || { amount: 0, count: 0 };
       byCategory.set(categoryName, {
-        amount: existing.amount + Number(exp.baseAmount || exp.totalAmount || 0),
+        amount:
+          existing.amount + Number(exp.baseAmount || exp.totalAmount || 0),
         count: existing.count + 1,
       });
     });
 
     // Group by month
-    const byMonth = new Map<
-      string,
-      { amount: number; count: number }
-    >();
+    const byMonth = new Map<string, { amount: number; count: number }>();
     expenses.forEach((exp) => {
       const month = exp.expenseDate.substring(0, 7); // YYYY-MM
       const existing = byMonth.get(month) || { amount: 0, count: 0 };
       byMonth.set(month, {
-        amount: existing.amount + Number(exp.baseAmount || exp.totalAmount || 0),
+        amount:
+          existing.amount + Number(exp.baseAmount || exp.totalAmount || 0),
         count: existing.count + 1,
       });
     });
@@ -296,4 +292,3 @@ export class VendorsService {
     });
   }
 }
-

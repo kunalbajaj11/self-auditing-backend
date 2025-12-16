@@ -42,10 +42,18 @@ export class OrganizationSettings extends AbstractEntity {
   @Column({ name: 'invoice_show_terms_conditions', default: true })
   invoiceShowTermsConditions: boolean;
 
-  @Column({ name: 'invoice_default_payment_terms', length: 100, default: 'Net 30' })
+  @Column({
+    name: 'invoice_default_payment_terms',
+    length: 100,
+    default: 'Net 30',
+  })
   invoiceDefaultPaymentTerms: string;
 
-  @Column({ name: 'invoice_custom_payment_terms', type: 'text', nullable: true })
+  @Column({
+    name: 'invoice_custom_payment_terms',
+    type: 'text',
+    nullable: true,
+  })
   invoiceCustomPaymentTerms?: string | null;
 
   @Column({ name: 'invoice_default_notes', type: 'text', nullable: true })
@@ -85,13 +93,23 @@ export class OrganizationSettings extends AbstractEntity {
   @Column({ name: 'tax_registration_date', type: 'date', nullable: true })
   taxRegistrationDate?: string | null;
 
-  @Column({ name: 'tax_authority', length: 100, default: 'Federal Tax Authority' })
+  @Column({
+    name: 'tax_authority',
+    length: 100,
+    default: 'Federal Tax Authority',
+  })
   taxAuthority: string;
 
   @Column({ name: 'tax_calculation_method', length: 20, default: 'inclusive' })
   taxCalculationMethod: string;
 
-  @Column({ name: 'tax_default_rate', type: 'decimal', precision: 5, scale: 2, default: 5.0 })
+  @Column({
+    name: 'tax_default_rate',
+    type: 'decimal',
+    precision: 5,
+    scale: 2,
+    default: 5.0,
+  })
   taxDefaultRate: number;
 
   @Column({ name: 'tax_rounding_method', length: 20, default: 'standard' })
@@ -109,7 +127,13 @@ export class OrganizationSettings extends AbstractEntity {
   @Column({ name: 'tax_enable_reverse_charge', default: false })
   taxEnableReverseCharge: boolean;
 
-  @Column({ name: 'tax_reverse_charge_rate', type: 'decimal', precision: 5, scale: 2, nullable: true })
+  @Column({
+    name: 'tax_reverse_charge_rate',
+    type: 'decimal',
+    precision: 5,
+    scale: 2,
+    nullable: true,
+  })
   taxReverseChargeRate?: number | null;
 
   @Column({ name: 'tax_calculate_on_shipping', default: true })
@@ -137,7 +161,11 @@ export class OrganizationSettings extends AbstractEntity {
   @Column({ name: 'currency_track_fx_gain_loss', default: true })
   currencyTrackFxGainLoss: boolean;
 
-  @Column({ name: 'currency_fx_gain_loss_account', length: 100, nullable: true })
+  @Column({
+    name: 'currency_fx_gain_loss_account',
+    length: 100,
+    nullable: true,
+  })
   currencyFxGainLossAccount?: string | null;
 
   @Column({ name: 'currency_display_format', length: 20, default: 'symbol' })
@@ -165,4 +193,3 @@ export class OrganizationSettings extends AbstractEntity {
   @Column({ name: 'numbering_warn_duplicates', default: true })
   numberingWarnDuplicates: boolean;
 }
-

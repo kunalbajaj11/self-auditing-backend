@@ -1,10 +1,4 @@
-import {
-  Column,
-  Entity,
-  JoinColumn,
-  ManyToOne,
-  Index,
-} from 'typeorm';
+import { Column, Entity, JoinColumn, ManyToOne, Index } from 'typeorm';
 import { AbstractEntity } from './abstract.entity';
 import { Organization } from './organization.entity';
 import { Expense } from './expense.entity';
@@ -50,13 +44,16 @@ export class SystemTransaction extends AbstractEntity {
   })
   status: ReconciliationStatus;
 
-  @ManyToOne(() => ReconciliationRecord, (record) => record.systemTransactions, {
-    nullable: true,
-  })
+  @ManyToOne(
+    () => ReconciliationRecord,
+    (record) => record.systemTransactions,
+    {
+      nullable: true,
+    },
+  )
   @JoinColumn({ name: 'reconciliation_record_id' })
   reconciliationRecord?: ReconciliationRecord | null;
 
   @Column({ name: 'source', type: 'varchar', length: 50, default: 'expense' })
   source: string; // 'expense', 'credit', 'adjustment', 'reconciliation'
 }
-

@@ -40,4 +40,3 @@ export class CreatePlanDto {
   @Min(0)
   priceYearly?: number;
 }
-

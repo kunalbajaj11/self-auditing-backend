@@ -65,7 +65,7 @@ export class CategoriesService {
       },
     });
     const existingNames = new Set(existing.map((c) => c.name.toLowerCase()));
-    
+
     // Create general default categories
     const toCreate = SYSTEM_DEFAULT_CATEGORIES.filter(
       (category) => !existingNames.has(category.toLowerCase()),
@@ -99,7 +99,9 @@ export class CategoriesService {
         }),
       );
       await this.categoriesRepository.save(entities);
-      fixedAssetsToCreate.forEach((name) => existingNames.add(name.toLowerCase()));
+      fixedAssetsToCreate.forEach((name) =>
+        existingNames.add(name.toLowerCase()),
+      );
     }
 
     // Create Cost of Sales categories
@@ -175,7 +177,12 @@ export class CategoriesService {
     if (dto.expenseTypeId) {
       expenseTypeEntity = await this.categoriesRepository.manager.findOne(
         ExpenseType,
-        { where: { id: dto.expenseTypeId, organization: { id: organizationId } } },
+        {
+          where: {
+            id: dto.expenseTypeId,
+            organization: { id: organizationId },
+          },
+        },
       );
       if (!expenseTypeEntity) {
         throw new NotFoundException('Expense type not found');
@@ -222,10 +229,13 @@ export class CategoriesService {
     }
     if (dto.expenseTypeId !== undefined) {
       if (dto.expenseTypeId) {
-        const expenseTypeEntity = await this.categoriesRepository.manager.findOne(
-          ExpenseType,
-          { where: { id: dto.expenseTypeId, organization: { id: organizationId } } },
-        );
+        const expenseTypeEntity =
+          await this.categoriesRepository.manager.findOne(ExpenseType, {
+            where: {
+              id: dto.expenseTypeId,
+              organization: { id: organizationId },
+            },
+          });
         if (!expenseTypeEntity) {
           throw new NotFoundException('Expense type not found');
         }
@@ -250,4 +260,3 @@ export class CategoriesService {
     await this.categoriesRepository.save(category);
   }
 }
-

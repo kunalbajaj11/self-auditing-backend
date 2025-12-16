@@ -1,10 +1,4 @@
-import {
-  Column,
-  Entity,
-  JoinColumn,
-  ManyToOne,
-  Index,
-} from 'typeorm';
+import { Column, Entity, JoinColumn, ManyToOne, Index } from 'typeorm';
 import { AbstractEntity } from './abstract.entity';
 import { Organization } from './organization.entity';
 import { NotificationType } from '../common/enums/notification-type.enum';
@@ -39,4 +33,3 @@ export class EmailTemplate extends AbstractEntity {
   @Column({ name: 'is_active', default: true })
   isActive: boolean;
 }
-

@@ -18,9 +18,7 @@ export interface ParsedTransaction {
 
 @Injectable()
 export class BankStatementParserService {
-  async parseFile(
-    file: Express.Multer.File,
-  ): Promise<ParsedTransaction[]> {
+  async parseFile(file: Express.Multer.File): Promise<ParsedTransaction[]> {
     const fileExtension = file.originalname.split('.').pop()?.toLowerCase();
 
     switch (fileExtension) {
@@ -38,7 +36,9 @@ export class BankStatementParserService {
     }
   }
 
-  private async parseCSV(file: Express.Multer.File): Promise<ParsedTransaction[]> {
+  private async parseCSV(
+    file: Express.Multer.File,
+  ): Promise<ParsedTransaction[]> {
     return new Promise((resolve, reject) => {
       const transactions: ParsedTransaction[] = [];
       const stream = Readable.from(file.buffer);
@@ -57,18 +57,26 @@ export class BankStatementParserService {
         })
         .on('end', () => {
           if (transactions.length === 0) {
-            reject(new BadRequestException('No valid transactions found in CSV file'));
+            reject(
+              new BadRequestException(
+                'No valid transactions found in CSV file',
+              ),
+            );
           } else {
             resolve(transactions);
           }
         })
         .on('error', (error) => {
-          reject(new BadRequestException(`Error parsing CSV: ${error.message}`));
+          reject(
+            new BadRequestException(`Error parsing CSV: ${error.message}`),
+          );
         });
     });
   }
 
-  private async parseExcel(file: Express.Multer.File): Promise<ParsedTransaction[]> {
+  private async parseExcel(
+    file: Express.Multer.File,
+  ): Promise<ParsedTransaction[]> {
     try {
       const workbook = XLSX.read(file.buffer, { type: 'buffer' });
       const sheetName = workbook.SheetNames[0];
@@ -89,7 +97,9 @@ export class BankStatementParserService {
       }
 
       if (transactions.length === 0) {
-        throw new BadRequestException('No valid transactions found in Excel file');
+        throw new BadRequestException(
+          'No valid transactions found in Excel file',
+        );
       }
 
       return transactions;
@@ -101,7 +111,9 @@ export class BankStatementParserService {
     }
   }
 
-  private async parsePDF(file: Express.Multer.File): Promise<ParsedTransaction[]> {
+  private async parsePDF(
+    file: Express.Multer.File,
+  ): Promise<ParsedTransaction[]> {
     try {
       // Dynamically import pdf-parse if not already loaded
       if (!pdfParse) {
@@ -122,27 +134,27 @@ export class BankStatementParserService {
           }
         }
       }
-      
+
       // pdf-parse v2.4.5 exports an object with PDFParse class constructor
       // We need to get the PDFParse class and instantiate it
       const PDFParseClass = pdfParse.PDFParse || pdfParse.default?.PDFParse;
-      
+
       if (!PDFParseClass || typeof PDFParseClass !== 'function') {
         throw new BadRequestException(
           `PDFParse class not found in pdf-parse module. Please ensure pdf-parse package is properly installed and node_modules are up to date.`,
         );
       }
-      
+
       // Convert buffer to Uint8Array (pdf-parse v2.4.5 requires Uint8Array)
       const uint8Array = new Uint8Array(file.buffer);
-      
+
       // Create a new instance of PDFParse with the Uint8Array
       const parser = new PDFParseClass(uint8Array);
-      
+
       // Call getText() method to extract text from PDF
       const result = await parser.getText();
       const text = result.text;
-      
+
       return this.processPDFText(text);
     } catch (error) {
       if (error instanceof BadRequestException) {
@@ -170,7 +182,11 @@ export class BankStatementParserService {
           const amountMatch = line.match(/(\d+\.?\d*)/g);
           if (amountMatch && amountMatch.length > 0) {
             try {
-              const transaction = this.mapPDFLine(line, dateMatch[0], amountMatch);
+              const transaction = this.mapPDFLine(
+                line,
+                dateMatch[0],
+                amountMatch,
+              );
               if (transaction) {
                 transactions.push(transaction);
               }
@@ -193,12 +209,37 @@ export class BankStatementParserService {
 
   private mapCSVRow(row: any): ParsedTransaction | null {
     // Auto-detect column mapping
-    const dateCol = this.findColumn(row, ['date', 'transaction_date', 'txn_date', 'transactiondate']);
-    const descCol = this.findColumn(row, ['description', 'narration', 'details', 'particulars', 'desc']);
+    const dateCol = this.findColumn(row, [
+      'date',
+      'transaction_date',
+      'txn_date',
+      'transactiondate',
+    ]);
+    const descCol = this.findColumn(row, [
+      'description',
+      'narration',
+      'details',
+      'particulars',
+      'desc',
+    ]);
     const amountCol = this.findColumn(row, ['amount', 'value', 'amt']);
-    const typeCol = this.findColumn(row, ['type', 'transaction_type', 'credit_debit', 'dr_cr']);
-    const balanceCol = this.findColumn(row, ['balance', 'closing_balance', 'bal']);
-    const refCol = this.findColumn(row, ['reference', 'ref', 'cheque_no', 'transaction_id']);
+    const typeCol = this.findColumn(row, [
+      'type',
+      'transaction_type',
+      'credit_debit',
+      'dr_cr',
+    ]);
+    const balanceCol = this.findColumn(row, [
+      'balance',
+      'closing_balance',
+      'bal',
+    ]);
+    const refCol = this.findColumn(row, [
+      'reference',
+      'ref',
+      'cheque_no',
+      'transaction_id',
+    ]);
 
     if (!dateCol || !descCol || !amountCol) {
       return null;
@@ -213,9 +254,17 @@ export class BankStatementParserService {
     let type = TransactionType.DEBIT;
     if (typeCol) {
       const typeValue = String(row[typeCol]).toLowerCase();
-      if (typeValue.includes('credit') || typeValue.includes('cr') || typeValue.includes('+')) {
+      if (
+        typeValue.includes('credit') ||
+        typeValue.includes('cr') ||
+        typeValue.includes('+')
+      ) {
         type = TransactionType.CREDIT;
-      } else if (typeValue.includes('debit') || typeValue.includes('dr') || typeValue.includes('-')) {
+      } else if (
+        typeValue.includes('debit') ||
+        typeValue.includes('dr') ||
+        typeValue.includes('-')
+      ) {
         type = TransactionType.DEBIT;
       } else if (amount < 0) {
         type = TransactionType.DEBIT;
@@ -248,7 +297,11 @@ export class BankStatementParserService {
     return this.mapCSVRow(row);
   }
 
-  private mapPDFLine(line: string, dateStr: string, amounts: string[]): ParsedTransaction | null {
+  private mapPDFLine(
+    line: string,
+    dateStr: string,
+    amounts: string[],
+  ): ParsedTransaction | null {
     const parsedDate = this.parseDate(dateStr);
     if (!parsedDate) return null;
 
@@ -257,15 +310,22 @@ export class BankStatementParserService {
     if (isNaN(amount)) return null;
 
     // Extract description (everything between date and amount)
-    const descMatch = line.match(/\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}\s+(.+?)\s+\d+\.?\d*/);
-    const description = descMatch ? descMatch[1].trim() : line.replace(/\d+\.?\d*/g, '').trim();
+    const descMatch = line.match(
+      /\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}\s+(.+?)\s+\d+\.?\d*/,
+    );
+    const description = descMatch
+      ? descMatch[1].trim()
+      : line.replace(/\d+\.?\d*/g, '').trim();
 
     // Infer type from amount sign or context
     let type = TransactionType.DEBIT;
     if (amount < 0) {
       type = TransactionType.DEBIT;
       amount = Math.abs(amount);
-    } else if (line.toLowerCase().includes('credit') || line.toLowerCase().includes('cr')) {
+    } else if (
+      line.toLowerCase().includes('credit') ||
+      line.toLowerCase().includes('cr')
+    ) {
       type = TransactionType.CREDIT;
     } else {
       type = TransactionType.CREDIT; // Default assumption
@@ -340,4 +400,3 @@ export class BankStatementParserService {
     return null;
   }
 }
-

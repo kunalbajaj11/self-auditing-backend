@@ -1,4 +1,13 @@
-import { IsOptional, IsString, IsNumber, IsBoolean, IsIn, Min, Max, Length } from 'class-validator';
+import {
+  IsOptional,
+  IsString,
+  IsNumber,
+  IsBoolean,
+  IsIn,
+  Min,
+  Max,
+  Length,
+} from 'class-validator';
 import { ResetPeriod } from '../../../entities/numbering-sequence.entity';
 
 export class UpdateNumberingSequenceDto {
@@ -36,4 +45,3 @@ export class UpdateNumberingSequenceDto {
   @IsBoolean()
   isActive?: boolean;
 }
-

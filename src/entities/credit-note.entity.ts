@@ -133,7 +133,9 @@ export class CreditNote extends AbstractEntity {
   })
   appliedAmount?: string | null;
 
-  @OneToMany(() => CreditNoteApplication, (application) => application.creditNote)
+  @OneToMany(
+    () => CreditNoteApplication,
+    (application) => application.creditNote,
+  )
   applications: CreditNoteApplication[];
 }
-

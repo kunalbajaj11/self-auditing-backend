@@ -52,22 +52,13 @@ export class CustomersController {
     @CurrentUser() user: AuthenticatedUser,
     @Query('q') query: string,
   ) {
-    return this.customersService.search(
-      user?.organizationId as string,
-      query,
-    );
+    return this.customersService.search(user?.organizationId as string, query);
   }
 
   @Get(':id')
   @Roles(UserRole.ADMIN, UserRole.ACCOUNTANT, UserRole.APPROVER)
-  async get(
-    @CurrentUser() user: AuthenticatedUser,
-    @Param('id') id: string,
-  ) {
-    return this.customersService.findById(
-      user?.organizationId as string,
-      id,
-    );
+  async get(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
+    return this.customersService.findById(user?.organizationId as string, id);
   }
 
   @Post()
@@ -76,10 +67,7 @@ export class CustomersController {
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: CreateCustomerDto,
   ) {
-    return this.customersService.create(
-      user?.organizationId as string,
-      dto,
-    );
+    return this.customersService.create(user?.organizationId as string, dto);
   }
 
   @Patch(':id')
@@ -102,11 +90,7 @@ export class CustomersController {
     @CurrentUser() user: AuthenticatedUser,
     @Param('id') id: string,
   ) {
-    await this.customersService.delete(
-      user?.organizationId as string,
-      id,
-    );
+    await this.customersService.delete(user?.organizationId as string, id);
     return { message: 'Customer deleted successfully' };
   }
 }
-

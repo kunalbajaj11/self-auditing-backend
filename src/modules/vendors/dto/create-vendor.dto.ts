@@ -65,4 +65,3 @@ export class CreateVendorDto {
   @IsString()
   notes?: string;
 }
-

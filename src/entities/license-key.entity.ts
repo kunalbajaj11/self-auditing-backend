@@ -54,4 +54,3 @@ export class LicenseKey extends AbstractEntity {
   @Column({ nullable: true })
   createdById?: string | null;
 }
-

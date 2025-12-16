@@ -75,4 +75,3 @@ export class Vendor extends AbstractEntity {
   @Column({ name: 'last_used_at', type: 'timestamp', nullable: true })
   lastUsedAt?: Date | null;
 }
-

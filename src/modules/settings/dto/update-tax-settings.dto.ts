@@ -1,4 +1,12 @@
-import { IsOptional, IsString, IsBoolean, IsNumber, IsIn, Min, Max } from 'class-validator';
+import {
+  IsOptional,
+  IsString,
+  IsBoolean,
+  IsNumber,
+  IsIn,
+  Min,
+  Max,
+} from 'class-validator';
 
 export class UpdateTaxSettingsDto {
   @IsOptional()
@@ -68,4 +76,3 @@ export class UpdateTaxSettingsDto {
   @IsBoolean()
   taxShowBreakdown?: boolean;
 }
-

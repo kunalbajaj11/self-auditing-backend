@@ -8,7 +8,7 @@ import {
   Post,
   UseGuards,
 } from '@nestjs/common';
-  import { LicenseKeysService } from './license-keys.service';
+import { LicenseKeysService } from './license-keys.service';
 import { CreateLicenseKeyDto } from './dto/create-license-key.dto';
 import { RenewLicenseKeyDto } from './dto/renew-license-key.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
@@ -52,4 +52,3 @@ export class LicenseKeysController {
     return this.licenseKeysService.revoke(id);
   }
 }
-

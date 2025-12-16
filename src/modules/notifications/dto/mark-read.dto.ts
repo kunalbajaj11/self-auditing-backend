@@ -4,4 +4,3 @@ export class MarkNotificationDto {
   @IsBoolean()
   isRead: boolean;
 }
-

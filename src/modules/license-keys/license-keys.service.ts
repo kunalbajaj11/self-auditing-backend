@@ -29,7 +29,9 @@ export class LicenseKeysService {
     const key = this.generateUniqueKey();
     const now = new Date();
     const validityDays = dto.validityDays ?? 365;
-    const expiresAt = new Date(now.getTime() + validityDays * 24 * 60 * 60 * 1000);
+    const expiresAt = new Date(
+      now.getTime() + validityDays * 24 * 60 * 60 * 1000,
+    );
 
     const license = this.licenseKeysRepository.create({
       key,
@@ -47,10 +49,15 @@ export class LicenseKeysService {
     // Send email with license key
     if (dto.email) {
       try {
-        const planTypeText = dto.planType ? dto.planType.toUpperCase() : 'Custom';
-        const validityText = validityDays === 365 ? '1 year' : `${validityDays} days`;
+        const planTypeText = dto.planType
+          ? dto.planType.toUpperCase()
+          : 'Custom';
+        const validityText =
+          validityDays === 365 ? '1 year' : `${validityDays} days`;
         const maxUsersText = dto.maxUsers ? `Max Users: ${dto.maxUsers}` : '';
-        const storageText = dto.storageQuotaMb ? `Storage Quota: ${dto.storageQuotaMb} MB` : '';
+        const storageText = dto.storageQuotaMb
+          ? `Storage Quota: ${dto.storageQuotaMb} MB`
+          : '';
 
         const emailSubject = 'Your License Key - SmartExpense UAE';
         const emailHtml = `
@@ -235,7 +242,9 @@ export class LicenseKeysService {
     return this.licenseKeysRepository.save(license);
   }
 
-  async findByOrganizationId(organizationId: string): Promise<LicenseKey | null> {
+  async findByOrganizationId(
+    organizationId: string,
+  ): Promise<LicenseKey | null> {
     return this.licenseKeysRepository.findOne({
       where: { consumedByOrganizationId: organizationId },
     });
@@ -271,4 +280,3 @@ export class LicenseKeysService {
     return randomBytes(16).toString('hex').toUpperCase();
   }
 }
-

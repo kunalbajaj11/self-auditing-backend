@@ -25,4 +25,3 @@ import { ForexModule } from '../forex/forex.module';
   exports: [SettingsService],
 })
 export class SettingsModule {}
-

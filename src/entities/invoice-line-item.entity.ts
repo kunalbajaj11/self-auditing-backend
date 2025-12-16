@@ -1,10 +1,4 @@
-import {
-  Column,
-  Entity,
-  JoinColumn,
-  ManyToOne,
-  Index,
-} from 'typeorm';
+import { Column, Entity, JoinColumn, ManyToOne, Index } from 'typeorm';
 import { AbstractEntity } from './abstract.entity';
 import { SalesInvoice } from './sales-invoice.entity';
 import { Product } from '../modules/products/product.entity';
@@ -46,7 +40,12 @@ export class InvoiceLineItem extends AbstractEntity {
   @Column({ name: 'unit_price', type: 'decimal', precision: 12, scale: 2 })
   unitPrice: string;
 
-  @Column({ name: 'unit_of_measure', length: 20, nullable: true, default: 'unit' })
+  @Column({
+    name: 'unit_of_measure',
+    length: 20,
+    nullable: true,
+    default: 'unit',
+  })
   unitOfMeasure?: string | null; // e.g., 'unit', 'kg', 'hour', 'day', 'm2'
 
   @Column({
@@ -95,4 +94,3 @@ export class InvoiceLineItem extends AbstractEntity {
   @Column({ name: 'account_id', type: 'uuid', nullable: true })
   accountId?: string | null; // Chart of Accounts link (for revenue tracking)
 }
-

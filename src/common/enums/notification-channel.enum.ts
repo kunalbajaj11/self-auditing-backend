@@ -3,4 +3,3 @@ export enum NotificationChannel {
   INAPP = 'inapp',
   SMS = 'sms',
 }
-

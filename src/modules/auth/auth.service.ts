@@ -69,9 +69,7 @@ export class AuthService {
     };
   }
 
-  async registerWithLicense(
-    dto: RegisterWithLicenseDto,
-  ): Promise<AuthResult> {
+  async registerWithLicense(dto: RegisterWithLicenseDto): Promise<AuthResult> {
     const license = await this.licenseKeysService.validateForRegistration(
       dto.licenseKey.trim(),
     );
@@ -92,8 +90,7 @@ export class AuthService {
       fiscalYearStart: dto.fiscalYearStart,
       contactPerson: dto.contactPerson ?? undefined,
       contactEmail: dto.contactEmail ?? dto.adminEmail,
-      storageQuotaMb:
-        license.storageQuotaMb ?? dto.storageQuotaMb ?? undefined,
+      storageQuotaMb: license.storageQuotaMb ?? dto.storageQuotaMb ?? undefined,
       planId: undefined,
     });
 
@@ -151,7 +148,10 @@ export class AuthService {
     if (!user) {
       throw new UnauthorizedException('Invalid credentials');
     }
-    const passwordValid = await comparePassword(dto.password, user.passwordHash);
+    const passwordValid = await comparePassword(
+      dto.password,
+      user.passwordHash,
+    );
     if (!passwordValid) {
       throw new UnauthorizedException('Invalid credentials');
     }
@@ -245,7 +245,7 @@ export class AuthService {
 
   async forgotPassword(dto: ForgotPasswordDto): Promise<{ success: boolean }> {
     const user = await this.usersService.findByEmail(dto.email);
-    
+
     // Don't reveal if user exists or not for security reasons
     // Always return success to prevent email enumeration
     if (!user) {
@@ -265,8 +265,7 @@ export class AuthService {
 
     // Build reset URL
     const frontendUrl =
-      this.configService.get<string>('FRONTEND_URL') ||
-      'http://localhost:4200';
+      this.configService.get<string>('FRONTEND_URL') || 'http://localhost:4200';
     const resetUrl = `${frontendUrl}/auth/reset-password?token=${resetToken}`;
 
     // Send email
@@ -369,4 +368,3 @@ export class AuthService {
     };
   }
 }
-

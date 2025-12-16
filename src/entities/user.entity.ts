@@ -63,7 +63,11 @@ export class User extends AbstractEntity {
   @Column({ name: 'password_reset_token', length: 255, nullable: true })
   passwordResetToken?: string | null;
 
-  @Column({ name: 'password_reset_token_expires', type: 'timestamp', nullable: true })
+  @Column({
+    name: 'password_reset_token_expires',
+    type: 'timestamp',
+    nullable: true,
+  })
   passwordResetTokenExpires?: Date | null;
 
   @OneToMany(() => Expense, (expense) => expense.user)
@@ -93,4 +97,3 @@ export class User extends AbstractEntity {
   @OneToMany(() => CreditNote, (creditNote) => creditNote.user)
   creditNotes: CreditNote[];
 }
-

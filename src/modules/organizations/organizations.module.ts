@@ -18,4 +18,3 @@ import { AuditLogsModule } from '../audit-logs/audit-logs.module';
   exports: [OrganizationsService],
 })
 export class OrganizationsModule {}
-

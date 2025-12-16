@@ -23,4 +23,3 @@ export class SalesInvoiceFilterDto {
   @IsDateString()
   endDate?: string;
 }
-

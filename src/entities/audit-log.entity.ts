@@ -1,10 +1,4 @@
-import {
-  Column,
-  Entity,
-  JoinColumn,
-  ManyToOne,
-  Index,
-} from 'typeorm';
+import { Column, Entity, JoinColumn, ManyToOne, Index } from 'typeorm';
 import { AbstractEntity } from './abstract.entity';
 import { Organization } from './organization.entity';
 import { User } from './user.entity';
@@ -43,4 +37,3 @@ export class AuditLog extends AbstractEntity {
   @Column({ type: 'timestamp' })
   timestamp: Date;
 }
-

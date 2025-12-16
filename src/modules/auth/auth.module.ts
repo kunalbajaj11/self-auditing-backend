@@ -33,4 +33,3 @@ import { NotificationsModule } from '../notifications/notifications.module';
   exports: [AuthService],
 })
 export class AuthModule {}
-

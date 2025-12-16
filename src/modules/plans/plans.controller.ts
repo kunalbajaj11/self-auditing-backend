@@ -45,4 +45,3 @@ export class PlansController {
     return { success: true };
   }
 }
-

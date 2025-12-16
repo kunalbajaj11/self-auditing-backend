@@ -1,11 +1,4 @@
-import {
-  Column,
-  Entity,
-  JoinColumn,
-  ManyToOne,
-  Index,
-  Unique,
-} from 'typeorm';
+import { Column, Entity, JoinColumn, ManyToOne, Index, Unique } from 'typeorm';
 import { AbstractEntity } from '../../entities/abstract.entity';
 import { Organization } from '../../entities/organization.entity';
 
@@ -56,4 +49,3 @@ export class Product extends AbstractEntity {
   @Column({ type: 'text', nullable: true })
   notes?: string | null;
 }
-

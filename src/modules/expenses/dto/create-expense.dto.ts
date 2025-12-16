@@ -77,4 +77,3 @@ export class CreateExpenseDto {
   @Type(() => AttachmentInputDto)
   attachments?: AttachmentInputDto[];
 }
-

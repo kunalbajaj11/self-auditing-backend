@@ -71,9 +71,7 @@ export class NotificationsService {
       message: input.message,
       type: input.type,
       channel: input.channel,
-      scheduledFor: input.scheduledFor
-        ? new Date(input.scheduledFor)
-        : null,
+      scheduledFor: input.scheduledFor ? new Date(input.scheduledFor) : null,
       isRead: false,
       entityType: input.entityType ?? null,
       entityId: input.entityId ?? null,
@@ -89,8 +87,9 @@ export class NotificationsService {
 
       if (recipientEmail) {
         // Send immediately if not scheduled, or schedule for later
-        const shouldSendNow = !input.scheduledFor || new Date(input.scheduledFor) <= new Date();
-        
+        const shouldSendNow =
+          !input.scheduledFor || new Date(input.scheduledFor) <= new Date();
+
         if (shouldSendNow) {
           this.emailService
             .sendNotificationEmail(
@@ -114,7 +113,7 @@ export class NotificationsService {
       } else {
         console.warn(
           `Cannot send email notification: No recipient email found. ` +
-          `User: ${user?.id || 'null'}, Organization: ${organization.id}`
+            `User: ${user?.id || 'null'}, Organization: ${organization.id}`,
         );
       }
     }
@@ -181,10 +180,7 @@ export class NotificationsService {
     if (!notification) {
       throw new NotFoundException('Notification not found');
     }
-    if (
-      notification.user &&
-      notification.user.id !== userId
-    ) {
+    if (notification.user && notification.user.id !== userId) {
       throw new NotFoundException('Notification not accessible');
     }
 
@@ -195,4 +191,3 @@ export class NotificationsService {
     return this.notificationsRepository.save(notification);
   }
 }
-

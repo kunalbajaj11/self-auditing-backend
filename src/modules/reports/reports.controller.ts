@@ -57,9 +57,7 @@ export class ReportsController {
   @Get('filter-options')
   @Roles(UserRole.ADMIN, UserRole.ACCOUNTANT)
   async getFilterOptions(@CurrentUser() user: AuthenticatedUser) {
-    return this.reportsService.getFilterOptions(
-      user?.organizationId as string,
-    );
+    return this.reportsService.getFilterOptions(user?.organizationId as string);
   }
 
   @Post('generate')
@@ -234,7 +232,7 @@ export class ReportsController {
         reportPeriod,
         summary: reportData.summary,
       };
-      
+
       let buffer: Buffer;
       switch (format) {
         case 'pdf':
@@ -277,4 +275,3 @@ export class ReportsController {
     };
   }
 }
-

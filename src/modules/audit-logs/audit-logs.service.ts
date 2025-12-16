@@ -67,4 +67,3 @@ export class AuditLogsService {
     return query.getMany();
   }
 }
-

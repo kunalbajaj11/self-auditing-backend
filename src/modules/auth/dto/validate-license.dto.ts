@@ -5,4 +5,3 @@ export class ValidateLicenseDto {
   @IsString()
   licenseKey: string;
 }
-

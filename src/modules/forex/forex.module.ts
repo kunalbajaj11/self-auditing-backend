@@ -9,4 +9,3 @@ import { ExchangeRate } from '../../entities/exchange-rate.entity';
   exports: [ForexRateService],
 })
 export class ForexModule {}
-
