@@ -274,6 +274,7 @@ export class ExpensesService {
       baseAmount: baseAmount,
       expenseDate: dto.expenseDate,
       expectedPaymentDate: dto.expectedPaymentDate ?? null,
+      purchaseStatus: dto.purchaseStatus ?? null,
       vendorName: dto.vendorName, // Keep for backward compatibility
       vendorTrn: dto.vendorTrn,
       description: dto.description,
@@ -664,6 +665,9 @@ export class ExpensesService {
     }
     if (dto.description !== undefined) {
       expense.description = dto.description;
+    }
+    if (dto.purchaseStatus !== undefined) {
+      expense.purchaseStatus = dto.purchaseStatus;
     }
 
     if (dto.attachments) {

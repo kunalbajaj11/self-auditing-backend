@@ -60,6 +60,10 @@ export class CreateExpenseDto {
   description?: string;
 
   @IsOptional()
+  @IsString()
+  purchaseStatus?: string; // 'Purchase - Cash Paid' or 'Purchase - Accruals'
+
+  @IsOptional()
   @IsEnum(ExpenseSource)
   source?: ExpenseSource;
 

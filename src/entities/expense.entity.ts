@@ -14,6 +14,7 @@ import { ExpenseType as ExpenseTypeEnum } from '../common/enums/expense-type.enu
 import { ExpenseStatus } from '../common/enums/expense-status.enum';
 import { Attachment } from './attachment.entity';
 import { Accrual } from './accrual.entity';
+import { ExpensePayment } from './expense-payment.entity';
 import { ExpenseSource } from '../common/enums/expense-source.enum';
 import { ExpenseType } from './expense-type.entity';
 import { Vendor } from '../modules/vendors/vendor.entity';
@@ -122,6 +123,9 @@ export class Expense extends AbstractEntity {
   @Column({ name: 'expected_payment_date', type: 'date', nullable: true })
   expectedPaymentDate?: string | null;
 
+  @Column({ name: 'purchase_status', length: 50, nullable: true })
+  purchaseStatus?: string | null; // 'Purchase - Cash Paid' or 'Purchase - Accruals'
+
   @Column({
     type: 'enum',
     enum: ExpenseStatus,
@@ -163,4 +167,7 @@ export class Expense extends AbstractEntity {
     cascade: true,
   })
   accrualDetail?: Accrual | null;
+
+  @OneToMany(() => ExpensePayment, (payment) => payment.expense)
+  payments: ExpensePayment[];
 }

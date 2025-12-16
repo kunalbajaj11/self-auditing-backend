@@ -52,6 +52,10 @@ export class UpdateExpenseDto {
   description?: string;
 
   @IsOptional()
+  @IsString()
+  purchaseStatus?: string; // 'Purchase - Cash Paid' or 'Purchase - Accruals'
+
+  @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => AttachmentInputDto)

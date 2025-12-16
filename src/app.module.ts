@@ -30,7 +30,9 @@ import { CustomersModule } from './modules/customers/customers.module';
 import { SalesInvoicesModule } from './modules/sales-invoices/sales-invoices.module';
 import { CreditNotesModule } from './modules/credit-notes/credit-notes.module';
 import { DebitNotesModule } from './modules/debit-notes/debit-notes.module';
+import { ExpensePaymentsModule } from './modules/expense-payments/expense-payments.module';
 import { SettingsModule } from './modules/settings/settings.module';
+import { JournalEntriesModule } from './modules/journal-entries/journal-entries.module';
 import { AppBootstrapService } from './bootstrap/app-bootstrap.service';
 import { SanitizeAttachmentsInterceptor } from './common/interceptors/sanitize-attachments.interceptor';
 
@@ -73,7 +75,9 @@ import { SanitizeAttachmentsInterceptor } from './common/interceptors/sanitize-a
     SalesInvoicesModule,
     CreditNotesModule,
     DebitNotesModule,
+    ExpensePaymentsModule,
     SettingsModule,
+    JournalEntriesModule,
   ],
   controllers: [AppController],
   providers: [
