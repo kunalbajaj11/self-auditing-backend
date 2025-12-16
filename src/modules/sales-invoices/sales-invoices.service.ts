@@ -174,7 +174,7 @@ export class SalesInvoicesService {
 
     if (outstanding <= 0) {
       invoice.paymentStatus = PaymentStatus.PAID;
-      invoice.status = InvoiceStatus.PAID;
+      invoice.status = InvoiceStatus.TAX_INVOICE_BANK_RECEIVED;
     } else if (paidAmount > 0) {
       invoice.paymentStatus = PaymentStatus.PARTIAL;
     } else {
@@ -237,7 +237,7 @@ export class SalesInvoicesService {
       currency: dto.currency || 'AED',
       description: dto.description,
       notes: dto.notes,
-      status: InvoiceStatus.DRAFT,
+      status: InvoiceStatus.PROFORMA_INVOICE,
       paymentStatus: PaymentStatus.UNPAID,
       paidAmount: '0',
       customer: dto.customerId ? { id: dto.customerId } : undefined,
@@ -367,11 +367,18 @@ export class SalesInvoicesService {
   async checkOverdueInvoices(): Promise<void> {
     const today = new Date().toISOString().split('T')[0];
     const invoices = await this.invoicesRepository.find({
-      where: {
-        status: InvoiceStatus.SENT,
-        paymentStatus: PaymentStatus.UNPAID,
-        isDeleted: false,
-      },
+      where: [
+        {
+          status: InvoiceStatus.TAX_INVOICE_RECEIVABLE,
+          paymentStatus: PaymentStatus.UNPAID,
+          isDeleted: false,
+        },
+        {
+          status: InvoiceStatus.SENT, // Legacy status for backward compatibility
+          paymentStatus: PaymentStatus.UNPAID,
+          isDeleted: false,
+        },
+      ],
     });
 
     for (const invoice of invoices) {
@@ -400,12 +407,20 @@ export class SalesInvoicesService {
     const dueDate = threeDaysFromNow.toISOString().split('T')[0];
 
     const invoices = await this.invoicesRepository.find({
-      where: {
-        dueDate,
-        status: InvoiceStatus.SENT,
-        paymentStatus: PaymentStatus.UNPAID,
-        isDeleted: false,
-      },
+      where: [
+        {
+          dueDate,
+          status: InvoiceStatus.TAX_INVOICE_RECEIVABLE,
+          paymentStatus: PaymentStatus.UNPAID,
+          isDeleted: false,
+        },
+        {
+          dueDate,
+          status: InvoiceStatus.SENT, // Legacy status for backward compatibility
+          paymentStatus: PaymentStatus.UNPAID,
+          isDeleted: false,
+        },
+      ],
     });
 
     for (const invoice of invoices) {
@@ -568,9 +583,9 @@ export class SalesInvoicesService {
       ],
     });
 
-    // Update invoice status to SENT if it's DRAFT
-    if (invoice.status === InvoiceStatus.DRAFT) {
-      invoice.status = InvoiceStatus.SENT;
+    // Update invoice status to TAX_INVOICE_RECEIVABLE if it's PROFORMA_INVOICE or DRAFT
+    if (invoice.status === InvoiceStatus.PROFORMA_INVOICE || invoice.status === InvoiceStatus.DRAFT) {
+      invoice.status = InvoiceStatus.TAX_INVOICE_RECEIVABLE;
       await this.invoicesRepository.save(invoice);
     }
   }
@@ -655,7 +670,7 @@ export class SalesInvoicesService {
       const newOutstanding = outstandingBalance - paymentAmount;
       if (newOutstanding <= 0) {
         invoice.paymentStatus = PaymentStatus.PAID;
-        invoice.status = InvoiceStatus.PAID;
+        invoice.status = InvoiceStatus.TAX_INVOICE_BANK_RECEIVED;
         invoice.paidDate = dto.paymentDate;
       } else if (currentPaidAmount > 0 || paymentAmount > 0) {
         invoice.paymentStatus = PaymentStatus.PARTIAL;
@@ -764,13 +779,13 @@ export class SalesInvoicesService {
         organizationId,
       );
       if (outstanding <= 0) {
-        invoice.status = InvoiceStatus.PAID;
+        invoice.status = InvoiceStatus.TAX_INVOICE_BANK_RECEIVED;
         invoice.paidDate =
           remainingPayments.length > 0
             ? remainingPayments[remainingPayments.length - 1].paymentDate
             : null;
-      } else if (invoice.status === InvoiceStatus.PAID) {
-        invoice.status = InvoiceStatus.SENT;
+      } else if (invoice.status === InvoiceStatus.PAID || invoice.status === InvoiceStatus.TAX_INVOICE_BANK_RECEIVED) {
+        invoice.status = InvoiceStatus.TAX_INVOICE_RECEIVABLE;
         invoice.paidDate = null;
       }
 
@@ -803,7 +818,7 @@ export class SalesInvoicesService {
   ): Promise<SalesInvoice> {
     const invoice = await this.findById(organizationId, invoiceId);
 
-    if (invoice.status === InvoiceStatus.PAID) {
+    if (invoice.status === InvoiceStatus.PAID || invoice.status === InvoiceStatus.TAX_INVOICE_BANK_RECEIVED) {
       throw new BadRequestException('Cannot update paid invoice');
     }
 
@@ -924,8 +939,8 @@ export class SalesInvoicesService {
 
     // Validate status transition
     if (
-      invoice.status === InvoiceStatus.PAID &&
-      status !== InvoiceStatus.PAID
+      (invoice.status === InvoiceStatus.PAID || invoice.status === InvoiceStatus.TAX_INVOICE_BANK_RECEIVED) &&
+      status !== InvoiceStatus.PAID && status !== InvoiceStatus.TAX_INVOICE_BANK_RECEIVED
     ) {
       throw new BadRequestException('Cannot change status of paid invoice');
     }
@@ -940,11 +955,11 @@ export class SalesInvoicesService {
     }
 
     if (
-      status === InvoiceStatus.PAID &&
+      (status === InvoiceStatus.PAID || status === InvoiceStatus.TAX_INVOICE_BANK_RECEIVED) &&
       invoice.paymentStatus !== PaymentStatus.PAID
     ) {
       throw new BadRequestException(
-        'Cannot set status to PAID unless invoice is fully paid',
+        'Cannot set status to paid unless invoice is fully paid',
       );
     }
 
@@ -974,7 +989,7 @@ export class SalesInvoicesService {
   ): Promise<void> {
     const invoice = await this.findById(organizationId, invoiceId);
 
-    if (invoice.status === InvoiceStatus.PAID) {
+    if (invoice.status === InvoiceStatus.PAID || invoice.status === InvoiceStatus.TAX_INVOICE_BANK_RECEIVED) {
       throw new BadRequestException('Cannot delete paid invoice');
     }
 

@@ -34,10 +34,6 @@ export class EmailService {
     const smtpPort = this.configService.get<number>('SMTP_PORT', 587);
     const smtpUser = this.configService.get<string>('SMTP_USER');
     const smtpPassword = this.configService.get<string>('SMTP_PASSWORD');
-    const smtpFrom = this.configService.get<string>(
-      'SMTP_FROM',
-      'noreply@smartexpense-uae.com',
-    );
 
     if (smtpHost && smtpUser && smtpPassword) {
       this.transporter = nodemailer.createTransport({
@@ -48,18 +44,39 @@ export class EmailService {
           user: smtpUser,
           pass: smtpPassword,
         },
+        connectionTimeout: 10000, // 10 seconds
+        greetingTimeout: 10000, // 10 seconds
+        socketTimeout: 10000, // 10 seconds
+        // For non-465 ports, use STARTTLS
+        requireTLS: smtpPort !== 465,
+        tls: {
+          rejectUnauthorized: false, // Allow self-signed certificates
+        },
       });
 
-      // Verify connection
-      this.transporter.verify((error) => {
-        if (error) {
-          console.warn('SMTP connection failed:', error.message);
+      // Verify connection asynchronously (non-blocking)
+      // This prevents startup delays if SMTP server is unreachable
+      setImmediate(() => {
+        const verifyTimeout = setTimeout(() => {
           console.warn(
-            'Email service will be disabled. Configure SMTP settings to enable.',
+            'SMTP verification timed out. Email service will attempt to connect when sending emails.',
           );
-        } else {
-          console.log('Email service configured successfully');
-        }
+          this.transporter = null; // Disable until connection is verified
+        }, 15000); // 15 second timeout for verification
+
+        this.transporter?.verify((error) => {
+          clearTimeout(verifyTimeout);
+          if (error) {
+            console.warn('SMTP connection verification failed:', error.message);
+            console.warn(
+              'Email service will attempt to connect when sending emails. Verify SMTP settings if emails fail.',
+            );
+            // Don't disable transporter - let it try on actual send
+            // this.transporter = null;
+          } else {
+            console.log('Email service configured and verified successfully');
+          }
+        });
       });
     } else {
       console.warn(
@@ -89,11 +106,42 @@ export class EmailService {
         attachments: options.attachments,
       };
 
-      const info = await this.transporter.sendMail(mailOptions);
+      // Add timeout wrapper for sendMail
+      const sendPromise = this.transporter.sendMail(mailOptions);
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        setTimeout(
+          () => reject(new Error('Email send timeout after 30 seconds')),
+          30000,
+        );
+      });
+
+      const info = (await Promise.race([sendPromise, timeoutPromise])) as any;
       console.log('Email sent successfully:', info.messageId);
       return true;
-    } catch (error) {
-      console.error('Error sending email:', error);
+    } catch (error: any) {
+      const errorMessage = error?.message || 'Unknown error';
+      if (
+        errorMessage.includes('timeout') ||
+        errorMessage.includes('ETIMEDOUT') ||
+        errorMessage.includes('Connection timeout')
+      ) {
+        console.error(
+          'SMTP connection timeout. Check SMTP server connectivity and settings:',
+          errorMessage,
+        );
+      } else if (errorMessage.includes('ECONNREFUSED')) {
+        console.error(
+          'SMTP connection refused. Check SMTP host and port:',
+          errorMessage,
+        );
+      } else if (errorMessage.includes('authentication')) {
+        console.error(
+          'SMTP authentication failed. Check SMTP_USER and SMTP_PASSWORD:',
+          errorMessage,
+        );
+      } else {
+        console.error('Error sending email:', errorMessage);
+      }
       return false;
     }
   }
@@ -142,7 +190,7 @@ export class EmailService {
 
     // Fallback to default email format
     const subject = `SmartExpense: ${title}`;
-    const html = this.buildNotificationHtml(title, message, type);
+    const html = this.buildNotificationHtml(title, message);
 
     return this.sendEmail({
       to,
@@ -184,11 +232,7 @@ export class EmailService {
     });
   }
 
-  private buildNotificationHtml(
-    title: string,
-    message: string,
-    type?: string,
-  ): string {
+  private buildNotificationHtml(title: string, message: string): string {
     return `
       <!DOCTYPE html>
       <html>

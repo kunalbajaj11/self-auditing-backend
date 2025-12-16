@@ -229,11 +229,18 @@ export class SchedulerService {
     const threeDaysFromNowStr = threeDaysFromNow.toISOString().split('T')[0];
 
     const invoices = await this.salesInvoicesRepository.find({
-      where: {
-        status: InvoiceStatus.SENT,
-        paymentStatus: PaymentStatus.UNPAID,
-        isDeleted: false,
-      },
+      where: [
+        {
+          status: InvoiceStatus.TAX_INVOICE_RECEIVABLE,
+          paymentStatus: PaymentStatus.UNPAID,
+          isDeleted: false,
+        },
+        {
+          status: InvoiceStatus.SENT, // Legacy status for backward compatibility
+          paymentStatus: PaymentStatus.UNPAID,
+          isDeleted: false,
+        },
+      ],
       relations: ['organization', 'user', 'customer'],
     });
 
@@ -352,11 +359,18 @@ export class SchedulerService {
     const todayStr = today.toISOString().split('T')[0];
 
     const invoices = await this.salesInvoicesRepository.find({
-      where: {
-        status: InvoiceStatus.SENT,
-        paymentStatus: PaymentStatus.UNPAID,
-        isDeleted: false,
-      },
+      where: [
+        {
+          status: InvoiceStatus.TAX_INVOICE_RECEIVABLE,
+          paymentStatus: PaymentStatus.UNPAID,
+          isDeleted: false,
+        },
+        {
+          status: InvoiceStatus.SENT, // Legacy status for backward compatibility
+          paymentStatus: PaymentStatus.UNPAID,
+          isDeleted: false,
+        },
+      ],
       relations: ['organization', 'user', 'customer'],
     });
 

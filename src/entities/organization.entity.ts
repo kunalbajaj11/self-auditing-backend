@@ -23,6 +23,7 @@ import { ExchangeRate } from './exchange-rate.entity';
 import { Vendor } from '../modules/vendors/vendor.entity';
 import { SalesInvoice } from './sales-invoice.entity';
 import { CreditNote } from './credit-note.entity';
+import { DebitNote } from './debit-note.entity';
 
 @Entity({ name: 'organizations' })
 @Unique(['name'])
@@ -141,4 +142,7 @@ export class Organization extends AbstractEntity {
 
   @OneToMany(() => CreditNote, (creditNote) => creditNote.organization)
   creditNotes: CreditNote[];
+
+  @OneToMany(() => DebitNote, (debitNote) => debitNote.organization)
+  debitNotes: DebitNote[];
 }

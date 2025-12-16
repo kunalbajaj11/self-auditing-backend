@@ -19,6 +19,7 @@ import { Attachment } from './attachment.entity';
 import { ExpenseType } from './expense-type.entity';
 import { SalesInvoice } from './sales-invoice.entity';
 import { CreditNote } from './credit-note.entity';
+import { DebitNote } from './debit-note.entity';
 
 @Index('idx_users_email', ['email'], { unique: true })
 @Entity({ name: 'users' })
@@ -96,4 +97,7 @@ export class User extends AbstractEntity {
 
   @OneToMany(() => CreditNote, (creditNote) => creditNote.user)
   creditNotes: CreditNote[];
+
+  @OneToMany(() => DebitNote, (debitNote) => debitNote.user)
+  debitNotes: DebitNote[];
 }

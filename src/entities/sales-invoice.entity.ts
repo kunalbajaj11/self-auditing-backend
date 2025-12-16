@@ -112,7 +112,7 @@ export class SalesInvoice extends AbstractEntity {
   @Column({
     type: 'enum',
     enum: InvoiceStatus,
-    default: InvoiceStatus.DRAFT,
+    default: InvoiceStatus.PROFORMA_INVOICE,
   })
   status: InvoiceStatus;
 

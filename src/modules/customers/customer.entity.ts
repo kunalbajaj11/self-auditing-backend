@@ -11,6 +11,7 @@ import { AbstractEntity } from '../../entities/abstract.entity';
 import { Organization } from '../../entities/organization.entity';
 import { SalesInvoice } from '../../entities/sales-invoice.entity';
 import { CreditNote } from '../../entities/credit-note.entity';
+import { DebitNote } from '../../entities/debit-note.entity';
 
 @Entity({ name: 'customers' })
 @Unique(['organization', 'name'])
@@ -76,4 +77,7 @@ export class Customer extends AbstractEntity {
 
   @OneToMany(() => CreditNote, (creditNote) => creditNote.customer)
   creditNotes: CreditNote[];
+
+  @OneToMany(() => DebitNote, (debitNote) => debitNote.customer)
+  debitNotes: DebitNote[];
 }
