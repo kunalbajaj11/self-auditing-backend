@@ -36,6 +36,14 @@ export class EmailService {
     const smtpPassword = this.configService.get<string>('SMTP_PASSWORD');
 
     if (smtpHost && smtpUser && smtpPassword) {
+      // Log SMTP configuration for debugging (without password)
+      console.log('Configuring SMTP:', {
+        host: smtpHost,
+        port: smtpPort,
+        user: smtpUser,
+        secure: smtpPort === 465,
+      });
+
       this.transporter = nodemailer.createTransport({
         host: smtpHost,
         port: smtpPort,
@@ -44,14 +52,18 @@ export class EmailService {
           user: smtpUser,
           pass: smtpPassword,
         },
-        connectionTimeout: 10000, // 10 seconds
-        greetingTimeout: 10000, // 10 seconds
-        socketTimeout: 10000, // 10 seconds
+        connectionTimeout: 30000, // 30 seconds - increased for slow networks
+        greetingTimeout: 30000, // 30 seconds
+        socketTimeout: 30000, // 30 seconds
         // For non-465 ports, use STARTTLS
         requireTLS: smtpPort !== 465,
         tls: {
           rejectUnauthorized: false, // Allow self-signed certificates
         },
+        // Pool connections for better reliability
+        pool: true,
+        maxConnections: 1,
+        maxMessages: 3,
       });
 
       // Verify connection asynchronously (non-blocking)
@@ -91,6 +103,9 @@ export class EmailService {
       return false;
     }
 
+    const smtpHost = this.configService.get<string>('SMTP_HOST');
+    const smtpPort = this.configService.get<number>('SMTP_PORT', 587);
+
     try {
       const from = this.configService.get<string>(
         'SMTP_FROM',
@@ -106,12 +121,16 @@ export class EmailService {
         attachments: options.attachments,
       };
 
-      // Add timeout wrapper for sendMail
+      console.log(
+        `Attempting to send email to: ${mailOptions.to} via ${smtpHost}:${smtpPort}`,
+      );
+
+      // Add timeout wrapper for sendMail (60 seconds for slow networks)
       const sendPromise = this.transporter.sendMail(mailOptions);
       const timeoutPromise = new Promise<never>((_, reject) => {
         setTimeout(
-          () => reject(new Error('Email send timeout after 30 seconds')),
-          30000,
+          () => reject(new Error('Email send timeout after 60 seconds')),
+          60000,
         );
       });
 
@@ -120,27 +139,57 @@ export class EmailService {
       return true;
     } catch (error: any) {
       const errorMessage = error?.message || 'Unknown error';
+      const errorCode = error?.code || '';
+
+      console.error('Email send failed:', {
+        to: Array.isArray(options.to) ? options.to.join(', ') : options.to,
+        smtpHost,
+        smtpPort,
+        error: errorMessage,
+        code: errorCode,
+      });
+
       if (
         errorMessage.includes('timeout') ||
         errorMessage.includes('ETIMEDOUT') ||
-        errorMessage.includes('Connection timeout')
+        errorMessage.includes('Connection timeout') ||
+        errorCode === 'ETIMEDOUT'
       ) {
         console.error(
-          'SMTP connection timeout. Check SMTP server connectivity and settings:',
-          errorMessage,
+          'SMTP connection timeout. Possible causes:',
+          '\n  1. SMTP server not reachable from deployment network',
+          '\n  2. Firewall blocking outbound SMTP ports (587, 465, 25)',
+          '\n  3. SMTP server is down or unreachable',
+          '\n  4. Network latency issues',
+          `\n  Attempted: ${smtpHost}:${smtpPort}`,
+          '\n  Solution: Consider using API-based email service (SendGrid, Mailgun, AWS SES)',
         );
-      } else if (errorMessage.includes('ECONNREFUSED')) {
+      } else if (
+        errorMessage.includes('ECONNREFUSED') ||
+        errorCode === 'ECONNREFUSED'
+      ) {
         console.error(
-          'SMTP connection refused. Check SMTP host and port:',
-          errorMessage,
+          'SMTP connection refused. Check:',
+          `\n  - SMTP_HOST: ${smtpHost}`,
+          `\n  - SMTP_PORT: ${smtpPort}`,
+          '\n  - SMTP server is running and accessible',
         );
-      } else if (errorMessage.includes('authentication')) {
+      } else if (
+        errorMessage.includes('authentication') ||
+        errorMessage.includes('535')
+      ) {
         console.error(
-          'SMTP authentication failed. Check SMTP_USER and SMTP_PASSWORD:',
-          errorMessage,
+          'SMTP authentication failed. Check SMTP_USER and SMTP_PASSWORD credentials.',
+        );
+      } else if (
+        errorMessage.includes('EHLO') ||
+        errorMessage.includes('HELO')
+      ) {
+        console.error(
+          'SMTP handshake failed. Server may not support the connection method.',
         );
       } else {
-        console.error('Error sending email:', errorMessage);
+        console.error('Error sending email:', errorMessage, errorCode);
       }
       return false;
     }
