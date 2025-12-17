@@ -7,7 +7,8 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
 import { CreditNote } from '../../entities/credit-note.entity';
 import { CreditNoteApplication } from '../../entities/credit-note-application.entity';
-import { CreditNoteNumberSequence } from '../../entities/credit-note-number-sequence.entity';
+import { NumberingSequenceType } from '../../entities/numbering-sequence.entity';
+import { SettingsService } from '../settings/settings.service';
 import { SalesInvoice } from '../../entities/sales-invoice.entity';
 import { Organization } from '../../entities/organization.entity';
 import { User } from '../../entities/user.entity';
@@ -25,8 +26,6 @@ export class CreditNotesService {
     private readonly creditNotesRepository: Repository<CreditNote>,
     @InjectRepository(CreditNoteApplication)
     private readonly creditNoteApplicationsRepository: Repository<CreditNoteApplication>,
-    @InjectRepository(CreditNoteNumberSequence)
-    private readonly creditNoteNumberSequencesRepository: Repository<CreditNoteNumberSequence>,
     @InjectRepository(SalesInvoice)
     private readonly invoicesRepository: Repository<SalesInvoice>,
     @InjectRepository(Organization)
@@ -35,6 +34,7 @@ export class CreditNotesService {
     private readonly usersRepository: Repository<User>,
     private readonly salesInvoicesService: SalesInvoicesService,
     private readonly auditLogsService: AuditLogsService,
+    private readonly settingsService: SettingsService,
     private readonly dataSource: DataSource,
   ) {}
 
@@ -73,11 +73,10 @@ export class CreditNotesService {
       throw new NotFoundException('User not found');
     }
 
-    // Generate credit note number
-    const year = new Date().getFullYear();
-    const creditNoteNumber = await this.generateCreditNoteNumber(
+    // Generate credit note number using centralized numbering sequence
+    const creditNoteNumber = await this.settingsService.generateNextNumber(
       organizationId,
-      year,
+      NumberingSequenceType.CREDIT_NOTE,
     );
 
     const creditNote = this.creditNotesRepository.create({
@@ -193,59 +192,14 @@ export class CreditNotesService {
   }
 
   /**
-   * Thread-safe credit note number generation using database-level locking
-   * Format: CN-YYYY-NNN (e.g., CN-2024-001)
-   */
-  private async generateCreditNoteNumber(
-    organizationId: string,
-    year: number,
-  ): Promise<string> {
-    return await this.dataSource.transaction(async (manager) => {
-      // Pessimistic lock on sequence row to prevent race conditions
-      const sequence = await manager.findOne(CreditNoteNumberSequence, {
-        where: { organizationId, year },
-        lock: { mode: 'pessimistic_write' },
-      });
-
-      if (!sequence) {
-        // Create new sequence for this year
-        const newSequence = manager.create(CreditNoteNumberSequence, {
-          organizationId,
-          year,
-          lastNumber: 1,
-        });
-        await manager.save(newSequence);
-        return `CN-${year}-001`;
-      }
-
-      // Increment and save
-      sequence.lastNumber += 1;
-      await manager.save(sequence);
-      const paddedNumber = sequence.lastNumber.toString().padStart(3, '0');
-      return `CN-${year}-${paddedNumber}`;
-    });
-  }
-
-  /**
    * Get next credit note number without creating a credit note
    * Useful for previewing the next number
    */
   async getNextCreditNoteNumber(organizationId: string): Promise<string> {
-    const year = new Date().getFullYear();
-    return await this.dataSource.transaction(async (manager) => {
-      const sequence = await manager.findOne(CreditNoteNumberSequence, {
-        where: { organizationId, year },
-        lock: { mode: 'pessimistic_write' },
-      });
-
-      if (!sequence) {
-        return `CN-${year}-001`;
-      }
-
-      const nextNumber = sequence.lastNumber + 1;
-      const paddedNumber = nextNumber.toString().padStart(3, '0');
-      return `CN-${year}-${paddedNumber}`;
-    });
+    return this.settingsService.getNextNumber(
+      organizationId,
+      NumberingSequenceType.CREDIT_NOTE,
+    );
   }
 
   /**

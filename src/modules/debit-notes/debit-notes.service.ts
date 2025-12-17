@@ -7,7 +7,8 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
 import { DebitNote } from '../../entities/debit-note.entity';
 import { DebitNoteApplication } from '../../entities/debit-note-application.entity';
-import { DebitNoteNumberSequence } from '../../entities/debit-note-number-sequence.entity';
+import { NumberingSequenceType } from '../../entities/numbering-sequence.entity';
+import { SettingsService } from '../settings/settings.service';
 import { SalesInvoice } from '../../entities/sales-invoice.entity';
 import { Organization } from '../../entities/organization.entity';
 import { User } from '../../entities/user.entity';
@@ -25,8 +26,6 @@ export class DebitNotesService {
     private readonly debitNotesRepository: Repository<DebitNote>,
     @InjectRepository(DebitNoteApplication)
     private readonly debitNoteApplicationsRepository: Repository<DebitNoteApplication>,
-    @InjectRepository(DebitNoteNumberSequence)
-    private readonly debitNoteNumberSequencesRepository: Repository<DebitNoteNumberSequence>,
     @InjectRepository(SalesInvoice)
     private readonly invoicesRepository: Repository<SalesInvoice>,
     @InjectRepository(Organization)
@@ -35,6 +34,7 @@ export class DebitNotesService {
     private readonly usersRepository: Repository<User>,
     private readonly salesInvoicesService: SalesInvoicesService,
     private readonly auditLogsService: AuditLogsService,
+    private readonly settingsService: SettingsService,
     private readonly dataSource: DataSource,
   ) {}
 
@@ -73,11 +73,10 @@ export class DebitNotesService {
       throw new NotFoundException('User not found');
     }
 
-    // Generate debit note number
-    const year = new Date().getFullYear();
-    const debitNoteNumber = await this.generateDebitNoteNumber(
+    // Generate debit note number using centralized numbering sequence
+    const debitNoteNumber = await this.settingsService.generateNextNumber(
       organizationId,
-      year,
+      NumberingSequenceType.DEBIT_NOTE,
     );
 
     const debitNote = this.debitNotesRepository.create({
@@ -180,59 +179,14 @@ export class DebitNotesService {
   }
 
   /**
-   * Thread-safe debit note number generation using database-level locking
-   * Format: DN-YYYY-NNN (e.g., DN-2024-001)
-   */
-  private async generateDebitNoteNumber(
-    organizationId: string,
-    year: number,
-  ): Promise<string> {
-    return await this.dataSource.transaction(async (manager) => {
-      // Pessimistic lock on sequence row to prevent race conditions
-      const sequence = await manager.findOne(DebitNoteNumberSequence, {
-        where: { organizationId, year },
-        lock: { mode: 'pessimistic_write' },
-      });
-
-      if (!sequence) {
-        // Create new sequence for this year
-        const newSequence = manager.create(DebitNoteNumberSequence, {
-          organizationId,
-          year,
-          lastNumber: 1,
-        });
-        await manager.save(newSequence);
-        return `DN-${year}-001`;
-      }
-
-      // Increment and save
-      sequence.lastNumber += 1;
-      await manager.save(sequence);
-      const paddedNumber = sequence.lastNumber.toString().padStart(3, '0');
-      return `DN-${year}-${paddedNumber}`;
-    });
-  }
-
-  /**
    * Get next debit note number without creating a debit note
    * Useful for previewing the next number
    */
   async getNextDebitNoteNumber(organizationId: string): Promise<string> {
-    const year = new Date().getFullYear();
-    return await this.dataSource.transaction(async (manager) => {
-      const sequence = await manager.findOne(DebitNoteNumberSequence, {
-        where: { organizationId, year },
-        lock: { mode: 'pessimistic_write' },
-      });
-
-      if (!sequence) {
-        return `DN-${year}-001`;
-      }
-
-      const nextNumber = sequence.lastNumber + 1;
-      const paddedNumber = nextNumber.toString().padStart(3, '0');
-      return `DN-${year}-${paddedNumber}`;
-    });
+    return this.settingsService.getNextNumber(
+      organizationId,
+      NumberingSequenceType.DEBIT_NOTE,
+    );
   }
 
   /**

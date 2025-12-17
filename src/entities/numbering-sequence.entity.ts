@@ -5,6 +5,7 @@ import { Organization } from './organization.entity';
 export enum NumberingSequenceType {
   INVOICE = 'invoice',
   CREDIT_NOTE = 'credit_note',
+  DEBIT_NOTE = 'debit_note',
   QUOTE = 'quote',
   PURCHASE_ORDER = 'purchase_order',
   PAYMENT_RECEIPT = 'payment_receipt',

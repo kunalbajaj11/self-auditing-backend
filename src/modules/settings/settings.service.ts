@@ -20,6 +20,7 @@ import { UpdateNumberingSequenceDto } from './dto/update-numbering-sequence.dto'
 import { UpdateNumberingSettingsDto } from './dto/update-numbering-settings.dto';
 import { ForexRateService } from '../forex/forex-rate.service';
 import { FileStorageService } from '../attachments/file-storage.service';
+import { DataSource } from 'typeorm';
 
 @Injectable()
 export class SettingsService {
@@ -36,6 +37,7 @@ export class SettingsService {
     private readonly organizationRepository: Repository<Organization>,
     private readonly forexRateService: ForexRateService,
     private readonly fileStorageService: FileStorageService,
+    private readonly dataSource: DataSource,
   ) {}
 
   // Organization Settings
@@ -55,13 +57,106 @@ export class SettingsService {
         throw new NotFoundException('Organization not found');
       }
 
+      // Initialize with default values
       settings = this.settingsRepository.create({
         organization,
+        // Invoice Template Defaults
+        invoiceColorScheme: 'blue',
+        invoiceTitle: 'TAX INVOICE',
+        invoiceShowCompanyDetails: true,
+        invoiceShowVatDetails: true,
+        invoiceShowPaymentTerms: true,
+        invoiceShowPaymentMethods: true,
+        invoiceShowBankDetails: false,
+        invoiceShowTermsConditions: true,
+        invoiceDefaultPaymentTerms: 'Net 30',
+        invoiceShowFooter: true,
+        invoiceShowItemDescription: true,
+        invoiceShowItemQuantity: true,
+        invoiceShowItemUnitPrice: true,
+        invoiceShowItemTotal: true,
+        invoiceEmailSubject: 'Invoice {{invoiceNumber}} from {{companyName}}',
+        invoiceEmailMessage: 'Please find attached invoice {{invoiceNumber}} for {{totalAmount}} {{currency}}.',
+        // Tax Settings Defaults
+        taxAuthority: 'Federal Tax Authority',
+        taxCalculationMethod: 'inclusive',
+        taxDefaultRate: 5.0,
+        taxRoundingMethod: 'standard',
+        taxReportingPeriod: 'monthly',
+        taxCalculateOnShipping: true,
+        taxCalculateOnDiscounts: false,
+        taxShowOnInvoices: true,
+        taxShowBreakdown: true,
+        // Currency Settings Defaults
+        currencyExchangeRateSource: 'api',
+        currencyAutoUpdateRates: true,
+        currencyUpdateFrequency: 'daily',
+        currencyTrackFxGainLoss: true,
+        currencyDisplayFormat: 'symbol',
+        currencyRounding: 2,
+        currencyRoundingMethod: 'standard',
+        currencyShowOnInvoices: true,
+        currencyShowExchangeRate: false,
+        // Numbering Sequences Defaults
+        numberingUseSequential: true,
+        numberingAllowManual: false,
+        numberingWarnDuplicates: true,
       });
       settings = await this.settingsRepository.save(settings);
     }
 
     return settings;
+  }
+
+  /**
+   * Get settings with defaults applied (for cases where null values should use defaults)
+   */
+  async getSettingsWithDefaults(
+    organizationId: string,
+  ): Promise<OrganizationSettings> {
+    const settings = await this.getOrCreateSettings(organizationId);
+    
+    // Apply defaults for null/undefined values
+    return {
+      ...settings,
+      invoiceColorScheme: settings.invoiceColorScheme || 'blue',
+      invoiceTitle: settings.invoiceTitle || 'TAX INVOICE',
+      invoiceShowCompanyDetails: settings.invoiceShowCompanyDetails ?? true,
+      invoiceShowVatDetails: settings.invoiceShowVatDetails ?? true,
+      invoiceShowPaymentTerms: settings.invoiceShowPaymentTerms ?? true,
+      invoiceShowPaymentMethods: settings.invoiceShowPaymentMethods ?? true,
+      invoiceShowBankDetails: settings.invoiceShowBankDetails ?? false,
+      invoiceShowTermsConditions: settings.invoiceShowTermsConditions ?? true,
+      invoiceDefaultPaymentTerms: settings.invoiceDefaultPaymentTerms || 'Net 30',
+      invoiceShowFooter: settings.invoiceShowFooter ?? true,
+      invoiceShowItemDescription: settings.invoiceShowItemDescription ?? true,
+      invoiceShowItemQuantity: settings.invoiceShowItemQuantity ?? true,
+      invoiceShowItemUnitPrice: settings.invoiceShowItemUnitPrice ?? true,
+      invoiceShowItemTotal: settings.invoiceShowItemTotal ?? true,
+      invoiceEmailSubject: settings.invoiceEmailSubject || 'Invoice {{invoiceNumber}} from {{companyName}}',
+      invoiceEmailMessage: settings.invoiceEmailMessage || 'Please find attached invoice {{invoiceNumber}} for {{totalAmount}} {{currency}}.',
+      taxAuthority: settings.taxAuthority || 'Federal Tax Authority',
+      taxCalculationMethod: settings.taxCalculationMethod || 'inclusive',
+      taxDefaultRate: settings.taxDefaultRate ?? 5.0,
+      taxRoundingMethod: settings.taxRoundingMethod || 'standard',
+      taxReportingPeriod: settings.taxReportingPeriod || 'monthly',
+      taxCalculateOnShipping: settings.taxCalculateOnShipping ?? true,
+      taxCalculateOnDiscounts: settings.taxCalculateOnDiscounts ?? false,
+      taxShowOnInvoices: settings.taxShowOnInvoices ?? true,
+      taxShowBreakdown: settings.taxShowBreakdown ?? true,
+      currencyExchangeRateSource: settings.currencyExchangeRateSource || 'api',
+      currencyAutoUpdateRates: settings.currencyAutoUpdateRates ?? true,
+      currencyUpdateFrequency: settings.currencyUpdateFrequency || 'daily',
+      currencyTrackFxGainLoss: settings.currencyTrackFxGainLoss ?? true,
+      currencyDisplayFormat: settings.currencyDisplayFormat || 'symbol',
+      currencyRounding: settings.currencyRounding ?? 2,
+      currencyRoundingMethod: settings.currencyRoundingMethod || 'standard',
+      currencyShowOnInvoices: settings.currencyShowOnInvoices ?? true,
+      currencyShowExchangeRate: settings.currencyShowExchangeRate ?? false,
+      numberingUseSequential: settings.numberingUseSequential ?? true,
+      numberingAllowManual: settings.numberingAllowManual ?? false,
+      numberingWarnDuplicates: settings.numberingWarnDuplicates ?? true,
+    };
   }
 
   // Invoice Template Settings
@@ -77,7 +172,7 @@ export class SettingsService {
   async getInvoiceTemplate(
     organizationId: string,
   ): Promise<OrganizationSettings> {
-    return this.getOrCreateSettings(organizationId);
+    return this.getSettingsWithDefaults(organizationId);
   }
 
   async uploadInvoiceLogo(
@@ -126,7 +221,7 @@ export class SettingsService {
   }
 
   async getTaxSettings(organizationId: string): Promise<OrganizationSettings> {
-    return this.getOrCreateSettings(organizationId);
+    return this.getSettingsWithDefaults(organizationId);
   }
 
   // Tax Rates
@@ -199,7 +294,7 @@ export class SettingsService {
   async getCurrencySettings(
     organizationId: string,
   ): Promise<OrganizationSettings> {
-    return this.getOrCreateSettings(organizationId);
+    return this.getSettingsWithDefaults(organizationId);
   }
 
   // Exchange Rates
@@ -370,6 +465,14 @@ export class SettingsService {
         resetPeriod: ResetPeriod.NEVER,
         format: 'CN-{YYYY}-{NNNNN}',
       },
+      [NumberingSequenceType.DEBIT_NOTE]: {
+        prefix: 'DN',
+        suffix: '',
+        nextNumber: 1,
+        numberLength: 5,
+        resetPeriod: ResetPeriod.NEVER,
+        format: 'DN-{YYYY}-{NNNNN}',
+      },
       [NumberingSequenceType.QUOTE]: {
         prefix: 'QTE',
         suffix: '',
@@ -405,5 +508,142 @@ export class SettingsService {
     };
 
     return defaults[type] || {};
+  }
+
+  /**
+   * Generate next number for a numbering sequence and increment it
+   * Uses transaction with pessimistic lock for thread safety
+   */
+  async generateNextNumber(
+    organizationId: string,
+    type: NumberingSequenceType,
+  ): Promise<string> {
+    return await this.dataSource.transaction(async (manager) => {
+      const sequenceRepo = manager.getRepository(NumberingSequence);
+      
+      // Get sequence with pessimistic lock to prevent race conditions
+      const sequence = await sequenceRepo.findOne({
+        where: { organization: { id: organizationId }, type },
+        relations: ['organization'],
+        lock: { mode: 'pessimistic_write' },
+      });
+
+      if (!sequence) {
+        // Create new sequence
+        const organization = await this.organizationRepository.findOne({
+          where: { id: organizationId },
+        });
+        if (!organization) {
+          throw new NotFoundException('Organization not found');
+        }
+
+        const defaults = this.getDefaultSequence(type);
+        const newSequence = sequenceRepo.create({
+          organization,
+          type,
+          ...defaults,
+        });
+        await sequenceRepo.save(newSequence);
+
+        // Format first number
+        return this.formatNumber(newSequence, newSequence.nextNumber);
+      }
+
+      // Check if reset is needed
+      if (sequence.resetPeriod !== ResetPeriod.NEVER) {
+        const now = new Date();
+        const lastReset = sequence.lastResetDate
+          ? new Date(sequence.lastResetDate)
+          : null;
+
+        let shouldReset = false;
+        if (sequence.resetPeriod === ResetPeriod.YEARLY) {
+          shouldReset = !lastReset || now.getFullYear() > lastReset.getFullYear();
+        } else if (sequence.resetPeriod === ResetPeriod.QUARTERLY) {
+          const currentQuarter = Math.floor(now.getMonth() / 3);
+          const lastQuarter = lastReset
+            ? Math.floor(lastReset.getMonth() / 3)
+            : -1;
+          shouldReset =
+            !lastReset ||
+            now.getFullYear() > lastReset.getFullYear() ||
+            (now.getFullYear() === lastReset.getFullYear() &&
+              currentQuarter > lastQuarter);
+        } else if (sequence.resetPeriod === ResetPeriod.MONTHLY) {
+          shouldReset =
+            !lastReset ||
+            now.getFullYear() > lastReset.getFullYear() ||
+            (now.getFullYear() === lastReset.getFullYear() &&
+              now.getMonth() > lastReset.getMonth());
+        }
+
+        if (shouldReset) {
+          sequence.nextNumber = 1;
+          sequence.lastResetDate = now.toISOString().split('T')[0];
+        }
+      }
+
+      // Get current number and increment
+      const currentNumber = sequence.nextNumber;
+      sequence.nextNumber += 1;
+      await sequenceRepo.save(sequence);
+
+      // Format and return
+      return this.formatNumber(sequence, currentNumber);
+    });
+  }
+
+  /**
+   * Get next number without incrementing (for preview)
+   */
+  async getNextNumber(
+    organizationId: string,
+    type: NumberingSequenceType,
+  ): Promise<string> {
+    const sequence = await this.getOrCreateNumberingSequence(
+      organizationId,
+      type,
+    );
+    return this.formatNumber(sequence, sequence.nextNumber);
+  }
+
+  /**
+   * Format number according to sequence format
+   */
+  private formatNumber(sequence: NumberingSequence, number: number): string {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    const yearShort = String(year).slice(-2);
+
+    const paddedNumber = number
+      .toString()
+      .padStart(sequence.numberLength, '0');
+
+    let formatted = sequence.format || `${sequence.prefix}-{YYYY}-{NNNNN}`;
+
+    // Replace format placeholders
+    formatted = formatted.replace(/{YYYY}/g, String(year));
+    formatted = formatted.replace(/{YY}/g, yearShort);
+    formatted = formatted.replace(/{MM}/g, month);
+    formatted = formatted.replace(/{DD}/g, day);
+    formatted = formatted.replace(/{YYYYMMDD}/g, `${year}${month}${day}`);
+    formatted = formatted.replace(/{MMYY}/g, `${month}${yearShort}`);
+    formatted = formatted.replace(/{NNNNN}/g, paddedNumber);
+    formatted = formatted.replace(/{NNNN}/g, paddedNumber.slice(-4));
+    formatted = formatted.replace(/{NNN}/g, paddedNumber.slice(-3));
+    formatted = formatted.replace(/{NN}/g, paddedNumber.slice(-2));
+    formatted = formatted.replace(/{N}/g, paddedNumber.slice(-1));
+
+    // Add prefix and suffix if not in format
+    if (sequence.prefix && !formatted.includes(sequence.prefix)) {
+      formatted = `${sequence.prefix}-${formatted}`;
+    }
+    if (sequence.suffix && !formatted.endsWith(sequence.suffix)) {
+      formatted = `${formatted}-${sequence.suffix}`;
+    }
+
+    return formatted;
   }
 }

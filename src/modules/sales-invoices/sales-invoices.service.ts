@@ -10,7 +10,7 @@ import { SalesInvoice } from '../../entities/sales-invoice.entity';
 import { InvoiceLineItem } from '../../entities/invoice-line-item.entity';
 import { InvoicePayment } from '../../entities/invoice-payment.entity';
 import { CreditNoteApplication } from '../../entities/credit-note-application.entity';
-import { InvoiceNumberSequence } from '../../entities/invoice-number-sequence.entity';
+import { NumberingSequenceType } from '../../entities/numbering-sequence.entity';
 import { Organization } from '../../entities/organization.entity';
 import { User } from '../../entities/user.entity';
 import { Customer } from '../customers/customer.entity';
@@ -35,8 +35,6 @@ export class SalesInvoicesService {
     private readonly paymentsRepository: Repository<InvoicePayment>,
     @InjectRepository(CreditNoteApplication)
     private readonly creditNoteApplicationsRepository: Repository<CreditNoteApplication>,
-    @InjectRepository(InvoiceNumberSequence)
-    private readonly invoiceNumberSequencesRepository: Repository<InvoiceNumberSequence>,
     @InjectRepository(Organization)
     private readonly organizationsRepository: Repository<Organization>,
     @InjectRepository(User)
@@ -202,11 +200,10 @@ export class SalesInvoicesService {
       throw new NotFoundException('User not found');
     }
 
-    // Generate invoice number
-    const year = new Date().getFullYear();
-    const invoiceNumber = await this.generateInvoiceNumber(
+    // Generate invoice number using centralized numbering sequence
+    const invoiceNumber = await this.settingsService.generateNextNumber(
       organizationId,
-      year,
+      NumberingSequenceType.INVOICE,
     );
 
     // Generate public token
@@ -517,56 +514,15 @@ export class SalesInvoicesService {
    * Thread-safe invoice number generation using database-level locking
    * Format: INV-YYYY-NNN (e.g., INV-2024-001)
    */
-  private async generateInvoiceNumber(
-    organizationId: string,
-    year: number,
-  ): Promise<string> {
-    return await this.dataSource.transaction(async (manager) => {
-      // Pessimistic lock on sequence row to prevent race conditions
-      const sequence = await manager.findOne(InvoiceNumberSequence, {
-        where: { organizationId, year },
-        lock: { mode: 'pessimistic_write' },
-      });
-
-      if (!sequence) {
-        // Create new sequence for this year
-        const newSequence = manager.create(InvoiceNumberSequence, {
-          organizationId,
-          year,
-          lastNumber: 1,
-        });
-        await manager.save(newSequence);
-        return `INV-${year}-001`;
-      }
-
-      // Increment and save
-      sequence.lastNumber += 1;
-      await manager.save(sequence);
-      const paddedNumber = sequence.lastNumber.toString().padStart(3, '0');
-      return `INV-${year}-${paddedNumber}`;
-    });
-  }
-
   /**
    * Get next invoice number without creating an invoice
    * Useful for previewing the next number
    */
   async getNextInvoiceNumber(organizationId: string): Promise<string> {
-    const year = new Date().getFullYear();
-    return await this.dataSource.transaction(async (manager) => {
-      const sequence = await manager.findOne(InvoiceNumberSequence, {
-        where: { organizationId, year },
-        lock: { mode: 'pessimistic_write' },
-      });
-
-      if (!sequence) {
-        return `INV-${year}-001`;
-      }
-
-      const nextNumber = sequence.lastNumber + 1;
-      const paddedNumber = nextNumber.toString().padStart(3, '0');
-      return `INV-${year}-${paddedNumber}`;
-    });
+    return this.settingsService.getNextNumber(
+      organizationId,
+      NumberingSequenceType.INVOICE,
+    );
   }
 
   /**

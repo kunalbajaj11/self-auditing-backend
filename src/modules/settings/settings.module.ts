@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { DataSource } from 'typeorm';
 import { SettingsController } from './settings.controller';
 import { SettingsService } from './settings.service';
 import { OrganizationSettings } from '../../entities/organization-settings.entity';
