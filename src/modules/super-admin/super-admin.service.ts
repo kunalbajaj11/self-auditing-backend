@@ -9,7 +9,6 @@ import { Accrual } from '../../entities/accrual.entity';
 import { AuditLog } from '../../entities/audit-log.entity';
 import { AccrualStatus } from '../../common/enums/accrual-status.enum';
 import { OrganizationStatus } from '../../common/enums/organization-status.enum';
-import { ExpenseStatus } from '../../common/enums/expense-status.enum';
 
 // Cache TTL: 5 minutes (300000 ms)
 const CACHE_TTL_MS = 5 * 60 * 1000;
@@ -102,7 +101,6 @@ export class SuperAdminService {
       this.expensesRepository.count({
         where: {
           isDeleted: false,
-          status: Not(ExpenseStatus.PENDING),
         },
       }),
       this.accrualsRepository.count({
@@ -173,7 +171,6 @@ export class SuperAdminService {
               where: {
                 organization: { id: organization.id },
                 isDeleted: false,
-                status: Not(ExpenseStatus.PENDING),
               },
             }),
             this.accrualsRepository.count({

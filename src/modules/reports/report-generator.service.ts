@@ -194,13 +194,14 @@ export class ReportGeneratorService {
         // Header with company info (Xero-style)
         this.addPDFHeader(doc, reportData);
 
-        // Report title and period
-        doc.moveDown(0.5);
+        // Report title and period - Enhanced styling
+        doc.moveDown(0.8);
         doc
-          .fontSize(18)
+          .fontSize(22)
           .font('Helvetica-Bold')
+          .fillColor('#0077c8')
           .text(this.getReportTitle(reportData.type), { align: 'center' });
-        doc.moveDown(0.3);
+        doc.moveDown(0.5);
 
         if (
           reportData.metadata?.reportPeriod?.startDate ||
@@ -208,10 +209,12 @@ export class ReportGeneratorService {
         ) {
           const period = `${this.formatDate(reportData.metadata.reportPeriod.startDate || '')} to ${this.formatDate(reportData.metadata.reportPeriod.endDate || '')}`;
           doc
-            .fontSize(12)
+            .fontSize(11)
             .font('Helvetica')
+            .fillColor('#666666')
             .text(`Period: ${period}`, { align: 'center' });
         }
+        doc.fillColor('#1a1a1a');
 
         doc.moveDown(0.5);
 
@@ -257,7 +260,11 @@ export class ReportGeneratorService {
       vat_report: 'VAT Summary Report',
       bank_reconciliation: 'Bank Reconciliation Summary',
       attachments_report: 'Attachments Report',
-      trial_balance: 'Trial Balance',
+      trial_balance: 'Trial Balance Report',
+      balance_sheet: 'Balance Sheet Report',
+      profit_and_loss: 'Profit and Loss Statement',
+      payables: 'Payables (Accruals) Report',
+      receivables: 'Receivables Report',
       audit_trail: 'Transaction Audit Trail',
       vendor_report: 'Vendor Report',
       employee_report: 'Employee Report',
@@ -273,8 +280,8 @@ export class ReportGeneratorService {
   private addPDFHeader(doc: PDFKit.PDFDocument, reportData: ReportData): void {
     const pageWidth = doc.page.width;
     const margin = 50;
-    const headerBgColor = '#fafafa'; // Subtle gray, professional
-    const headerHeight = 120;
+    const headerBgColor = '#f8f9fa'; // Professional light gray
+    const headerHeight = 130;
 
     // Header background
     doc
@@ -358,10 +365,10 @@ export class ReportGeneratorService {
       doc.text('selfAccounting.AI', logoX, logoY, { width: logoSize });
     }
 
-    // Company name (to the right of the logo)
-    doc.fontSize(18).font('Helvetica-Bold').fillColor('#1a1a1a');
+    // Company name (to the right of the logo) - Enhanced styling
+    doc.fontSize(20).font('Helvetica-Bold').fillColor('#0077c8'); // Brand color
     const orgName = reportData.metadata?.organizationName || 'SmartExpense UAE';
-    const leftTextX = logoX + logoSize + 12;
+    const leftTextX = logoX + logoSize + 15;
     doc.text(orgName, leftTextX, 40, {
       width: pageWidth / 2 - (leftTextX - margin) - 20,
     });
@@ -387,9 +394,9 @@ export class ReportGeneratorService {
       doc.text(`Email: ${reportData.metadata.email}`, leftTextX, yPos);
     }
 
-    // Report title and metadata (right side)
+    // Report title and metadata (right side) - Enhanced styling
     const rightX = pageWidth / 2 + 20;
-    doc.fontSize(16).font('Helvetica-Bold').fillColor('#1a1a1a');
+    doc.fontSize(18).font('Helvetica-Bold').fillColor('#0077c8'); // Brand color
     doc.text(this.getReportTitle(reportData.type), rightX, 40, {
       width: pageWidth - rightX - margin,
       align: 'right',
@@ -475,10 +482,18 @@ export class ReportGeneratorService {
       });
     }
 
-    // Horizontal line below header - clean professional border
+    // Horizontal line below header - enhanced professional border
     doc
       .moveTo(margin, 30 + headerHeight + 5)
       .lineTo(pageWidth - margin, 30 + headerHeight + 5)
+      .strokeColor('#0077c8') // Brand color accent
+      .lineWidth(2)
+      .stroke();
+    
+    // Additional subtle line for depth
+    doc
+      .moveTo(margin, 30 + headerHeight + 7)
+      .lineTo(pageWidth - margin, 30 + headerHeight + 7)
       .strokeColor('#e0e0e0')
       .lineWidth(0.5)
       .stroke();
@@ -684,6 +699,30 @@ export class ReportGeneratorService {
       // Trial Balance with summary and accounts
       this.addXLSXTrialBalance(workbook, reportData, currency);
     } else if (
+      reportData.type === 'balance_sheet' &&
+      typeof reportData.data === 'object'
+    ) {
+      // Balance Sheet with multiple tabs
+      this.addXLSXBalanceSheet(workbook, reportData, currency);
+    } else if (
+      reportData.type === 'profit_and_loss' &&
+      typeof reportData.data === 'object'
+    ) {
+      // Profit and Loss with multiple tabs
+      this.addXLSXProfitAndLoss(workbook, reportData, currency);
+    } else if (
+      reportData.type === 'payables' &&
+      typeof reportData.data === 'object'
+    ) {
+      // Payables report
+      this.addXLSXPayables(workbook, reportData, currency);
+    } else if (
+      reportData.type === 'receivables' &&
+      typeof reportData.data === 'object'
+    ) {
+      // Receivables report
+      this.addXLSXReceivables(workbook, reportData, currency);
+    } else if (
       (reportData.type === 'expense_summary' ||
         reportData.type === 'expense_detail') &&
       Array.isArray(reportData.data)
@@ -745,24 +784,29 @@ export class ReportGeneratorService {
       expenseSheet.addRow([]);
     }
 
-    // Headers
-    const headers = Object.keys(data[0]);
-    const formattedHeaders = headers.map((h) => this.formatHeaderLabel(h));
-    expenseSheet.addRow(formattedHeaders);
-    const headerRow = expenseSheet.getRow(expenseSheet.rowCount);
-    headerRow.font = { bold: true, color: { argb: 'FF1a1a1a' } };
-    headerRow.fill = {
-      type: 'pattern',
-      pattern: 'solid',
-      fgColor: { argb: 'FFF9FAFB' },
-    };
-    headerRow.alignment = { horizontal: 'center', vertical: 'middle' };
-    headerRow.border = {
-      top: { style: 'thin', color: { argb: 'FF000000' } },
-      bottom: { style: 'thin', color: { argb: 'FF000000' } },
-      left: { style: 'thin', color: { argb: 'FF000000' } },
-      right: { style: 'thin', color: { argb: 'FF000000' } },
-    };
+      // Headers - Enhanced professional styling
+      const headers = Object.keys(data[0]);
+      const formattedHeaders = headers.map((h) => this.formatHeaderLabel(h));
+      expenseSheet.addRow(formattedHeaders);
+      const headerRow = expenseSheet.getRow(expenseSheet.rowCount);
+      headerRow.font = { 
+        bold: true, 
+        size: 11,
+        color: { argb: 'FFFFFFFF' } // White text
+      };
+      headerRow.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FF0077C8' }, // Brand color
+      };
+      headerRow.alignment = { horizontal: 'center', vertical: 'middle' };
+      headerRow.border = {
+        top: { style: 'medium', color: { argb: 'FF005A9A' } },
+        bottom: { style: 'medium', color: { argb: 'FF005A9A' } },
+        left: { style: 'thin', color: { argb: 'FF005A9A' } },
+        right: { style: 'thin', color: { argb: 'FF005A9A' } },
+      };
+      headerRow.height = 22;
 
     // Data rows
     data.forEach((row: any, index: number) => {
@@ -785,16 +829,22 @@ export class ReportGeneratorService {
       });
       const dataRow = expenseSheet.addRow(values);
 
-      // Alternate row colors
+      // Alternate row colors - Enhanced styling
       if (index % 2 === 0) {
         dataRow.fill = {
           type: 'pattern',
           pattern: 'solid',
-          fgColor: { argb: 'FFF9FAFB' },
+          fgColor: { argb: 'FFF8F9FA' }, // Light gray
+        };
+      } else {
+        dataRow.fill = {
+          type: 'pattern',
+          pattern: 'solid',
+          fgColor: { argb: 'FFFFFFFF' }, // White
         };
       }
 
-      // Format currency columns
+      // Format currency columns - Enhanced borders
       headers.forEach((header, colIndex) => {
         const cell = dataRow.getCell(colIndex + 1);
         const currencyFields = [
@@ -809,10 +859,12 @@ export class ReportGeneratorService {
           currencyFields.some((field) => header.toLowerCase().includes(field))
         ) {
           cell.numFmt = `"${currency}" #,##0.00`;
-          cell.alignment = { horizontal: 'right' };
+          cell.alignment = { horizontal: 'right', vertical: 'middle' };
         } else if (header.toLowerCase().includes('date')) {
           cell.numFmt = 'dd-mmm-yyyy';
-          cell.alignment = { horizontal: 'center' };
+          cell.alignment = { horizontal: 'center', vertical: 'middle' };
+        } else {
+          cell.alignment = { horizontal: 'left', vertical: 'middle' };
         }
         cell.border = {
           top: { style: 'thin', color: { argb: 'FFE5E7EB' } },
@@ -821,6 +873,7 @@ export class ReportGeneratorService {
           right: { style: 'thin', color: { argb: 'FFE5E7EB' } },
         };
       });
+      dataRow.height = 20;
     });
 
     // Freeze header row
@@ -934,13 +987,25 @@ export class ReportGeneratorService {
     // Vendor Summary Sheet
     const vendorSheet = workbook.addWorksheet('Vendor Summary');
     vendorSheet.addRow(['Vendor', 'Count', 'Amount', 'VAT', 'Total']);
-    const vendorHeaderRow = vendorSheet.getRow(1);
-    vendorHeaderRow.font = { bold: true, color: { argb: 'FF1a1a1a' } };
-    vendorHeaderRow.fill = {
-      type: 'pattern',
-      pattern: 'solid',
-      fgColor: { argb: 'FFF9FAFB' },
-    };
+      const vendorHeaderRow = vendorSheet.getRow(1);
+      vendorHeaderRow.font = { 
+        bold: true, 
+        size: 11,
+        color: { argb: 'FFFFFFFF' } 
+      };
+      vendorHeaderRow.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FF0077C8' },
+      };
+      vendorHeaderRow.border = {
+        top: { style: 'medium', color: { argb: 'FF005A9A' } },
+        bottom: { style: 'medium', color: { argb: 'FF005A9A' } },
+        left: { style: 'thin', color: { argb: 'FF005A9A' } },
+        right: { style: 'thin', color: { argb: 'FF005A9A' } },
+      };
+      vendorHeaderRow.height = 22;
+      vendorHeaderRow.alignment = { horizontal: 'center', vertical: 'middle' };
 
     const vendorMap = new Map<
       string,
@@ -980,13 +1045,25 @@ export class ReportGeneratorService {
     // Monthly Breakdown Sheet
     const monthlySheet = workbook.addWorksheet('Monthly Breakdown');
     monthlySheet.addRow(['Month', 'Total Spend', 'VAT']);
-    const monthlyHeaderRow = monthlySheet.getRow(1);
-    monthlyHeaderRow.font = { bold: true, color: { argb: 'FF1a1a1a' } };
-    monthlyHeaderRow.fill = {
-      type: 'pattern',
-      pattern: 'solid',
-      fgColor: { argb: 'FFF9FAFB' },
-    };
+      const monthlyHeaderRow = monthlySheet.getRow(1);
+      monthlyHeaderRow.font = { 
+        bold: true, 
+        size: 11,
+        color: { argb: 'FFFFFFFF' } 
+      };
+      monthlyHeaderRow.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FF0077C8' },
+      };
+      monthlyHeaderRow.border = {
+        top: { style: 'medium', color: { argb: 'FF005A9A' } },
+        bottom: { style: 'medium', color: { argb: 'FF005A9A' } },
+        left: { style: 'thin', color: { argb: 'FF005A9A' } },
+        right: { style: 'thin', color: { argb: 'FF005A9A' } },
+      };
+      monthlyHeaderRow.height = 22;
+      monthlyHeaderRow.alignment = { horizontal: 'center', vertical: 'middle' };
 
     const monthlyMap = new Map<string, { spend: number; vat: number }>();
     data.forEach((row: any) => {
@@ -1084,21 +1161,27 @@ export class ReportGeneratorService {
       const availableWidth = pageWidth - 2 * margin;
       const colWidth = availableWidth / headers.length;
 
-      // Table header with background
+      // Table header with enhanced professional styling
       const headerY = doc.y;
+      // Header background with brand color accent
       doc
-        .rect(margin, headerY, availableWidth, 25)
-        .fillColor('#fafafa')
-        .fill()
-        .strokeColor('#e0e0e0')
+        .rect(margin, headerY, availableWidth, 28)
+        .fillColor('#0077c8') // Brand color
+        .fill();
+      
+      // Header border
+      doc
+        .rect(margin, headerY, availableWidth, 28)
+        .strokeColor('#005a9a')
+        .lineWidth(1)
         .stroke();
 
-      doc.fontSize(10).font('Helvetica-Bold').fillColor('#1a1a1a');
-      let x = margin + 5;
+      doc.fontSize(11).font('Helvetica-Bold').fillColor('#ffffff'); // White text on colored background
+      let x = margin + 8;
       headers.forEach((header) => {
         const headerLabel = this.formatHeaderLabel(header);
-        doc.text(headerLabel, x, headerY + 8, {
-          width: colWidth - 10,
+        doc.text(headerLabel, x, headerY + 9, {
+          width: colWidth - 16,
           align: this.getColumnAlignment(header),
         });
         x += colWidth;
@@ -1113,72 +1196,81 @@ export class ReportGeneratorService {
           doc.addPage();
           this.addPDFHeader(doc, reportData);
           rowY = doc.y;
-          // Redraw header on new page
+          // Redraw header on new page with enhanced styling
           doc
-            .rect(margin, rowY, availableWidth, 25)
-            .fillColor('#f3f6fa')
-            .fill()
-            .strokeColor('#d0d7de')
+            .rect(margin, rowY, availableWidth, 28)
+            .fillColor('#0077c8')
+            .fill();
+          doc
+            .rect(margin, rowY, availableWidth, 28)
+            .strokeColor('#005a9a')
+            .lineWidth(1)
             .stroke();
-          doc.fontSize(10).font('Helvetica-Bold').fillColor('#1a1a1a');
-          x = margin + 5;
+          doc.fontSize(11).font('Helvetica-Bold').fillColor('#ffffff');
+          x = margin + 8;
           headers.forEach((header) => {
             const headerLabel = this.formatHeaderLabel(header);
-            doc.text(headerLabel, x, rowY + 8, {
-              width: colWidth - 10,
+            doc.text(headerLabel, x, rowY + 9, {
+              width: colWidth - 16,
               align: this.getColumnAlignment(header),
             });
             x += colWidth;
           });
           doc.fillColor('#1a1a1a');
-          rowY += 25;
+          rowY += 28;
         }
 
-        // Draw row border for clean professional look
-        doc.strokeColor('#e0e0e0').lineWidth(0.5);
-        doc.rect(margin, rowY, availableWidth, 20).stroke();
+        // Draw row border for enhanced professional look
+        doc.strokeColor('#e5e7eb').lineWidth(0.5);
+        doc.rect(margin, rowY, availableWidth, 22).stroke();
 
-        // Alternate row background
+        // Alternate row background with subtle colors
         if (index % 2 === 0) {
           doc
-            .rect(margin, rowY, availableWidth, 20)
-            .fillColor('#fafafa')
+            .rect(margin, rowY, availableWidth, 22)
+            .fillColor('#f8f9fa')
+            .fill();
+        } else {
+          doc
+            .rect(margin, rowY, availableWidth, 22)
+            .fillColor('#ffffff')
             .fill();
         }
 
-        doc.fontSize(9).font('Helvetica').fillColor('#1a1a1a');
-        x = margin + 5;
+        doc.fontSize(9.5).font('Helvetica').fillColor('#1a1a1a');
+        x = margin + 8;
         headers.forEach((header) => {
           const value = this.formatCellValue(row[header], header, currency);
-          doc.text(value, x, rowY + 5, {
-            width: colWidth - 10,
+          doc.text(value, x, rowY + 6, {
+            width: colWidth - 16,
             align: this.getColumnAlignment(header),
             lineBreak: false,
             ellipsis: true,
           });
           x += colWidth;
         });
-        rowY += 20;
+        rowY += 22;
       });
 
-      // Total row if applicable
+      // Total row if applicable - Enhanced styling
       if (this.shouldShowTotal(reportData.type) && data.length > 0) {
         const totalRow = this.calculateTotalRow(data, headers, currency);
-        rowY += 5;
+        rowY += 8;
+        // Total row with professional styling
         doc
-          .rect(margin, rowY, availableWidth, 25)
-          .fillColor('#f0f0f0')
+          .rect(margin, rowY, availableWidth, 28)
+          .fillColor('#e8f4f8') // Light brand color tint
           .fill()
-          .strokeColor('#e0e0e0')
-          .lineWidth(1)
+          .strokeColor('#0077c8')
+          .lineWidth(1.5)
           .stroke();
 
-        doc.fontSize(10).font('Helvetica-Bold').fillColor('#1a1a1a');
-        x = margin + 5;
+        doc.fontSize(11).font('Helvetica-Bold').fillColor('#0077c8');
+        x = margin + 8;
         headers.forEach((header) => {
           const value = totalRow[header] || '';
-          doc.text(value, x, rowY + 8, {
-            width: colWidth - 10,
+          doc.text(value, x, rowY + 9, {
+            width: colWidth - 16,
             align: this.getColumnAlignment(header),
           });
           x += colWidth;
@@ -1613,21 +1705,42 @@ export class ReportGeneratorService {
     worksheet: ExcelJS.Worksheet,
     reportData: ReportData,
   ): void {
-    // Company header
+    // Company header - Enhanced professional styling
     worksheet.addRow([
       reportData.metadata?.organizationName || 'SmartExpense UAE',
     ]);
     worksheet.mergeCells(`A1:D1`);
     const headerCell = worksheet.getCell('A1');
-    headerCell.font = { size: 16, bold: true, color: { argb: 'FF1a1a1a' } };
+    headerCell.font = { 
+      size: 18, 
+      bold: true, 
+      color: { argb: 'FFFFFFFF' } // White text
+    };
+    headerCell.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FF0077C8' }, // Brand color
+    };
     headerCell.alignment = { horizontal: 'left', vertical: 'middle' };
+    headerCell.border = {
+      top: { style: 'thin', color: { argb: 'FF005A9A' } },
+      bottom: { style: 'thin', color: { argb: 'FF005A9A' } },
+      left: { style: 'thin', color: { argb: 'FF005A9A' } },
+      right: { style: 'thin', color: { argb: 'FF005A9A' } },
+    };
+    worksheet.getRow(1).height = 28;
 
-    // Report title
+    // Report title - Enhanced styling
     worksheet.addRow([this.getReportTitle(reportData.type)]);
     worksheet.mergeCells(`A2:D2`);
     const titleCell = worksheet.getCell('A2');
-    titleCell.font = { size: 14, bold: true };
-    titleCell.alignment = { horizontal: 'left' };
+    titleCell.font = { 
+      size: 16, 
+      bold: true,
+      color: { argb: 'FF0077C8' } // Brand color
+    };
+    titleCell.alignment = { horizontal: 'left', vertical: 'middle' };
+    worksheet.getRow(2).height = 24;
 
     // Period
     if (
@@ -1675,24 +1788,29 @@ export class ReportGeneratorService {
         return;
       }
 
-      // Headers
+      // Headers - Enhanced professional styling
       const headers = Object.keys(data[0]);
       const formattedHeaders = headers.map((h) => this.formatHeaderLabel(h));
       worksheet.addRow(formattedHeaders);
       const headerRow = worksheet.getRow(worksheet.rowCount);
-      headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+      headerRow.font = { 
+        bold: true, 
+        size: 11,
+        color: { argb: 'FFFFFFFF' } // White text
+      };
       headerRow.fill = {
         type: 'pattern',
         pattern: 'solid',
-        fgColor: { argb: 'FFF3F6FA' },
+        fgColor: { argb: 'FF0077C8' }, // Brand color
       };
       headerRow.alignment = { horizontal: 'center', vertical: 'middle' };
       headerRow.border = {
-        top: { style: 'thin', color: { argb: 'FFD0D7DE' } },
-        bottom: { style: 'thin', color: { argb: 'FFD0D7DE' } },
-        left: { style: 'thin', color: { argb: 'FFD0D7DE' } },
-        right: { style: 'thin', color: { argb: 'FFD0D7DE' } },
+        top: { style: 'medium', color: { argb: 'FF005A9A' } },
+        bottom: { style: 'medium', color: { argb: 'FF005A9A' } },
+        left: { style: 'thin', color: { argb: 'FF005A9A' } },
+        right: { style: 'thin', color: { argb: 'FF005A9A' } },
       };
+      headerRow.height = 22;
 
       // Data rows with formatting
       data.forEach((row: any, index: number) => {
@@ -1718,14 +1836,21 @@ export class ReportGeneratorService {
         });
         const dataRow = worksheet.addRow(values);
 
-        // Alternate row colors
+        // Alternate row colors - Enhanced styling
         if (index % 2 === 0) {
           dataRow.fill = {
             type: 'pattern',
             pattern: 'solid',
-            fgColor: { argb: 'FFF9FAFB' },
+            fgColor: { argb: 'FFF8F9FA' }, // Light gray
+          };
+        } else {
+          dataRow.fill = {
+            type: 'pattern',
+            pattern: 'solid',
+            fgColor: { argb: 'FFFFFFFF' }, // White
           };
         }
+        dataRow.height = 20;
 
         // Format currency columns
         headers.forEach((header, colIndex) => {
@@ -1778,12 +1903,23 @@ export class ReportGeneratorService {
           return totalRow[h] || '';
         });
         const totalDataRow = worksheet.addRow(totalValues);
-        totalDataRow.font = { bold: true, color: { argb: 'FF1a1a1a' } };
+        totalDataRow.font = { 
+          bold: true, 
+          size: 11,
+          color: { argb: 'FF0077C8' } // Brand color
+        };
         totalDataRow.fill = {
           type: 'pattern',
           pattern: 'solid',
-          fgColor: { argb: 'FFE8EEF5' },
+          fgColor: { argb: 'FFE8F4F8' }, // Light brand color tint
         };
+        totalDataRow.border = {
+          top: { style: 'medium', color: { argb: 'FF0077C8' } },
+          bottom: { style: 'medium', color: { argb: 'FF0077C8' } },
+          left: { style: 'thin', color: { argb: 'FF0077C8' } },
+          right: { style: 'thin', color: { argb: 'FF0077C8' } },
+        };
+        totalDataRow.height = 24;
 
         headers.forEach((header, colIndex) => {
           const cell = totalDataRow.getCell(colIndex + 1);
@@ -1868,12 +2004,24 @@ export class ReportGeneratorService {
         'Total Amount',
       ]);
       const headerRow = categorySheet.getRow(1);
-      headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+      headerRow.font = { 
+        bold: true, 
+        size: 11,
+        color: { argb: 'FFFFFFFF' } 
+      };
       headerRow.fill = {
         type: 'pattern',
         pattern: 'solid',
-        fgColor: { argb: 'FFF3F6FA' },
+        fgColor: { argb: 'FF0077C8' },
       };
+      headerRow.border = {
+        top: { style: 'medium', color: { argb: 'FF005A9A' } },
+        bottom: { style: 'medium', color: { argb: 'FF005A9A' } },
+        left: { style: 'thin', color: { argb: 'FF005A9A' } },
+        right: { style: 'thin', color: { argb: 'FF005A9A' } },
+      };
+      headerRow.height = 22;
+      headerRow.alignment = { horizontal: 'center', vertical: 'middle' };
 
       data.categoryBreakdown.forEach((item: any) => {
         categorySheet.addRow([
@@ -1934,12 +2082,24 @@ export class ReportGeneratorService {
         'Linked Expense ID',
       ]);
       const headerRow = transactionsSheet.getRow(1);
-      headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+      headerRow.font = { 
+        bold: true, 
+        size: 11,
+        color: { argb: 'FFFFFFFF' } 
+      };
       headerRow.fill = {
         type: 'pattern',
         pattern: 'solid',
-        fgColor: { argb: 'FFF3F6FA' },
+        fgColor: { argb: 'FF0077C8' },
       };
+      headerRow.border = {
+        top: { style: 'medium', color: { argb: 'FF005A9A' } },
+        bottom: { style: 'medium', color: { argb: 'FF005A9A' } },
+        left: { style: 'thin', color: { argb: 'FF005A9A' } },
+        right: { style: 'thin', color: { argb: 'FF005A9A' } },
+      };
+      headerRow.height = 22;
+      headerRow.alignment = { horizontal: 'center', vertical: 'middle' };
 
       data.transactions.forEach((item: any) => {
         transactionsSheet.addRow([
@@ -2001,12 +2161,24 @@ export class ReportGeneratorService {
         'Balance',
       ]);
       const headerRow = accountsSheet.getRow(1);
-      headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+      headerRow.font = { 
+        bold: true, 
+        size: 11,
+        color: { argb: 'FFFFFFFF' } 
+      };
       headerRow.fill = {
         type: 'pattern',
         pattern: 'solid',
-        fgColor: { argb: 'FFF3F6FA' },
+        fgColor: { argb: 'FF0077C8' },
       };
+      headerRow.border = {
+        top: { style: 'medium', color: { argb: 'FF005A9A' } },
+        bottom: { style: 'medium', color: { argb: 'FF005A9A' } },
+        left: { style: 'thin', color: { argb: 'FF005A9A' } },
+        right: { style: 'thin', color: { argb: 'FF005A9A' } },
+      };
+      headerRow.height = 22;
+      headerRow.alignment = { horizontal: 'center', vertical: 'middle' };
 
       data.accounts.forEach((item: any) => {
         accountsSheet.addRow([
@@ -2028,6 +2200,463 @@ export class ReportGeneratorService {
       ['C', 'D', 'E'].forEach((col) => {
         accountsSheet.getColumn(col).width = 18;
       });
+    }
+  }
+
+  private addXLSXBalanceSheet(
+    workbook: ExcelJS.Workbook,
+    reportData: ReportData,
+    currency: string,
+  ): void {
+    const data = reportData.data;
+
+    // Summary sheet
+    const summarySheet =
+      workbook.getWorksheet('Summary') || workbook.addWorksheet('Summary');
+    this.addXLSXHeader(summarySheet, reportData);
+
+    if (data.summary) {
+      summarySheet.addRow(['Balance Sheet Summary']);
+      summarySheet.addRow(['Total Assets', data.summary.totalAssets || 0]);
+      summarySheet.addRow(['Total Liabilities', data.summary.totalLiabilities || 0]);
+      summarySheet.addRow(['Total Equity', data.summary.totalEquity || 0]);
+      summarySheet.addRow(['Balance', data.summary.balance || 0]);
+
+      [2, 3, 4, 5].forEach((rowNum) => {
+        const cell = summarySheet.getCell(`B${rowNum}`);
+        cell.numFmt = `"${currency}" #,##0.00`;
+      });
+    }
+
+    // Assets sheet
+    if (
+      data.assets &&
+      data.assets.items &&
+      Array.isArray(data.assets.items) &&
+      data.assets.items.length > 0
+    ) {
+      const assetsSheet = workbook.addWorksheet('Assets');
+      assetsSheet.addRow(['Category', 'Amount']);
+      const headerRow = assetsSheet.getRow(1);
+      headerRow.font = { 
+        bold: true, 
+        size: 11,
+        color: { argb: 'FFFFFFFF' } 
+      };
+      headerRow.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FF0077C8' },
+      };
+      headerRow.border = {
+        top: { style: 'medium', color: { argb: 'FF005A9A' } },
+        bottom: { style: 'medium', color: { argb: 'FF005A9A' } },
+        left: { style: 'thin', color: { argb: 'FF005A9A' } },
+        right: { style: 'thin', color: { argb: 'FF005A9A' } },
+      };
+      headerRow.height = 22;
+      headerRow.alignment = { horizontal: 'center', vertical: 'middle' };
+
+      data.assets.items.forEach((item: any) => {
+        assetsSheet.addRow([item.category || 'N/A', item.amount || 0]);
+      });
+
+      // Add total row
+      assetsSheet.addRow(['Total Assets', data.assets.total || 0]);
+      const totalRow = assetsSheet.getRow(assetsSheet.rowCount);
+      totalRow.font = { bold: true };
+      totalRow.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FFE8EEF5' },
+      };
+
+      assetsSheet.getColumn('B').numFmt = `"${currency}" #,##0.00`;
+      assetsSheet.getColumn('B').alignment = { horizontal: 'right' };
+      assetsSheet.getColumn('A').width = 25;
+      assetsSheet.getColumn('B').width = 18;
+    }
+
+    // Liabilities sheet
+    if (
+      data.liabilities &&
+      data.liabilities.items &&
+      Array.isArray(data.liabilities.items) &&
+      data.liabilities.items.length > 0
+    ) {
+      const liabilitiesSheet = workbook.addWorksheet('Liabilities');
+      liabilitiesSheet.addRow(['Vendor', 'Amount', 'Status']);
+      const headerRow = liabilitiesSheet.getRow(1);
+      headerRow.font = { 
+        bold: true, 
+        size: 11,
+        color: { argb: 'FFFFFFFF' } 
+      };
+      headerRow.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FF0077C8' },
+      };
+      headerRow.border = {
+        top: { style: 'medium', color: { argb: 'FF005A9A' } },
+        bottom: { style: 'medium', color: { argb: 'FF005A9A' } },
+        left: { style: 'thin', color: { argb: 'FF005A9A' } },
+        right: { style: 'thin', color: { argb: 'FF005A9A' } },
+      };
+      headerRow.height = 22;
+      headerRow.alignment = { horizontal: 'center', vertical: 'middle' };
+
+      data.liabilities.items.forEach((item: any) => {
+        liabilitiesSheet.addRow([
+          item.vendor || 'N/A',
+          item.amount || 0,
+          item.status || 'N/A',
+        ]);
+      });
+
+      // Add total row
+      liabilitiesSheet.addRow(['Total Liabilities', data.liabilities.total || 0, '']);
+      const totalRow = liabilitiesSheet.getRow(liabilitiesSheet.rowCount);
+      totalRow.font = { bold: true };
+      totalRow.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FFE8EEF5' },
+      };
+
+      liabilitiesSheet.getColumn('B').numFmt = `"${currency}" #,##0.00`;
+      liabilitiesSheet.getColumn('B').alignment = { horizontal: 'right' };
+      liabilitiesSheet.getColumn('A').width = 25;
+      liabilitiesSheet.getColumn('B').width = 18;
+      liabilitiesSheet.getColumn('C').width = 15;
+    }
+  }
+
+  private addXLSXProfitAndLoss(
+    workbook: ExcelJS.Workbook,
+    reportData: ReportData,
+    currency: string,
+  ): void {
+    const data = reportData.data;
+
+    // Summary sheet
+    const summarySheet =
+      workbook.getWorksheet('Summary') || workbook.addWorksheet('Summary');
+    this.addXLSXHeader(summarySheet, reportData);
+
+    if (data.summary) {
+      summarySheet.addRow(['Profit and Loss Summary']);
+      summarySheet.addRow(['Gross Profit', data.summary.grossProfit || 0]);
+      summarySheet.addRow(['Total Expenses', data.summary.totalExpenses || 0]);
+      summarySheet.addRow(['Net Profit', data.summary.netProfit || 0]);
+      if (data.summary.netProfitMargin) {
+        summarySheet.addRow(['Profit Margin (%)', data.summary.netProfitMargin]);
+      }
+
+      [2, 3, 4].forEach((rowNum) => {
+        const cell = summarySheet.getCell(`B${rowNum}`);
+        cell.numFmt = `"${currency}" #,##0.00`;
+      });
+    }
+
+    // Revenue sheet
+    if (data.revenue) {
+      const revenueSheet = workbook.addWorksheet('Revenue');
+      revenueSheet.addRow(['Description', 'Amount', 'VAT', 'Total']);
+      const headerRow = revenueSheet.getRow(1);
+      headerRow.font = { 
+        bold: true, 
+        size: 11,
+        color: { argb: 'FFFFFFFF' } 
+      };
+      headerRow.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FF0077C8' },
+      };
+      headerRow.border = {
+        top: { style: 'medium', color: { argb: 'FF005A9A' } },
+        bottom: { style: 'medium', color: { argb: 'FF005A9A' } },
+        left: { style: 'thin', color: { argb: 'FF005A9A' } },
+        right: { style: 'thin', color: { argb: 'FF005A9A' } },
+      };
+      headerRow.height = 22;
+      headerRow.alignment = { horizontal: 'center', vertical: 'middle' };
+
+      revenueSheet.addRow([
+        'Total Revenue',
+        data.revenue.amount || 0,
+        data.revenue.vat || 0,
+        data.revenue.total || 0,
+      ]);
+
+      ['B', 'C', 'D'].forEach((col) => {
+        revenueSheet.getColumn(col).numFmt = `"${currency}" #,##0.00`;
+        revenueSheet.getColumn(col).alignment = { horizontal: 'right' };
+      });
+      revenueSheet.getColumn('A').width = 25;
+      ['B', 'C', 'D'].forEach((col) => {
+        revenueSheet.getColumn(col).width = 18;
+      });
+    }
+
+    // Expenses sheet
+    if (
+      data.expenses &&
+      data.expenses.items &&
+      Array.isArray(data.expenses.items) &&
+      data.expenses.items.length > 0
+    ) {
+      const expensesSheet = workbook.addWorksheet('Expenses');
+      expensesSheet.addRow(['Category', 'Amount', 'VAT', 'Total']);
+      const headerRow = expensesSheet.getRow(1);
+      headerRow.font = { 
+        bold: true, 
+        size: 11,
+        color: { argb: 'FFFFFFFF' } 
+      };
+      headerRow.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FF0077C8' },
+      };
+      headerRow.border = {
+        top: { style: 'medium', color: { argb: 'FF005A9A' } },
+        bottom: { style: 'medium', color: { argb: 'FF005A9A' } },
+        left: { style: 'thin', color: { argb: 'FF005A9A' } },
+        right: { style: 'thin', color: { argb: 'FF005A9A' } },
+      };
+      headerRow.height = 22;
+      headerRow.alignment = { horizontal: 'center', vertical: 'middle' };
+
+      data.expenses.items.forEach((item: any) => {
+        expensesSheet.addRow([
+          item.category || 'N/A',
+          item.amount || 0,
+          item.vat || 0,
+          item.total || 0,
+        ]);
+      });
+
+      // Add total row
+      expensesSheet.addRow([
+        'Total Expenses',
+        data.expenses.total || 0,
+        data.expenses.vat || 0,
+        data.expenses.total || 0,
+      ]);
+      const totalRow = expensesSheet.getRow(expensesSheet.rowCount);
+      totalRow.font = { bold: true };
+      totalRow.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FFE8EEF5' },
+      };
+
+      ['B', 'C', 'D'].forEach((col) => {
+        expensesSheet.getColumn(col).numFmt = `"${currency}" #,##0.00`;
+        expensesSheet.getColumn(col).alignment = { horizontal: 'right' };
+      });
+      expensesSheet.getColumn('A').width = 25;
+      ['B', 'C', 'D'].forEach((col) => {
+        expensesSheet.getColumn(col).width = 18;
+      });
+    }
+  }
+
+  private addXLSXPayables(
+    workbook: ExcelJS.Workbook,
+    reportData: ReportData,
+    currency: string,
+  ): void {
+    const data = reportData.data;
+
+    // Summary sheet
+    const summarySheet =
+      workbook.getWorksheet('Summary') || workbook.addWorksheet('Summary');
+    this.addXLSXHeader(summarySheet, reportData);
+
+    if (data.summary) {
+      summarySheet.addRow(['Payables Summary']);
+      summarySheet.addRow(['Total Outstanding', data.summary.totalOutstanding || 0]);
+      summarySheet.addRow(['Total Count', data.summary.totalCount || 0]);
+
+      const cell = summarySheet.getCell('B2');
+      cell.numFmt = `"${currency}" #,##0.00`;
+    }
+
+    // Items sheet
+    if (data.items && Array.isArray(data.items) && data.items.length > 0) {
+      const itemsSheet = workbook.addWorksheet('Payables');
+      itemsSheet.addRow([
+        'Vendor',
+        'Invoice Number',
+        'Invoice Date',
+        'Amount',
+        'Status',
+        'Due Date',
+      ]);
+      const headerRow = itemsSheet.getRow(1);
+      headerRow.font = { 
+        bold: true, 
+        size: 11,
+        color: { argb: 'FFFFFFFF' } 
+      };
+      headerRow.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FF0077C8' },
+      };
+      headerRow.border = {
+        top: { style: 'medium', color: { argb: 'FF005A9A' } },
+        bottom: { style: 'medium', color: { argb: 'FF005A9A' } },
+        left: { style: 'thin', color: { argb: 'FF005A9A' } },
+        right: { style: 'thin', color: { argb: 'FF005A9A' } },
+      };
+      headerRow.height = 22;
+      headerRow.alignment = { horizontal: 'center', vertical: 'middle' };
+
+      data.items.forEach((item: any) => {
+        itemsSheet.addRow([
+          item.vendor || 'N/A',
+          item.invoiceNumber || 'N/A',
+          item.invoiceDate || '',
+          item.amount || 0,
+          item.status || 'N/A',
+          item.dueDate || '',
+        ]);
+      });
+
+      // Add total row
+      itemsSheet.addRow([
+        'Total',
+        '',
+        '',
+        data.summary?.totalOutstanding || 0,
+        '',
+        '',
+      ]);
+      const totalRow = itemsSheet.getRow(itemsSheet.rowCount);
+      totalRow.font = { bold: true };
+      totalRow.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FFE8EEF5' },
+      };
+
+      itemsSheet.getColumn('D').numFmt = `"${currency}" #,##0.00`;
+      itemsSheet.getColumn('D').alignment = { horizontal: 'right' };
+      itemsSheet.getColumn('C').numFmt = 'dd-mmm-yyyy';
+      itemsSheet.getColumn('C').alignment = { horizontal: 'center' };
+      itemsSheet.getColumn('F').numFmt = 'dd-mmm-yyyy';
+      itemsSheet.getColumn('F').alignment = { horizontal: 'center' };
+      itemsSheet.getColumn('A').width = 25;
+      itemsSheet.getColumn('B').width = 18;
+      itemsSheet.getColumn('C').width = 15;
+      itemsSheet.getColumn('D').width = 18;
+      itemsSheet.getColumn('E').width = 15;
+      itemsSheet.getColumn('F').width = 15;
+    }
+  }
+
+  private addXLSXReceivables(
+    workbook: ExcelJS.Workbook,
+    reportData: ReportData,
+    currency: string,
+  ): void {
+    const data = reportData.data;
+
+    // Summary sheet
+    const summarySheet =
+      workbook.getWorksheet('Summary') || workbook.addWorksheet('Summary');
+    this.addXLSXHeader(summarySheet, reportData);
+
+    if (data.summary) {
+      summarySheet.addRow(['Receivables Summary']);
+      summarySheet.addRow(['Total Outstanding', data.summary.totalOutstanding || 0]);
+      summarySheet.addRow(['Total Count', data.summary.totalCount || 0]);
+
+      const cell = summarySheet.getCell('B2');
+      cell.numFmt = `"${currency}" #,##0.00`;
+    }
+
+    // Items sheet
+    if (data.items && Array.isArray(data.items) && data.items.length > 0) {
+      const itemsSheet = workbook.addWorksheet('Receivables');
+      itemsSheet.addRow([
+        'Customer',
+        'Invoice Number',
+        'Invoice Date',
+        'Amount',
+        'Outstanding',
+        'Status',
+        'Due Date',
+      ]);
+      const headerRow = itemsSheet.getRow(1);
+      headerRow.font = { 
+        bold: true, 
+        size: 11,
+        color: { argb: 'FFFFFFFF' } 
+      };
+      headerRow.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FF0077C8' },
+      };
+      headerRow.border = {
+        top: { style: 'medium', color: { argb: 'FF005A9A' } },
+        bottom: { style: 'medium', color: { argb: 'FF005A9A' } },
+        left: { style: 'thin', color: { argb: 'FF005A9A' } },
+        right: { style: 'thin', color: { argb: 'FF005A9A' } },
+      };
+      headerRow.height = 22;
+      headerRow.alignment = { horizontal: 'center', vertical: 'middle' };
+
+      data.items.forEach((item: any) => {
+        itemsSheet.addRow([
+          item.customer || 'N/A',
+          item.invoiceNumber || 'N/A',
+          item.invoiceDate || '',
+          item.amount || 0,
+          item.outstanding || 0,
+          item.status || 'N/A',
+          item.dueDate || '',
+        ]);
+      });
+
+      // Add total row
+      itemsSheet.addRow([
+        'Total',
+        '',
+        '',
+        data.summary?.totalAmount || 0,
+        data.summary?.totalOutstanding || 0,
+        '',
+        '',
+      ]);
+      const totalRow = itemsSheet.getRow(itemsSheet.rowCount);
+      totalRow.font = { bold: true };
+      totalRow.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FFE8EEF5' },
+      };
+
+      ['D', 'E'].forEach((col) => {
+        itemsSheet.getColumn(col).numFmt = `"${currency}" #,##0.00`;
+        itemsSheet.getColumn(col).alignment = { horizontal: 'right' };
+      });
+      itemsSheet.getColumn('C').numFmt = 'dd-mmm-yyyy';
+      itemsSheet.getColumn('C').alignment = { horizontal: 'center' };
+      itemsSheet.getColumn('G').numFmt = 'dd-mmm-yyyy';
+      itemsSheet.getColumn('G').alignment = { horizontal: 'center' };
+      itemsSheet.getColumn('A').width = 25;
+      itemsSheet.getColumn('B').width = 18;
+      itemsSheet.getColumn('C').width = 15;
+      itemsSheet.getColumn('D').width = 18;
+      itemsSheet.getColumn('E').width = 18;
+      itemsSheet.getColumn('F').width = 15;
+      itemsSheet.getColumn('G').width = 15;
     }
   }
 

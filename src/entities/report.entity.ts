@@ -13,8 +13,9 @@ export class Report extends AbstractEntity {
   organization: Organization;
 
   @Column({
-    type: 'enum',
-    enum: ReportType,
+    type: 'varchar',
+    length: 50,
+    default: 'trial_balance',
   })
   type: ReportType;
 

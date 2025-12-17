@@ -1,6 +1,5 @@
 import { IsDateString, IsEnum, IsOptional, IsString } from 'class-validator';
 import { ExpenseType } from '../../../common/enums/expense-type.enum';
-import { ExpenseStatus } from '../../../common/enums/expense-status.enum';
 
 export class ExpenseFilterDto {
   @IsOptional()
@@ -14,10 +13,6 @@ export class ExpenseFilterDto {
   @IsOptional()
   @IsString()
   categoryId?: string;
-
-  @IsOptional()
-  @IsEnum(ExpenseStatus)
-  status?: ExpenseStatus;
 
   @IsOptional()
   @IsEnum(ExpenseType)

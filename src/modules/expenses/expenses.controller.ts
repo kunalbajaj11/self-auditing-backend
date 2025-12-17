@@ -21,7 +21,6 @@ import {
 import { CreateExpenseDto } from './dto/create-expense.dto';
 import { ExpenseFilterDto } from './dto/expense-filter.dto';
 import { UpdateExpenseDto } from './dto/update-expense.dto';
-import { UpdateExpenseStatusDto } from './dto/update-status.dto';
 import { LinkAccrualDto } from './dto/link-accrual.dto';
 
 @Controller('expenses')
@@ -94,20 +93,6 @@ export class ExpensesController {
     @Body() dto: UpdateExpenseDto,
   ) {
     return this.expensesService.update(id, user?.organizationId as string, dto);
-  }
-
-  @Patch(':id/status')
-  @Roles(UserRole.ADMIN, UserRole.ACCOUNTANT, UserRole.APPROVER)
-  async updateStatus(
-    @Param('id') id: string,
-    @CurrentUser() user: AuthenticatedUser,
-    @Body() dto: UpdateExpenseStatusDto,
-  ) {
-    return this.expensesService.updateStatus(
-      id,
-      user?.organizationId as string,
-      dto,
-    );
   }
 
   @Post(':id/link-accrual')

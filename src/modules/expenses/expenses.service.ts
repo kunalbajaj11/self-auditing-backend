@@ -14,10 +14,8 @@ import { Accrual } from '../../entities/accrual.entity';
 import { CreateExpenseDto } from './dto/create-expense.dto';
 import { ExpenseFilterDto } from './dto/expense-filter.dto';
 import { UpdateExpenseDto } from './dto/update-expense.dto';
-import { UpdateExpenseStatusDto } from './dto/update-status.dto';
 import { LinkAccrualDto } from './dto/link-accrual.dto';
 import { ExpenseType } from '../../common/enums/expense-type.enum';
-import { ExpenseStatus } from '../../common/enums/expense-status.enum';
 import { ExpenseSource } from '../../common/enums/expense-source.enum';
 import { AccrualStatus } from '../../common/enums/accrual-status.enum';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -88,11 +86,6 @@ export class ExpensesService {
     if (filters.categoryId) {
       query.andWhere('expense.category_id = :categoryId', {
         categoryId: filters.categoryId,
-      });
-    }
-    if (filters.status) {
-      query.andWhere('expense.status = :status', {
-        status: filters.status,
       });
     }
     if (filters.type) {
@@ -278,7 +271,6 @@ export class ExpensesService {
       vendorName: dto.vendorName, // Keep for backward compatibility
       vendorTrn: dto.vendorTrn,
       description: dto.description,
-      status: ExpenseStatus.PENDING,
       source: dto.source ?? ExpenseSource.MANUAL,
       ocrConfidence:
         dto.ocrConfidence !== undefined ? dto.ocrConfidence.toFixed(2) : null,
@@ -699,17 +691,6 @@ export class ExpensesService {
     return this.findById(id, organizationId);
   }
 
-  async updateStatus(
-    id: string,
-    organizationId: string,
-    dto: UpdateExpenseStatusDto,
-  ): Promise<Expense> {
-    const expense = await this.findById(id, organizationId);
-    expense.status = dto.status;
-    await this.expensesRepository.save(expense);
-    return this.findById(id, organizationId);
-  }
-
   async linkAccrual(
     id: string,
     organizationId: string,
@@ -765,8 +746,6 @@ export class ExpensesService {
     accrual.status = isAutoMatched
       ? AccrualStatus.AUTO_SETTLED
       : AccrualStatus.SETTLED;
-
-    expense.status = ExpenseStatus.SETTLED;
 
     await Promise.all([
       this.expensesRepository.save(expense),

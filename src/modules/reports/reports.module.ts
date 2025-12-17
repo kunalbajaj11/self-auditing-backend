@@ -6,10 +6,8 @@ import { ReportGeneratorService } from './report-generator.service';
 import { Expense } from '../../entities/expense.entity';
 import { Accrual } from '../../entities/accrual.entity';
 import { Report } from '../../entities/report.entity';
-import { AuditLog } from '../../entities/audit-log.entity';
 import { Organization } from '../../entities/organization.entity';
-import { Attachment } from '../../entities/attachment.entity';
-import { Vendor } from '../vendors/vendor.entity';
+import { SalesInvoice } from '../../entities/sales-invoice.entity';
 import { User } from '../../entities/user.entity';
 import { NotificationsModule } from '../notifications/notifications.module';
 
@@ -19,10 +17,8 @@ import { NotificationsModule } from '../notifications/notifications.module';
       Expense,
       Accrual,
       Report,
-      AuditLog,
       Organization,
-      Attachment,
-      Vendor,
+      SalesInvoice,
       User,
     ]),
     NotificationsModule,

@@ -11,7 +11,6 @@ import { Organization } from './organization.entity';
 import { User } from './user.entity';
 import { Category } from './category.entity';
 import { ExpenseType as ExpenseTypeEnum } from '../common/enums/expense-type.enum';
-import { ExpenseStatus } from '../common/enums/expense-status.enum';
 import { Attachment } from './attachment.entity';
 import { Accrual } from './accrual.entity';
 import { ExpensePayment } from './expense-payment.entity';
@@ -125,13 +124,6 @@ export class Expense extends AbstractEntity {
 
   @Column({ name: 'purchase_status', length: 50, nullable: true })
   purchaseStatus?: string | null; // 'Purchase - Cash Paid' or 'Purchase - Accruals'
-
-  @Column({
-    type: 'enum',
-    enum: ExpenseStatus,
-    default: ExpenseStatus.PENDING,
-  })
-  status: ExpenseStatus;
 
   @ManyToOne(() => Expense, (expense) => expense.linkedExpenses, {
     nullable: true,

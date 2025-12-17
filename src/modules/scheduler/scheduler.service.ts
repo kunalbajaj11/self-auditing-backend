@@ -13,7 +13,6 @@ import { NotificationType } from '../../common/enums/notification-type.enum';
 import { AccrualStatus } from '../../common/enums/accrual-status.enum';
 import { InvoiceStatus } from '../../common/enums/invoice-status.enum';
 import { PaymentStatus } from '../../common/enums/payment-status.enum';
-import { ExpenseStatus } from '../../common/enums/expense-status.enum';
 import { ReconciliationRecord } from '../../entities/reconciliation-record.entity';
 import { ReconciliationStatus } from '../../common/enums/reconciliation-status.enum';
 import { User } from '../../entities/user.entity';
@@ -495,106 +494,4 @@ export class SchedulerService {
     }
   }
 
-  // Run daily at 10 AM to check for pending expense approvals
-  @Cron('0 10 * * *')
-  async checkPendingExpenseApprovals() {
-    const pendingExpenses = await this.expensesRepository.find({
-      where: {
-        status: ExpenseStatus.PENDING,
-        isDeleted: false,
-      },
-      relations: ['organization', 'user'],
-    });
-
-    // Priority 1: Filter out expenses that are now approved (may have changed since query)
-    const stillPendingExpenses: Expense[] = [];
-    for (const expense of pendingExpenses) {
-      const currentExpense = await this.expensesRepository.findOne({
-        where: { id: expense.id },
-      });
-      if (currentExpense?.status === ExpenseStatus.PENDING) {
-        stillPendingExpenses.push(expense);
-      }
-    }
-
-    // Group expenses by organization to avoid spamming
-    const expensesByOrg = new Map<string, Expense[]>();
-    for (const expense of stillPendingExpenses) {
-      const orgId = expense.organization.id;
-      if (!expensesByOrg.has(orgId)) {
-        expensesByOrg.set(orgId, []);
-      }
-      expensesByOrg.get(orgId)!.push(expense);
-    }
-
-    for (const [orgId, expenses] of expensesByOrg.entries()) {
-      if (expenses.length === 0) continue;
-
-      // Find admin and accountant users for the organization
-      const approvers = await this.usersRepository.find({
-        where: {
-          organization: { id: orgId },
-          role: In([UserRole.ADMIN, UserRole.ACCOUNTANT]),
-        },
-      });
-
-      if (approvers.length > 0) {
-        // Priority 2: Check if we already sent a reminder for this set of expenses today
-        const todayStart = new Date();
-        todayStart.setHours(0, 0, 0, 0);
-
-        // Create a unique identifier for this set of expenses
-        const expenseIds = expenses
-          .map((e) => e.id)
-          .sort()
-          .join(',');
-        const expenseIdsHash = expenseIds.substring(0, 100); // Use first 100 chars as identifier
-
-        const existingNotification = await this.notificationsRepository
-          .createQueryBuilder('notification')
-          .where('notification.organization_id = :orgId', { orgId })
-          .andWhere('notification.type = :type', {
-            type: NotificationType.EXPENSE_APPROVAL_PENDING,
-          })
-          .andWhere('notification.message LIKE :expenseRef', {
-            expenseRef: `%${expenses.length} expense(s)%`,
-          })
-          .andWhere('notification.created_at >= :todayStart', { todayStart })
-          .getOne();
-
-        // Only send if no reminder was sent today
-        if (!existingNotification) {
-          const totalAmount = expenses.reduce(
-            (sum, e) => sum + parseFloat(e.totalAmount),
-            0,
-          );
-          const title = 'Expense Approval Pending';
-          const message = `You have ${expenses.length} expense(s) totaling ${expenses[0]?.currency || 'AED'} ${totalAmount.toFixed(2)} pending approval. Please review and approve them.`;
-
-          // Prepare template variables
-          const templateVars = {
-            expenseCount: expenses.length.toString(),
-            currency: expenses[0]?.currency || 'AED',
-            totalAmount: totalAmount.toFixed(2),
-          };
-
-          for (const approver of approvers) {
-            if (approver.email) {
-              await this.notificationsService.scheduleNotification({
-                organizationId: orgId,
-                userId: approver.id,
-                title,
-                message,
-                type: NotificationType.EXPENSE_APPROVAL_PENDING,
-                channel: NotificationChannel.EMAIL,
-                entityType: 'expense_batch',
-                entityId: expenseIdsHash, // Use hash as entity ID for batch
-                templateVariables: templateVars,
-              });
-            }
-          }
-        }
-      }
-    }
-  }
 }
