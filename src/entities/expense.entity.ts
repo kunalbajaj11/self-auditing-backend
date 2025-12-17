@@ -17,6 +17,7 @@ import { ExpensePayment } from './expense-payment.entity';
 import { ExpenseSource } from '../common/enums/expense-source.enum';
 import { ExpenseType } from './expense-type.entity';
 import { Vendor } from '../modules/vendors/vendor.entity';
+import { VatTaxType } from '../common/enums/vat-tax-type.enum';
 
 @Entity({ name: 'expenses' })
 export class Expense extends AbstractEntity {
@@ -75,6 +76,15 @@ export class Expense extends AbstractEntity {
     default: 0,
   })
   vatAmount: string;
+
+  @Column({
+    name: 'vat_tax_type',
+    type: 'varchar',
+    length: 50,
+    nullable: true,
+    default: 'standard',
+  })
+  vatTaxType?: VatTaxType | null; // Tax type: STANDARD, ZERO_RATED, EXEMPT, REVERSE_CHARGE
 
   @Column({
     name: 'total_amount',

@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In } from 'typeorm';
@@ -17,9 +17,15 @@ import { ReconciliationRecord } from '../../entities/reconciliation-record.entit
 import { ReconciliationStatus } from '../../common/enums/reconciliation-status.enum';
 import { User } from '../../entities/user.entity';
 import { UserRole } from '../../common/enums/user-role.enum';
+import { Organization } from '../../entities/organization.entity';
+import { OrganizationStatus } from '../../common/enums/organization-status.enum';
+import { SettingsService } from '../settings/settings.service';
+import { ForexRateService } from '../forex/forex-rate.service';
 
 @Injectable()
 export class SchedulerService {
+  private readonly logger = new Logger(SchedulerService.name);
+
   constructor(
     @InjectRepository(Notification)
     private readonly notificationsRepository: Repository<Notification>,
@@ -33,8 +39,12 @@ export class SchedulerService {
     private readonly reconciliationRecordsRepository: Repository<ReconciliationRecord>,
     @InjectRepository(User)
     private readonly usersRepository: Repository<User>,
+    @InjectRepository(Organization)
+    private readonly organizationsRepository: Repository<Organization>,
     private readonly notificationsService: NotificationsService,
     private readonly emailService: EmailService,
+    private readonly settingsService: SettingsService,
+    private readonly forexRateService: ForexRateService,
   ) {}
 
   // Run every hour to send scheduled notifications
@@ -490,6 +500,105 @@ export class SchedulerService {
             }
           }
         }
+      }
+    }
+  }
+
+  // Run daily at 2 AM to update exchange rates (if auto-update is enabled)
+  @Cron('0 2 * * *')
+  async updateExchangeRatesDaily() {
+    this.logger.log('Starting daily exchange rate update job');
+    
+    const organizations = await this.organizationsRepository.find({
+      where: { status: OrganizationStatus.ACTIVE },
+    });
+
+    for (const organization of organizations) {
+      try {
+        const currencySettings = await this.settingsService.getCurrencySettings(organization.id);
+        
+        // Check if auto-update is enabled
+        if (!currencySettings.currencyAutoUpdateRates) {
+          continue;
+        }
+
+        // Check update frequency
+        if (currencySettings.currencyUpdateFrequency === 'daily') {
+          // Check exchange rate source
+          if (currencySettings.currencyExchangeRateSource === 'api' || 
+              currencySettings.currencyExchangeRateSource === 'auto') {
+            await this.forexRateService.updateRates(organization);
+            this.logger.log(`Updated exchange rates for organization: ${organization.name}`);
+          }
+        }
+      } catch (error) {
+        this.logger.error(`Failed to update exchange rates for organization ${organization.id}: ${error.message}`);
+      }
+    }
+  }
+
+  // Run weekly on Monday at 2 AM to update exchange rates (if frequency is weekly)
+  @Cron('0 2 * * 1')
+  async updateExchangeRatesWeekly() {
+    this.logger.log('Starting weekly exchange rate update job');
+    
+    const organizations = await this.organizationsRepository.find({
+      where: { status: OrganizationStatus.ACTIVE },
+    });
+
+    for (const organization of organizations) {
+      try {
+        const currencySettings = await this.settingsService.getCurrencySettings(organization.id);
+        
+        // Check if auto-update is enabled
+        if (!currencySettings.currencyAutoUpdateRates) {
+          continue;
+        }
+
+        // Check update frequency
+        if (currencySettings.currencyUpdateFrequency === 'weekly') {
+          // Check exchange rate source
+          if (currencySettings.currencyExchangeRateSource === 'api' || 
+              currencySettings.currencyExchangeRateSource === 'auto') {
+            await this.forexRateService.updateRates(organization);
+            this.logger.log(`Updated exchange rates for organization: ${organization.name}`);
+          }
+        }
+      } catch (error) {
+        this.logger.error(`Failed to update exchange rates for organization ${organization.id}: ${error.message}`);
+      }
+    }
+  }
+
+  // Run monthly on the 1st at 2 AM to update exchange rates (if frequency is monthly)
+  @Cron('0 2 1 * *')
+  async updateExchangeRatesMonthly() {
+    this.logger.log('Starting monthly exchange rate update job');
+    
+    const organizations = await this.organizationsRepository.find({
+      where: { status: OrganizationStatus.ACTIVE },
+    });
+
+    for (const organization of organizations) {
+      try {
+        const currencySettings = await this.settingsService.getCurrencySettings(organization.id);
+        
+        // Check if auto-update is enabled
+        if (!currencySettings.currencyAutoUpdateRates) {
+          continue;
+        }
+
+        // Check update frequency
+        if (currencySettings.currencyUpdateFrequency === 'monthly') {
+          // Check exchange rate source
+          if (currencySettings.currencyExchangeRateSource === 'api' || 
+              currencySettings.currencyExchangeRateSource === 'auto') {
+            await this.forexRateService.updateRates(organization);
+            this.logger.log(`Updated exchange rates for organization: ${organization.name}`);
+          }
+        }
+      } catch (error) {
+        this.logger.error(`Failed to update exchange rates for organization ${organization.id}: ${error.message}`);
       }
     }
   }

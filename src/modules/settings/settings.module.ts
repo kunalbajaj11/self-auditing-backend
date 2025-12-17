@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { SettingsController } from './settings.controller';
@@ -20,7 +20,7 @@ import { AttachmentsModule } from '../attachments/attachments.module';
       ExchangeRate,
       Organization,
     ]),
-    ForexModule,
+    forwardRef(() => ForexModule),
     AttachmentsModule,
   ],
   controllers: [SettingsController],

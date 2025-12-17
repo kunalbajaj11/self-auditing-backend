@@ -26,9 +26,13 @@ import { DuplicateDetectionService } from '../duplicates/duplicate-detection.ser
 import { ForexRateService } from '../forex/forex-rate.service';
 import { LicenseKeysService } from '../license-keys/license-keys.service';
 import { SettingsService } from '../settings/settings.service';
+import { JournalEntriesService } from '../journal-entries/journal-entries.service';
 import { Vendor } from '../vendors/vendor.entity';
 import { Repository as TypeOrmRepository } from 'typeorm';
 import { ConflictException } from '@nestjs/common';
+import { JournalEntryType } from '../../common/enums/journal-entry-type.enum';
+import { JournalEntryCategory } from '../../common/enums/journal-entry-category.enum';
+import { JournalEntryStatus } from '../../common/enums/journal-entry-status.enum';
 
 const DEFAULT_ACCRUAL_TOLERANCE = Number(
   process.env.ACCRUAL_AMOUNT_TOLERANCE ?? 5,
@@ -57,57 +61,81 @@ export class ExpensesService {
     private readonly forexRateService: ForexRateService,
     private readonly licenseKeysService: LicenseKeysService,
     private readonly settingsService: SettingsService,
+    private readonly journalEntriesService: JournalEntriesService,
   ) {}
 
   /**
    * Calculate VAT amount based on tax settings
    * Supports both inclusive and exclusive tax calculation methods
+   * For reverse charge: VAT is calculated but NOT added to total (customer self-accounts)
    */
   private async calculateVatAmount(
     organizationId: string,
     amount: number,
     taxRate?: number,
-  ): Promise<{ vatAmount: number; baseAmount: number }> {
+    vatTaxType?: string,
+  ): Promise<{ vatAmount: number; baseAmount: number; isReverseCharge: boolean }> {
     // Get tax settings
     const taxSettings = await this.settingsService.getTaxSettings(organizationId);
     const calculationMethod = taxSettings.taxCalculationMethod || 'inclusive';
     const defaultTaxRate = taxSettings.taxDefaultRate || 5;
-    const effectiveTaxRate = taxRate ?? defaultTaxRate;
-
+    
+    // Check if reverse charge applies
+    const isReverseCharge = vatTaxType === 'reverse_charge';
+    
     let vatAmount: number;
     let baseAmount: number;
+    let effectiveTaxRate: number;
 
-    if (calculationMethod === 'inclusive') {
-      // Tax is included in the amount
-      // VAT = Amount * (TaxRate / (100 + TaxRate))
-      // Base = Amount - VAT
-      vatAmount = (amount * effectiveTaxRate) / (100 + effectiveTaxRate);
-      baseAmount = amount - vatAmount;
-    } else {
-      // Tax is exclusive (added on top)
-      // VAT = Amount * (TaxRate / 100)
-      // Base = Amount
+    if (isReverseCharge) {
+      // Reverse charge: use reverse charge rate from settings
+      effectiveTaxRate = taxSettings.taxReverseChargeRate || taxSettings.taxDefaultRate || 5;
+      // For reverse charge, VAT is always calculated on the base amount (exclusive)
       vatAmount = (amount * effectiveTaxRate) / 100;
+      baseAmount = amount; // Total = base amount (VAT not added)
+    } else if (vatTaxType === 'zero_rated' || vatTaxType === 'exempt') {
+      // Zero rated or exempt: no VAT
+      vatAmount = 0;
       baseAmount = amount;
-    }
-
-    // Apply rounding method
-    const roundingMethod = taxSettings.taxRoundingMethod || 'standard';
-    if (roundingMethod === 'up') {
-      vatAmount = Math.ceil(vatAmount * 100) / 100;
-    } else if (roundingMethod === 'down') {
-      vatAmount = Math.floor(vatAmount * 100) / 100;
+      effectiveTaxRate = 0;
     } else {
-      // standard rounding
-      vatAmount = Math.round(vatAmount * 100) / 100;
+      // Standard VAT calculation
+      effectiveTaxRate = taxRate ?? defaultTaxRate;
+
+      if (calculationMethod === 'inclusive') {
+        // Tax is included in the amount
+        // VAT = Amount * (TaxRate / (100 + TaxRate))
+        // Base = Amount - VAT
+        vatAmount = (amount * effectiveTaxRate) / (100 + effectiveTaxRate);
+        baseAmount = amount - vatAmount;
+      } else {
+        // Tax is exclusive (added on top)
+        // VAT = Amount * (TaxRate / 100)
+        // Base = Amount
+        vatAmount = (amount * effectiveTaxRate) / 100;
+        baseAmount = amount;
+      }
     }
 
-    // Recalculate base amount for inclusive to ensure consistency
-    if (calculationMethod === 'inclusive') {
-      baseAmount = amount - vatAmount;
+    // Apply rounding method (except for zero/exempt)
+    if (!isReverseCharge && vatTaxType !== 'zero_rated' && vatTaxType !== 'exempt') {
+      const roundingMethod = taxSettings.taxRoundingMethod || 'standard';
+      if (roundingMethod === 'up') {
+        vatAmount = Math.ceil(vatAmount * 100) / 100;
+      } else if (roundingMethod === 'down') {
+        vatAmount = Math.floor(vatAmount * 100) / 100;
+      } else {
+        // standard rounding
+        vatAmount = Math.round(vatAmount * 100) / 100;
+      }
+
+      // Recalculate base amount for inclusive to ensure consistency
+      if (calculationMethod === 'inclusive') {
+        baseAmount = amount - vatAmount;
+      }
     }
 
-    return { vatAmount, baseAmount };
+    return { vatAmount, baseAmount, isReverseCharge };
   }
 
   /**
@@ -281,10 +309,28 @@ export class ExpensesService {
       );
     }
 
+    // Determine VAT tax type (reverse charge, zero-rated, exempt, or standard)
+    let vatTaxType = dto.vatTaxType || 'standard';
+    
+    // Auto-detect reverse charge eligibility if not explicitly set
+    if (!dto.vatTaxType) {
+      const taxSettings = await this.settingsService.getTaxSettings(organizationId);
+      if (taxSettings.taxEnableReverseCharge) {
+        // Check if vendor has TRN (B2B transaction eligible for reverse charge)
+        const vendorTrn = vendor?.vendorTrn || dto.vendorTrn;
+        if (vendorTrn) {
+          // For UAE: B2B transactions with TRN are typically eligible for reverse charge
+          // User can override this in the UI if needed
+          vatTaxType = 'standard'; // Default to standard, user can change in UI
+        }
+      }
+    }
+
     // Calculate VAT if not provided, using tax settings
-    // Note: totalAmount is auto-calculated as amount + vatAmount in the database
+    // Note: For reverse charge, totalAmount needs manual override (DB generated column adds VAT)
     let vatAmount = dto.vatAmount;
     let expenseAmount = dto.amount;
+    let isReverseCharge = false;
 
     if (vatAmount === undefined || vatAmount === null) {
       // Auto-calculate VAT from tax settings
@@ -293,11 +339,18 @@ export class ExpensesService {
         organizationId,
         dto.amount,
         defaultTaxRate,
+        vatTaxType,
       );
       vatAmount = taxCalculation.vatAmount;
+      isReverseCharge = taxCalculation.isReverseCharge;
       // For inclusive tax, amount should be base amount (without VAT)
       // For exclusive tax, amount stays as entered (base amount)
       expenseAmount = taxCalculation.baseAmount;
+    } else {
+      // VAT amount provided, but check if reverse charge type is set
+      if (vatTaxType === 'reverse_charge') {
+        isReverseCharge = true;
+      }
     }
 
     // Handle currency and conversion (use final expense amount after tax calculation)
@@ -356,6 +409,7 @@ export class ExpensesService {
       vendor: vendor,
       amount: this.formatMoney(expenseAmount),
       vatAmount: this.formatMoney(vatAmount),
+      vatTaxType: vatTaxType as any, // Store VAT tax type
       currency: expenseCurrency,
       exchangeRate: exchangeRate,
       baseAmount: baseAmount,
@@ -386,6 +440,20 @@ export class ExpensesService {
 
     // Save expense first to get the ID
     const saved = await this.expensesRepository.save(expense);
+
+    // Override total_amount for reverse charge (DB generated column adds VAT, but reverse charge VAT shouldn't be in total)
+    if (isReverseCharge) {
+      // For reverse charge: total_amount = amount (VAT not included)
+      // The DB generated column would have calculated: total_amount = amount + vatAmount
+      // We need to override it to: total_amount = amount
+      saved.totalAmount = saved.amount;
+      await this.expensesRepository
+        .createQueryBuilder()
+        .update(Expense)
+        .set({ totalAmount: saved.amount })
+        .where('id = :id', { id: saved.id })
+        .execute();
+    }
 
     // Then create and save attachments with the saved expense reference
     if (dto.attachments?.length) {
@@ -745,6 +813,13 @@ export class ExpensesService {
       expense.type = dto.type;
     }
     
+    // Update VAT tax type if provided
+    if (dto.vatTaxType !== undefined) {
+      expense.vatTaxType = dto.vatTaxType as any;
+    }
+    const currentVatTaxType = expense.vatTaxType || dto.vatTaxType || 'standard';
+    const isReverseCharge = currentVatTaxType === 'reverse_charge';
+
     // Recalculate VAT if amount changes and VAT not explicitly provided
     if (dto.amount !== undefined) {
       const newAmount = dto.amount;
@@ -757,11 +832,24 @@ export class ExpensesService {
           organizationId,
           newAmount,
           defaultTaxRate,
+          currentVatTaxType,
         );
         expense.vatAmount = this.formatMoney(taxCalculation.vatAmount);
         // Update amount to base amount for inclusive tax
         expense.amount = this.formatMoney(taxCalculation.baseAmount);
       }
+    } else if (dto.vatTaxType !== undefined && dto.vatAmount === undefined) {
+      // VAT tax type changed, recalculate VAT with new type
+      const currentAmount = parseFloat(expense.amount);
+      const defaultTaxRate = await this.getDefaultTaxRate(organizationId);
+      const taxCalculation = await this.calculateVatAmount(
+        organizationId,
+        currentAmount,
+        defaultTaxRate,
+        currentVatTaxType,
+      );
+      expense.vatAmount = this.formatMoney(taxCalculation.vatAmount);
+      expense.amount = this.formatMoney(taxCalculation.baseAmount);
     }
     
     if (dto.vatAmount !== undefined) {
@@ -798,6 +886,17 @@ export class ExpensesService {
     }
 
     await this.expensesRepository.save(expense);
+
+    // Override total_amount for reverse charge (DB generated column adds VAT, but reverse charge VAT shouldn't be in total)
+    if (isReverseCharge) {
+      // For reverse charge: total_amount = amount (VAT not included)
+      await this.expensesRepository
+        .createQueryBuilder()
+        .update(Expense)
+        .set({ totalAmount: expense.amount })
+        .where('id = :id', { id: expense.id })
+        .execute();
+    }
 
     // Try auto-matching accrual if vendor or amount was updated and expense is not already linked
     if (

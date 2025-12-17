@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, LessThanOrEqual, MoreThanOrEqual } from 'typeorm';
 import { ExchangeRate } from '../../entities/exchange-rate.entity';
 import { Organization } from '../../entities/organization.entity';
+import { SettingsService } from '../settings/settings.service';
 import axios from 'axios';
 
 @Injectable()
@@ -12,6 +13,7 @@ export class ForexRateService {
   constructor(
     @InjectRepository(ExchangeRate)
     private readonly exchangeRateRepository: Repository<ExchangeRate>,
+    private readonly settingsService?: SettingsService,
   ) {}
 
   /**
@@ -63,7 +65,38 @@ export class ForexRateService {
       return Number(closestRate.rate);
     }
 
-    // If not found, fetch from API and store
+    // If not found, check exchange rate source setting
+    if (this.settingsService) {
+      try {
+        const currencySettings = await this.settingsService.getCurrencySettings(organization.id);
+        const source = currencySettings.currencyExchangeRateSource || 'api';
+        
+        // If source is manual, don't auto-fetch - return 1 and log warning
+        if (source === 'manual') {
+          this.logger.warn(`Exchange rate source is set to manual for ${organization.name}. Please add exchange rate manually.`);
+          return 1;
+        }
+        
+        // If source is api or auto, fetch from API
+        if (source === 'api' || source === 'auto') {
+          const rate = await this.fetchRateFromAPI(fromCurrency, toCurrency, date);
+          await this.saveRate(
+            organization,
+            fromCurrency,
+            toCurrency,
+            dateString,
+            rate,
+            'api',
+            false,
+          );
+          return rate;
+        }
+      } catch (error) {
+        this.logger.error(`Failed to get currency settings: ${error.message}`);
+      }
+    }
+    
+    // Fallback: try to fetch from API if settings service not available
     try {
       const rate = await this.fetchRateFromAPI(fromCurrency, toCurrency, date);
       await this.saveRate(
@@ -72,6 +105,8 @@ export class ForexRateService {
         toCurrency,
         dateString,
         rate,
+        'api',
+        false,
       );
       return rate;
     } catch (error) {

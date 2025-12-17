@@ -12,6 +12,7 @@ import {
 import { Type } from 'class-transformer';
 import { ExpenseType } from '../../../common/enums/expense-type.enum';
 import { ExpenseSource } from '../../../common/enums/expense-source.enum';
+import { VatTaxType } from '../../../common/enums/vat-tax-type.enum';
 import { AttachmentInputDto } from './attachment-input.dto';
 
 export class CreateExpenseDto {
@@ -31,6 +32,10 @@ export class CreateExpenseDto {
   @IsNumber()
   @Min(0)
   vatAmount?: number;
+
+  @IsOptional()
+  @IsEnum(VatTaxType)
+  vatTaxType?: VatTaxType;
 
   @IsDateString()
   expenseDate: string;

@@ -29,25 +29,107 @@ export interface ReportData {
       totalAmountBeforeVat?: number;
       totalVatAmount?: number;
       totalAmountAfterVat?: number;
+      averageExpenseAmount?: number;
       highestCategorySpend?: { category: string; amount: number };
       topVendor?: { vendor: string; amount: number };
-      averageExpenseAmount?: number;
       totalCreditNotes?: number;
       totalAdjustments?: number;
       userWithHighestUploadCount?: { user: string; count: number };
     };
+    currencySettings?: {
+      displayFormat?: string;
+      rounding?: number;
+      roundingMethod?: string;
+      showOnInvoices?: boolean;
+      showExchangeRate?: boolean;
+    };
+    exchangeRate?: {
+      rate: number;
+      fromCurrency: string;
+      toCurrency: string;
+      date: string;
+    } | null;
   };
 }
 
 @Injectable()
 export class ReportGeneratorService {
+  /**
+   * Format currency amount based on organization settings
+   */
   private formatCurrency(
     value: number | string,
     currency: string = 'AED',
+    currencySettings?: {
+      displayFormat?: string;
+      rounding?: number;
+      roundingMethod?: string;
+      showOnInvoices?: boolean;
+    },
   ): string {
     const numValue = typeof value === 'string' ? parseFloat(value) : value;
-    if (isNaN(numValue)) return `${currency} 0.00`;
-    return `${currency} ${numValue.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}`;
+    if (isNaN(numValue)) {
+      const decimalPlaces = currencySettings?.rounding ?? 2;
+      const rounded = 0;
+      const formatted = rounded.toFixed(decimalPlaces);
+      return this.formatCurrencyDisplay(formatted, currency, currencySettings);
+    }
+
+    // Apply rounding method
+    const roundingMethod = currencySettings?.roundingMethod || 'standard';
+    const decimalPlaces = currencySettings?.rounding ?? 2;
+    let rounded: number;
+    
+    if (roundingMethod === 'up') {
+      rounded = Math.ceil(numValue * Math.pow(10, decimalPlaces)) / Math.pow(10, decimalPlaces);
+    } else if (roundingMethod === 'down') {
+      rounded = Math.floor(numValue * Math.pow(10, decimalPlaces)) / Math.pow(10, decimalPlaces);
+    } else {
+      // standard rounding
+      rounded = Math.round(numValue * Math.pow(10, decimalPlaces)) / Math.pow(10, decimalPlaces);
+    }
+
+    const formatted = rounded.toFixed(decimalPlaces).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    
+    // If showOnInvoices is false, return only the number
+    if (currencySettings?.showOnInvoices === false) {
+      return formatted;
+    }
+
+    return this.formatCurrencyDisplay(formatted, currency, currencySettings);
+  }
+
+  /**
+   * Format currency display based on display format setting
+   */
+  private formatCurrencyDisplay(
+    formattedNumber: string,
+    currency: string,
+    currencySettings?: { displayFormat?: string },
+  ): string {
+    const format = currencySettings?.displayFormat || 'symbol';
+    const currencySymbols: Record<string, string> = {
+      AED: 'د.إ',
+      USD: '$',
+      EUR: '€',
+      GBP: '£',
+      SAR: '﷼',
+      OMR: 'ر.ع.',
+      KWD: 'د.ك',
+      BHD: '.د.ب',
+      INR: '₹',
+    };
+
+    const symbol = currencySymbols[currency] || currency;
+
+    if (format === 'code') {
+      return `${currency} ${formattedNumber}`;
+    } else if (format === 'both') {
+      return `${symbol} ${currency} ${formattedNumber}`;
+    } else {
+      // symbol (default)
+      return `${symbol} ${formattedNumber}`;
+    }
   }
 
   private formatDate(dateString: string | Date): string {
@@ -2791,6 +2873,8 @@ export class ReportGeneratorService {
         const customer = invoice.customer;
         const metadata = reportData.metadata || {};
         const currency = metadata.currency || invoice.currency || 'AED';
+        const currencySettings = metadata.currencySettings || {};
+        const exchangeRate = metadata.exchangeRate || null;
 
         const doc = new PDFDocument({
           margin: 50,
@@ -2957,6 +3041,21 @@ export class ReportGeneratorService {
             if (orgTrn) {
               doc.fillColor(colors.textLight).text(`TRN: `, leftX, currentY);
               doc.fillColor(colors.text).text(orgTrn, leftX + 32, currentY);
+              currentY += 13;
+            }
+            
+            // Show tax registration number if available
+            const taxSettings = (metadata as any).taxSettings || {};
+            if (taxSettings.taxRegistrationNumber) {
+              doc.fillColor(colors.textLight).text(`Tax Registration: `, leftX, currentY);
+              doc.fillColor(colors.text).text(taxSettings.taxRegistrationNumber, leftX + 100, currentY);
+              currentY += 13;
+            }
+            
+            // Show tax registration date if available
+            if (taxSettings.taxRegistrationDate) {
+              doc.fillColor(colors.textLight).text(`Registration Date: `, leftX, currentY);
+              doc.fillColor(colors.text).text(this.formatDateForInvoice(taxSettings.taxRegistrationDate), leftX + 100, currentY);
               currentY += 13;
             }
           }
@@ -3213,6 +3312,19 @@ export class ReportGeneratorService {
           align: 'center',
         });
 
+        // Currency rounding helper
+        const decimalPlaces = currencySettings?.rounding ?? 2;
+        const roundingMethod = currencySettings?.roundingMethod || 'standard';
+        const roundAmount = (val: number) => {
+          if (roundingMethod === 'up') {
+            return Math.ceil(val * Math.pow(10, decimalPlaces)) / Math.pow(10, decimalPlaces);
+          } else if (roundingMethod === 'down') {
+            return Math.floor(val * Math.pow(10, decimalPlaces)) / Math.pow(10, decimalPlaces);
+          } else {
+            return Math.round(val * Math.pow(10, decimalPlaces)) / Math.pow(10, decimalPlaces);
+          }
+        };
+
         // Table Rows - Clean styling with subtle borders
         let rowY = tableTop + rowHeight;
         lineItems.forEach((item: any, index: number) => {
@@ -3362,7 +3474,7 @@ export class ReportGeneratorService {
 
           // Rate
           const unitPrice = parseFloat(item.unitPrice || '0');
-          doc.text(unitPrice.toFixed(2), tableX + 8, rowY + 7, {
+          doc.text(roundAmount(unitPrice).toFixed(decimalPlaces), tableX + 8, rowY + 7, {
             width: colWidths.rate - 16,
             align: 'right',
           });
@@ -3377,7 +3489,7 @@ export class ReportGeneratorService {
 
           // Amount
           const itemAmount = parseFloat(item.amount || '0');
-          doc.text(itemAmount.toFixed(2), tableX + 8, rowY + 7, {
+          doc.text(roundAmount(itemAmount).toFixed(decimalPlaces), tableX + 8, rowY + 7, {
             width: colWidths.amount - 16,
             align: 'right',
           });
@@ -3386,16 +3498,20 @@ export class ReportGeneratorService {
           // VAT % and VAT Amount
           const vatRate = parseFloat(item.vatRate || '0');
           const vatAmount = parseFloat(item.vatAmount || '0');
+          const isReverseCharge = item.vatTaxType === 'reverse_charge' || item.vatTaxType === 'REVERSE_CHARGE';
 
           // VAT % on first line
           doc.fontSize(9).fillColor(colors.text);
-          doc.text(`${vatRate.toFixed(2)}%`, tableX + 8, rowY + 5, {
+          const vatRateText = isReverseCharge 
+            ? `${vatRate.toFixed(2)}% RC` // Add "RC" indicator for reverse charge
+            : `${vatRate.toFixed(2)}%`;
+          doc.text(vatRateText, tableX + 8, rowY + 5, {
             width: colWidths.vatPercent - 16,
             align: 'center',
           });
           // VAT Amount on second line (below) - matching sample format
           doc.fontSize(8).fillColor(colors.textLight);
-          doc.text(vatAmount.toFixed(2), tableX + 8, rowY + 16, {
+          doc.text(roundAmount(vatAmount).toFixed(decimalPlaces), tableX + 8, rowY + 16, {
             width: colWidths.vatPercent - 16,
             align: 'center',
           });
@@ -3421,71 +3537,137 @@ export class ReportGeneratorService {
         const vatTableWidth = 200;
         const vatRowHeight = 22;
 
-        // VAT Summary Table (Right side) - Clean borders
+        // Check if tax should be shown on invoices
+        const taxSettings = (metadata as any).taxSettings || {};
+        const showTaxOnInvoices = taxSettings.taxShowOnInvoices !== false; // Default to true
+        const showTaxBreakdown = taxSettings.taxShowBreakdown !== false; // Default to true
+
+        // VAT Summary Table (Right side) - Clean borders (only if tax display enabled)
         const vatSummaryX = totalsX;
         let vatY = totalsY;
+        
+        // Calculate total VAT for use later
+        const totalVat = parseFloat(invoice.vatAmount || '0');
 
-        // Table header with subtle background
-        doc
-          .fillColor(colors.backgroundLight)
-          .rect(vatSummaryX, vatY, vatTableWidth, vatRowHeight)
-          .fill();
-        doc.strokeColor(colors.border).lineWidth(0.5);
-        doc.rect(vatSummaryX, vatY, vatTableWidth, vatRowHeight).stroke();
+        if (showTaxOnInvoices) {
+          // Table header with subtle background
+          doc
+            .fillColor(colors.backgroundLight)
+            .rect(vatSummaryX, vatY, vatTableWidth, vatRowHeight)
+            .fill();
+          doc.strokeColor(colors.border).lineWidth(0.5);
+          doc.rect(vatSummaryX, vatY, vatTableWidth, vatRowHeight).stroke();
 
-        // Column dividers
-        doc
-          .moveTo(vatSummaryX + 50, vatY)
-          .lineTo(vatSummaryX + 50, vatY + vatRowHeight)
-          .stroke();
-        doc
-          .moveTo(vatSummaryX + 125, vatY)
-          .lineTo(vatSummaryX + 125, vatY + vatRowHeight)
-          .stroke();
+          // Column dividers
+          doc
+            .moveTo(vatSummaryX + 50, vatY)
+            .lineTo(vatSummaryX + 50, vatY + vatRowHeight)
+            .stroke();
+          doc
+            .moveTo(vatSummaryX + 125, vatY)
+            .lineTo(vatSummaryX + 125, vatY + vatRowHeight)
+            .stroke();
 
-        doc.fontSize(9).font('Helvetica-Bold').fillColor(colors.text);
-        doc.text('VAT %', vatSummaryX + 8, vatY + 7, {
-          width: 42,
-          align: 'center',
-        });
-        doc.text('Assessable Value', vatSummaryX + 58, vatY + 7, {
-          width: 67,
-          align: 'right',
-        });
-        doc.text('Tax Amount', vatSummaryX + 133, vatY + 7, {
-          width: 67,
-          align: 'right',
-        });
+          doc.fontSize(9).font('Helvetica-Bold').fillColor(colors.text);
+          doc.text('VAT %', vatSummaryX + 8, vatY + 7, {
+            width: 42,
+            align: 'center',
+          });
+          doc.text('Assessable Value', vatSummaryX + 58, vatY + 7, {
+            width: 67,
+            align: 'right',
+          });
+          doc.text('Tax Amount', vatSummaryX + 133, vatY + 7, {
+            width: 67,
+            align: 'right',
+          });
 
-        vatY += 20;
+          vatY += 20;
+        }
 
-        // Group line items by VAT rate
+        // Group line items by VAT rate and tax type (separate reverse charge)
         const vatGroups = new Map<
-          number,
-          { assessable: number; tax: number }
+          string, // Key: "rate" or "rate_RC" for reverse charge
+          { assessable: number; tax: number; isReverseCharge: boolean }
         >();
         lineItems.forEach((item: any) => {
           const vatRate = parseFloat(item.vatRate || '0');
           const assessable = parseFloat(item.amount || '0');
           const tax = parseFloat(item.vatAmount || '0');
+          const isReverseCharge = item.vatTaxType === 'reverse_charge' || item.vatTaxType === 'REVERSE_CHARGE';
+          const groupKey = isReverseCharge ? `${vatRate}_RC` : `${vatRate}`;
 
-          if (!vatGroups.has(vatRate)) {
-            vatGroups.set(vatRate, { assessable: 0, tax: 0 });
+          if (!vatGroups.has(groupKey)) {
+            vatGroups.set(groupKey, { assessable: 0, tax: 0, isReverseCharge });
           }
-          const group = vatGroups.get(vatRate)!;
+          const group = vatGroups.get(groupKey)!;
           group.assessable += assessable;
           group.tax += tax;
         });
 
         vatY += vatRowHeight;
 
-        vatGroups.forEach((group, vatRate) => {
+        // Show breakdown only if enabled
+        if (showTaxBreakdown) {
+          vatGroups.forEach((group, groupKey) => {
+            if (vatY + vatRowHeight > doc.page.height - 100) {
+              doc.addPage();
+              vatY = margin + 20;
+            }
+
+            // Extract VAT rate from group key (remove "_RC" suffix if present)
+            const vatRate = parseFloat(groupKey.replace('_RC', ''));
+
+            // Draw row border
+            doc.strokeColor(colors.border).lineWidth(0.5);
+            doc.rect(vatSummaryX, vatY, vatTableWidth, vatRowHeight).stroke();
+            doc
+              .moveTo(vatSummaryX + 50, vatY)
+              .lineTo(vatSummaryX + 50, vatY + vatRowHeight)
+              .stroke();
+            doc
+              .moveTo(vatSummaryX + 125, vatY)
+              .lineTo(vatSummaryX + 125, vatY + vatRowHeight)
+              .stroke();
+
+            doc.fontSize(9).font('Helvetica').fillColor(colors.text);
+            // Show "RC" indicator for reverse charge
+            const vatRateText = group.isReverseCharge 
+              ? `${vatRate.toFixed(2)}% RC`
+              : `${vatRate.toFixed(2)}%`;
+            doc.text(vatRateText, vatSummaryX + 8, vatY + 7, {
+              width: 42,
+              align: 'center',
+            });
+            doc.text(roundAmount(group.assessable).toFixed(decimalPlaces), vatSummaryX + 58, vatY + 7, {
+              width: 67,
+              align: 'right',
+            });
+            doc.text(roundAmount(group.tax).toFixed(decimalPlaces), vatSummaryX + 133, vatY + 7, {
+              width: 67,
+              align: 'right',
+            });
+            vatY += vatRowHeight;
+          });
+        }
+
+        // VAT Summary Total Row - Bold with top border (only if tax is shown)
+        if (showTaxOnInvoices) {
+          const totalAssessable = parseFloat(invoice.amount || '0');
+
           if (vatY + vatRowHeight > doc.page.height - 100) {
             doc.addPage();
             vatY = margin + 20;
           }
 
-          // Draw row border
+          // Top border (thicker for emphasis)
+          doc.strokeColor(colors.border).lineWidth(1);
+          doc
+            .moveTo(vatSummaryX, vatY)
+            .lineTo(vatSummaryX + vatTableWidth, vatY)
+            .stroke();
+
+          // Row border and dividers
           doc.strokeColor(colors.border).lineWidth(0.5);
           doc.rect(vatSummaryX, vatY, vatTableWidth, vatRowHeight).stroke();
           doc
@@ -3497,77 +3679,53 @@ export class ReportGeneratorService {
             .lineTo(vatSummaryX + 125, vatY + vatRowHeight)
             .stroke();
 
-          doc.fontSize(9).font('Helvetica').fillColor(colors.text);
-          doc.text(`${vatRate.toFixed(2)}%`, vatSummaryX + 8, vatY + 7, {
+          doc.fontSize(9).font('Helvetica-Bold').fillColor(colors.text);
+          doc.text('Total', vatSummaryX + 8, vatY + 7, {
             width: 42,
             align: 'center',
           });
-          doc.text(group.assessable.toFixed(2), vatSummaryX + 58, vatY + 7, {
+          // Use the same rounding helper defined earlier
+          doc.text(roundAmount(totalAssessable).toFixed(decimalPlaces), vatSummaryX + 58, vatY + 7, {
             width: 67,
             align: 'right',
           });
-          doc.text(group.tax.toFixed(2), vatSummaryX + 133, vatY + 7, {
+          doc.text(roundAmount(totalVat).toFixed(decimalPlaces), vatSummaryX + 133, vatY + 7, {
             width: 67,
             align: 'right',
           });
-          vatY += vatRowHeight;
-        });
-
-        // VAT Summary Total Row - Bold with top border
-        const totalAssessable = parseFloat(invoice.amount || '0');
-        const totalVat = parseFloat(invoice.vatAmount || '0');
-
-        if (vatY + vatRowHeight > doc.page.height - 100) {
-          doc.addPage();
-          vatY = margin + 20;
+          vatY += vatRowHeight + 10;
         }
-
-        // Top border (thicker for emphasis)
-        doc.strokeColor(colors.border).lineWidth(1);
-        doc
-          .moveTo(vatSummaryX, vatY)
-          .lineTo(vatSummaryX + vatTableWidth, vatY)
-          .stroke();
-
-        // Row border and dividers
-        doc.strokeColor(colors.border).lineWidth(0.5);
-        doc.rect(vatSummaryX, vatY, vatTableWidth, vatRowHeight).stroke();
-        doc
-          .moveTo(vatSummaryX + 50, vatY)
-          .lineTo(vatSummaryX + 50, vatY + vatRowHeight)
-          .stroke();
-        doc
-          .moveTo(vatSummaryX + 125, vatY)
-          .lineTo(vatSummaryX + 125, vatY + vatRowHeight)
-          .stroke();
-
-        doc.fontSize(9).font('Helvetica-Bold').fillColor(colors.text);
-        doc.text('Total', vatSummaryX + 8, vatY + 7, {
-          width: 42,
-          align: 'center',
-        });
-        doc.text(totalAssessable.toFixed(2), vatSummaryX + 58, vatY + 7, {
-          width: 67,
-          align: 'right',
-        });
-        doc.text(totalVat.toFixed(2), vatSummaryX + 133, vatY + 7, {
-          width: 67,
-          align: 'right',
-        });
 
         // Total Amount (Left side)
         const totalAmountX = margin;
-        let totalY = totalsY + (vatGroups.size + 1) * vatRowHeight + 10;
+        // Calculate totalY based on whether tax is shown
+        let totalY = showTaxOnInvoices 
+          ? totalsY + (showTaxBreakdown ? (vatGroups.size + 1) : 1) * vatRowHeight + 10
+          : totalsY + 10;
 
         if (totalY + 120 > doc.page.height - 100) {
           doc.addPage();
           totalY = margin + 20;
         }
 
+        // Display exchange rate if enabled and different from base currency
+        if (exchangeRate && currencySettings?.showExchangeRate) {
+          doc.fontSize(8).font('Helvetica').fillColor(colors.textLight);
+          const exchangeRateText = `Exchange Rate: 1 ${exchangeRate.fromCurrency} = ${exchangeRate.rate.toFixed(4)} ${exchangeRate.toCurrency} (as of ${exchangeRate.date})`;
+          doc.text(exchangeRateText, totalAmountX, totalY, {
+            width: contentWidth,
+          });
+          totalY += 14;
+        }
+
         const totalAmount = parseFloat(invoice.totalAmount || '0');
         doc.fontSize(12).font('Helvetica-Bold').fillColor(colors.text);
+        // Only show currency if enabled
+        const currencyText = currencySettings?.showOnInvoices !== false 
+          ? this.formatCurrency(totalAmount, currency, currencySettings)
+          : this.formatCurrency(totalAmount, currency, { ...currencySettings, showOnInvoices: false });
         doc.text(
-          `Total: ${this.formatCurrency(totalAmount, currency)}`,
+          `Total: ${currencyText}`,
           totalAmountX,
           totalY,
         );
@@ -3581,7 +3739,7 @@ export class ReportGeneratorService {
         doc
           .font('Helvetica-Bold')
           .text(
-            `UAE Dirham ${amountInWords} Only (${this.formatCurrency(totalAmount, currency)})`,
+            `UAE Dirham ${amountInWords} Only (${this.formatCurrency(totalAmount, currency, currencySettings)})`,
             totalAmountX,
             totalY,
           );
@@ -3597,7 +3755,7 @@ export class ReportGeneratorService {
         doc
           .font('Helvetica-Bold')
           .text(
-            `UAE Dirham ${vatInWords} Only (${this.formatCurrency(totalVat, currency)})`,
+            `UAE Dirham ${vatInWords} Only (${this.formatCurrency(totalVat, currency, currencySettings)})`,
             totalAmountX,
             totalY,
           );
@@ -3643,6 +3801,33 @@ export class ReportGeneratorService {
             });
           }
           doc.moveDown(1.5);
+        }
+
+        // Add reverse charge note if invoice contains reverse charge line items
+        const hasReverseCharge = lineItems.some(
+          (item: any) => item.vatTaxType === 'reverse_charge' || item.vatTaxType === 'REVERSE_CHARGE'
+        );
+        if (hasReverseCharge) {
+          doc.moveDown(0.5);
+          doc
+            .fontSize(9)
+            .font('Helvetica-Bold')
+            .fillColor(colors.text)
+            .text('Reverse Charge Notice:', margin, doc.y);
+          doc.moveDown(0.3);
+          doc
+            .fontSize(8)
+            .font('Helvetica')
+            .fillColor(colors.textLight)
+            .text(
+              'Items marked with "RC" are subject to reverse charge. The customer is responsible for self-accounting the VAT amount shown. This VAT is not included in the total amount due.',
+              margin,
+              doc.y,
+              {
+                width: contentWidth - 100,
+              }
+            );
+          doc.moveDown(1);
         }
 
         // ============================================================================

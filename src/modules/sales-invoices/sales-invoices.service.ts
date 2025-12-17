@@ -22,6 +22,7 @@ import { EmailService } from '../notifications/email.service';
 import { ReportGeneratorService } from '../reports/report-generator.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { SettingsService } from '../settings/settings.service';
+import { VatTaxType } from '../../common/enums/vat-tax-type.enum';
 import * as crypto from 'crypto';
 
 @Injectable()
@@ -200,11 +201,61 @@ export class SalesInvoicesService {
       throw new NotFoundException('User not found');
     }
 
-    // Generate invoice number using centralized numbering sequence
-    const invoiceNumber = await this.settingsService.generateNextNumber(
-      organizationId,
-      NumberingSequenceType.INVOICE,
-    );
+    // Get numbering settings to check if manual entry is allowed
+    const numberingSettings = await this.settingsService.getOrCreateSettings(organizationId);
+    let invoiceNumber: string;
+
+    if (numberingSettings.numberingAllowManual && dto.invoiceNumber) {
+      // Use manual invoice number
+      invoiceNumber = dto.invoiceNumber.trim();
+      
+      // Check for duplicates if enabled
+      if (numberingSettings.numberingWarnDuplicates) {
+        const existing = await this.invoicesRepository.findOne({
+          where: { 
+            invoiceNumber,
+            organization: { id: organizationId },
+            isDeleted: false
+          }
+        });
+        if (existing) {
+          throw new BadRequestException(
+            `Invoice number ${invoiceNumber} already exists. Please use a different number.`
+          );
+        }
+      }
+    } else {
+      // Auto-generate invoice number
+      invoiceNumber = await this.settingsService.generateNextNumber(
+        organizationId,
+        NumberingSequenceType.INVOICE,
+      );
+      
+      // Check for duplicates if enabled (even for auto-generated numbers)
+      if (numberingSettings.numberingWarnDuplicates) {
+        let attempts = 0;
+        const maxAttempts = 10; // Prevent infinite loop
+        while (attempts < maxAttempts) {
+          const existing = await this.invoicesRepository.findOne({
+            where: { 
+              invoiceNumber,
+              organization: { id: organizationId },
+              isDeleted: false
+            }
+          });
+          if (!existing) {
+            break; // Number is unique
+          }
+          // Regenerate if duplicate found
+          invoiceNumber = await this.settingsService.generateNextNumber(
+            organizationId,
+            NumberingSequenceType.INVOICE,
+          );
+          attempts++;
+        }
+        // If still duplicate after max attempts, database unique constraint will catch it
+      }
+    }
 
     // Generate public token
     const publicToken = this.generatePublicToken();
@@ -219,18 +270,22 @@ export class SalesInvoicesService {
     const effectiveDefaultRate = activeStandardRate?.rate || defaultTaxRate;
 
     // Calculate totals from line items
+    // Separate standard VAT from reverse charge VAT
     let totalAmount = 0;
-    let totalVatAmount = 0;
+    let standardVatAmount = 0;
+    let reverseChargeVatAmount = 0;
 
     if (dto.lineItems && dto.lineItems.length > 0) {
       for (const item of dto.lineItems) {
         const amount = parseFloat(item.quantity) * parseFloat(item.unitPrice);
+        const isReverseCharge = item.vatTaxType === 'REVERSE_CHARGE' || item.vatTaxType === 'reverse_charge';
+        
         // Use VAT rate from item, or find matching tax rate, or use default
         let itemVatRate = parseFloat(item.vatRate || '0');
         
         if (itemVatRate === 0) {
           // Try to find matching tax rate by code or type
-          if (item.vatTaxType) {
+          if (item.vatTaxType && !isReverseCharge) {
             const matchingRate = taxRates.find(
               (rate) => rate.isActive && rate.type === item.vatTaxType,
             );
@@ -239,6 +294,9 @@ export class SalesInvoicesService {
             } else {
               itemVatRate = effectiveDefaultRate;
             }
+          } else if (isReverseCharge) {
+            // Use reverse charge rate from settings
+            itemVatRate = taxSettings.taxReverseChargeRate || effectiveDefaultRate;
           } else {
             itemVatRate = effectiveDefaultRate;
           }
@@ -246,17 +304,59 @@ export class SalesInvoicesService {
         
         const vatAmount = amount * (itemVatRate / 100);
         totalAmount += amount;
-        totalVatAmount += vatAmount;
+        
+        if (isReverseCharge) {
+          // Reverse charge VAT: calculated but NOT added to total
+          reverseChargeVatAmount += vatAmount;
+        } else if (item.vatTaxType === 'ZERO_RATED' || item.vatTaxType === 'zero_rated' || 
+                   item.vatTaxType === 'EXEMPT' || item.vatTaxType === 'exempt') {
+          // Zero rated or exempt: no VAT
+          // Do nothing
+        } else {
+          // Standard VAT: added to total
+          standardVatAmount += vatAmount;
+          totalAmount += vatAmount;
+        }
       }
     } else {
       totalAmount = parseFloat(dto.amount || '0');
       // If VAT amount not provided, calculate from default rate
       if (!dto.vatAmount || dto.vatAmount === 0) {
-        totalVatAmount = totalAmount * (effectiveDefaultRate / 100);
+        standardVatAmount = totalAmount * (effectiveDefaultRate / 100);
+        totalAmount += standardVatAmount;
       } else {
-        totalVatAmount = parseFloat(dto.vatAmount || '0');
+        standardVatAmount = parseFloat(dto.vatAmount || '0');
+        totalAmount += standardVatAmount;
       }
     }
+
+    // Calculate tax on shipping if enabled
+    const shippingAmount = parseFloat(dto.shippingAmount || '0');
+    let shippingVatAmount = 0;
+    if (shippingAmount > 0 && taxSettings.taxCalculateOnShipping) {
+      shippingVatAmount = shippingAmount * (effectiveDefaultRate / 100);
+      standardVatAmount += shippingVatAmount;
+      totalAmount += shippingAmount + shippingVatAmount;
+    } else if (shippingAmount > 0) {
+      // Shipping without tax
+      totalAmount += shippingAmount;
+    }
+
+    // Calculate tax on discounts if enabled
+    const discountAmount = parseFloat(dto.discountAmount || '0');
+    let discountVatAmount = 0;
+    if (discountAmount > 0 && taxSettings.taxCalculateOnDiscounts) {
+      // Tax on discount: reverse calculation (subtract tax from discount)
+      discountVatAmount = discountAmount * (effectiveDefaultRate / 100);
+      standardVatAmount -= discountVatAmount; // Subtract tax on discount
+      totalAmount -= discountAmount; // Subtract discount from total
+    } else if (discountAmount > 0) {
+      // Discount without tax
+      totalAmount -= discountAmount;
+    }
+
+    // Total VAT amount includes both standard and reverse charge (for reporting)
+    const totalVatAmount = standardVatAmount + reverseChargeVatAmount;
 
     const invoice = this.invoicesRepository.create({
       organization,
@@ -280,26 +380,66 @@ export class SalesInvoicesService {
 
     const savedInvoice = await this.invoicesRepository.save(invoice);
 
+    // Override total_amount for invoices with reverse charge (DB generated column adds VAT incorrectly)
+    if (reverseChargeVatAmount > 0) {
+      // For invoices with reverse charge: total_amount = amount (which already excludes reverse charge VAT)
+      // The DB generated column would calculate: total_amount = amount + vatAmount
+      // But vatAmount includes reverse charge VAT, so we need to override
+      await this.invoicesRepository
+        .createQueryBuilder()
+        .update(SalesInvoice)
+        .set({ totalAmount: totalAmount.toString() })
+        .where('id = :id', { id: savedInvoice.id })
+        .execute();
+    }
+
     // Create line items
     if (dto.lineItems && dto.lineItems.length > 0) {
       const lineItems = dto.lineItems.map((item: any, index: number) => {
         const amount = parseFloat(item.quantity) * parseFloat(item.unitPrice);
         
         // Determine VAT rate for this line item
+        const isReverseCharge = item.vatTaxType === 'REVERSE_CHARGE' || item.vatTaxType === 'reverse_charge';
         let itemVatRate = parseFloat(item.vatRate || '0');
+        let taxCode = item.taxCode || null; // Get tax code from item if provided
+        
         if (itemVatRate === 0) {
           // Try to find matching tax rate by code or type
-          if (item.vatTaxType) {
+          if (item.vatTaxType && !isReverseCharge) {
             const matchingRate = taxRates.find(
               (rate) => rate.isActive && rate.type === item.vatTaxType,
             );
             if (matchingRate) {
               itemVatRate = matchingRate.rate;
+              // Use tax code from matching rate if not provided
+              if (!taxCode && matchingRate.code) {
+                taxCode = matchingRate.code;
+              }
             } else {
               itemVatRate = effectiveDefaultRate;
+              // Use default tax code from settings if not provided
+              if (!taxCode && taxSettings.taxDefaultCode) {
+                taxCode = taxSettings.taxDefaultCode;
+              }
+            }
+          } else if (isReverseCharge) {
+            // Use reverse charge rate from settings
+            itemVatRate = taxSettings.taxReverseChargeRate || effectiveDefaultRate;
+            // Use default tax code from settings if not provided
+            if (!taxCode && taxSettings.taxDefaultCode) {
+              taxCode = taxSettings.taxDefaultCode;
             }
           } else {
             itemVatRate = effectiveDefaultRate;
+            // Use default tax code from settings if not provided
+            if (!taxCode && taxSettings.taxDefaultCode) {
+              taxCode = taxSettings.taxDefaultCode;
+            }
+          }
+        } else {
+          // VAT rate provided, but check for default tax code
+          if (!taxCode && taxSettings.taxDefaultCode) {
+            taxCode = taxSettings.taxDefaultCode;
           }
         }
         
@@ -546,6 +686,28 @@ export class SalesInvoicesService {
       organizationId,
     );
 
+    // Get currency settings
+    const currencySettings = await this.settingsService.getCurrencySettings(
+      organizationId,
+    );
+
+    // Get tax settings for tax registration info
+    const taxSettings = await this.settingsService.getTaxSettings(organizationId);
+
+    // Get exchange rate if invoice currency differs from base currency
+    let exchangeRate = null;
+    if (currencySettings.currencyShowExchangeRate && invoice.currency !== invoice.organization?.baseCurrency) {
+      // Use the exchange rate from invoice if available
+      if (invoice.exchangeRate) {
+        exchangeRate = {
+          rate: parseFloat(invoice.exchangeRate),
+          fromCurrency: invoice.currency,
+          toCurrency: invoice.organization?.baseCurrency || 'AED',
+          date: invoice.invoiceDate,
+        };
+      }
+    }
+
     // Determine payment terms
     const paymentTerms =
       templateSettings.invoiceDefaultPaymentTerms === 'Custom'
@@ -559,6 +721,20 @@ export class SalesInvoicesService {
         organizationName: invoice.organization?.name,
         vatNumber: invoice.organization?.vatNumber,
         address: invoice.organization?.address,
+        currencySettings: {
+          displayFormat: currencySettings.currencyDisplayFormat,
+          rounding: currencySettings.currencyRounding,
+          roundingMethod: currencySettings.currencyRoundingMethod,
+          showOnInvoices: currencySettings.currencyShowOnInvoices,
+          showExchangeRate: currencySettings.currencyShowExchangeRate,
+        },
+        taxSettings: {
+          taxRegistrationNumber: taxSettings.taxRegistrationNumber,
+          taxRegistrationDate: taxSettings.taxRegistrationDate,
+          taxShowOnInvoices: taxSettings.taxShowOnInvoices,
+          taxShowBreakdown: taxSettings.taxShowBreakdown,
+        },
+        exchangeRate,
         phone: invoice.organization?.phone,
         email: invoice.organization?.contactEmail,
         website: invoice.organization?.website,
@@ -958,10 +1134,30 @@ export class SalesInvoicesService {
         organization: { id: organizationId },
       });
 
+      // Get tax settings for reverse charge rate
+      const taxSettings = await this.settingsService.getTaxSettings(organizationId);
+      const taxRates = await this.settingsService.getTaxRates(organizationId);
+      const effectiveDefaultRate = taxSettings.taxDefaultRate || 5;
+
       // Create new line items
       const lineItems = dto.lineItems.map((item: any, index: number) => {
         const amount = parseFloat(item.quantity) * parseFloat(item.unitPrice);
-        const vatRate = parseFloat(item.vatRate || '5');
+        const isReverseCharge = item.vatTaxType === 'REVERSE_CHARGE' || item.vatTaxType === 'reverse_charge';
+        
+        let vatRate = parseFloat(item.vatRate || '0');
+        if (vatRate === 0) {
+          if (isReverseCharge) {
+            vatRate = taxSettings.taxReverseChargeRate || effectiveDefaultRate;
+          } else if (item.vatTaxType) {
+            const matchingRate = taxRates.find(
+              (rate) => rate.isActive && rate.type === item.vatTaxType,
+            );
+            vatRate = matchingRate?.rate || effectiveDefaultRate;
+          } else {
+            vatRate = effectiveDefaultRate;
+          }
+        }
+        
         const vatAmount = amount * (vatRate / 100);
 
         return this.lineItemsRepository.create({
@@ -982,18 +1178,57 @@ export class SalesInvoicesService {
 
       await this.lineItemsRepository.save(lineItems);
 
-      // Recalculate totals
-      const totalAmount = lineItems.reduce(
-        (sum, item) => sum + parseFloat(item.amount),
-        0,
-      );
-      const totalVatAmount = lineItems.reduce(
-        (sum, item) => sum + parseFloat(item.vatAmount),
-        0,
-      );
+      // Recalculate totals (separate standard VAT from reverse charge)
+      let totalAmount = 0;
+      let standardVatAmount = 0;
+      let reverseChargeVatAmount = 0;
+
+      for (const item of lineItems) {
+        const amount = parseFloat(item.amount);
+        const vatAmount = parseFloat(item.vatAmount);
+        const isReverseCharge = item.vatTaxType === 'reverse_charge' || item.vatTaxType === 'REVERSE_CHARGE';
+        
+        totalAmount += amount;
+        
+        if (isReverseCharge) {
+          reverseChargeVatAmount += vatAmount;
+          // Reverse charge VAT not added to total
+        } else if (item.vatTaxType === 'zero_rated' || item.vatTaxType === 'ZERO_RATED' ||
+                   item.vatTaxType === 'exempt' || item.vatTaxType === 'EXEMPT') {
+          // Zero rated or exempt: no VAT
+        } else {
+          standardVatAmount += vatAmount;
+          totalAmount += vatAmount; // Standard VAT added to total
+        }
+      }
+
+      // Calculate tax on shipping if enabled (use taxSettings already declared above)
+      const shippingAmount = parseFloat(dto.shippingAmount || '0');
+      let shippingVatAmount = 0;
+      if (shippingAmount > 0 && taxSettings.taxCalculateOnShipping) {
+        shippingVatAmount = shippingAmount * (effectiveDefaultRate / 100);
+        standardVatAmount += shippingVatAmount;
+        totalAmount += shippingAmount + shippingVatAmount;
+      } else if (shippingAmount > 0) {
+        // Shipping without tax
+        totalAmount += shippingAmount;
+      }
+
+      // Calculate tax on discounts if enabled (use taxSettings already declared above)
+      const discountAmount = parseFloat(dto.discountAmount || '0');
+      let discountVatAmount = 0;
+      if (discountAmount > 0 && taxSettings.taxCalculateOnDiscounts) {
+        // Tax on discount: reverse calculation (subtract tax from discount)
+        discountVatAmount = discountAmount * (effectiveDefaultRate / 100);
+        standardVatAmount -= discountVatAmount; // Subtract tax on discount
+        totalAmount -= discountAmount; // Subtract discount from total
+      } else if (discountAmount > 0) {
+        // Discount without tax
+        totalAmount -= discountAmount;
+      }
 
       invoice.amount = totalAmount.toString();
-      invoice.vatAmount = totalVatAmount.toString();
+      invoice.vatAmount = (standardVatAmount + reverseChargeVatAmount).toString(); // Both for reporting
     } else if (dto.amount !== undefined || dto.vatAmount !== undefined) {
       // Update amounts directly
       if (dto.amount !== undefined) {
@@ -1005,6 +1240,42 @@ export class SalesInvoicesService {
     }
 
     const updated = await this.invoicesRepository.save(invoice);
+
+    // Override total_amount for invoices with reverse charge (DB generated column adds VAT incorrectly)
+    // Check if invoice has reverse charge line items
+    if (dto.lineItems && Array.isArray(dto.lineItems)) {
+      const hasReverseCharge = dto.lineItems.some(
+        (item: any) => item.vatTaxType === 'REVERSE_CHARGE' || item.vatTaxType === 'reverse_charge'
+      );
+      if (hasReverseCharge) {
+        // Recalculate to get correct total (excluding reverse charge VAT)
+        const lineItems = await this.lineItemsRepository.find({
+          where: { invoice: { id: invoice.id } },
+        });
+        let correctTotal = 0;
+        for (const item of lineItems) {
+          const amount = parseFloat(item.amount);
+          const vatTaxTypeStr = String(item.vatTaxType || '').toLowerCase();
+          const isReverseCharge = vatTaxTypeStr === 'reverse_charge' || 
+                                  item.vatTaxType === VatTaxType.REVERSE_CHARGE;
+          const isZeroRated = vatTaxTypeStr === 'zero_rated' || 
+                             item.vatTaxType === VatTaxType.ZERO_RATED;
+          const isExempt = vatTaxTypeStr === 'exempt' || 
+                          item.vatTaxType === VatTaxType.EXEMPT;
+          
+          correctTotal += amount;
+          if (!isReverseCharge && !isZeroRated && !isExempt) {
+            correctTotal += parseFloat(item.vatAmount);
+          }
+        }
+        await this.invoicesRepository
+          .createQueryBuilder()
+          .update(SalesInvoice)
+          .set({ totalAmount: correctTotal.toString() })
+          .where('id = :id', { id: updated.id })
+          .execute();
+      }
+    }
 
     // Audit log
     await this.auditLogsService.record({

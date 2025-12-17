@@ -10,6 +10,7 @@ import { Organization } from '../../entities/organization.entity';
 import { SalesInvoice } from '../../entities/sales-invoice.entity';
 import { User } from '../../entities/user.entity';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { SettingsModule } from '../settings/settings.module';
 
 @Module({
   imports: [
@@ -22,6 +23,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
       User,
     ]),
     NotificationsModule,
+    SettingsModule,
   ],
   providers: [ReportsService, ReportGeneratorService],
   controllers: [ReportsController],

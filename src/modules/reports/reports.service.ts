@@ -12,6 +12,7 @@ import { ReportType } from '../../common/enums/report-type.enum';
 import { ExpenseType } from '../../common/enums/expense-type.enum';
 import { AccrualStatus } from '../../common/enums/accrual-status.enum';
 import { PaymentStatus } from '../../common/enums/payment-status.enum';
+import { SettingsService } from '../settings/settings.service';
 
 @Injectable()
 export class ReportsService {
@@ -26,6 +27,7 @@ export class ReportsService {
     private readonly organizationsRepository: Repository<Organization>,
     @InjectRepository(SalesInvoice)
     private readonly salesInvoicesRepository: Repository<SalesInvoice>,
+    private readonly settingsService: SettingsService,
   ) {}
 
   async listHistory(
@@ -127,11 +129,37 @@ export class ReportsService {
     organizationId: string,
     filters?: Record<string, any>,
   ) {
-    const startDate =
-      filters?.['startDate'] ||
-      new Date(new Date().getFullYear(), 0, 1).toISOString().split('T')[0];
-    const endDate =
-      filters?.['endDate'] || new Date().toISOString().split('T')[0];
+    let startDate = filters?.['startDate'];
+    let endDate = filters?.['endDate'];
+    
+    // If dates not provided, use fiscal year based on tax year end
+    if (!startDate || !endDate) {
+      const taxSettings = await this.settingsService.getTaxSettings(organizationId);
+      const taxYearEnd = taxSettings.taxYearEnd; // Format: "MM-DD" (e.g., "12-31")
+      
+      if (taxYearEnd) {
+        const [month, day] = taxYearEnd.split('-').map(Number);
+        const now = new Date();
+        const currentYear = now.getFullYear();
+        const fiscalYearEnd = new Date(currentYear, month - 1, day);
+        
+        // If fiscal year end has passed this year, use current fiscal year
+        // Otherwise, use previous fiscal year
+        if (now > fiscalYearEnd) {
+          // Current fiscal year: from last year's fiscal year end + 1 day to this year's fiscal year end
+          startDate = new Date(currentYear - 1, month - 1, day + 1).toISOString().split('T')[0];
+          endDate = fiscalYearEnd.toISOString().split('T')[0];
+        } else {
+          // Previous fiscal year: from year before last's fiscal year end + 1 day to last year's fiscal year end
+          startDate = new Date(currentYear - 2, month - 1, day + 1).toISOString().split('T')[0];
+          endDate = new Date(currentYear - 1, month - 1, day).toISOString().split('T')[0];
+        }
+      } else {
+        // Fallback to calendar year
+        startDate = new Date(new Date().getFullYear(), 0, 1).toISOString().split('T')[0];
+        endDate = new Date().toISOString().split('T')[0];
+      }
+    }
 
     // Get expenses grouped by category (debits)
     const expenseQuery = this.expensesRepository
