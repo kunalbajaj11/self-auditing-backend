@@ -14,33 +14,10 @@ import { Expense } from '../../entities/expense.entity';
 
 const SYSTEM_EXPENSE_TYPES = [
   { name: 'expense', displayLabel: 'Expense', description: 'Regular expense' },
-  { name: 'credit', displayLabel: 'Sales', description: 'Sales/Revenue' },
-  {
-    name: 'adjustment',
-    displayLabel: 'Adjustment',
-    description: 'Adjustment entry',
-  },
-  { name: 'advance', displayLabel: 'Advance', description: 'Advance payment' },
-  { name: 'accrual', displayLabel: 'Accrual', description: 'Accrual entry' },
   {
     name: 'fixed_assets',
     displayLabel: 'Fixed Assets',
     description: 'Fixed assets purchase',
-  },
-  {
-    name: 'share_capital',
-    displayLabel: 'Share Capital',
-    description: 'Share capital entry',
-  },
-  {
-    name: 'retained_earnings',
-    displayLabel: 'Retained Earnings',
-    description: 'Retained earnings',
-  },
-  {
-    name: 'shareholder_account',
-    displayLabel: 'Shareholder Account',
-    description: 'Shareholder account',
   },
   {
     name: 'cost_of_sales',
