@@ -14,6 +14,7 @@ import { Customer } from '../customers/customer.entity';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { ReportsModule } from '../reports/reports.module';
 import { AuditLogsModule } from '../audit-logs/audit-logs.module';
+import { SettingsModule } from '../settings/settings.module';
 
 @Module({
   imports: [
@@ -31,6 +32,7 @@ import { AuditLogsModule } from '../audit-logs/audit-logs.module';
     NotificationsModule,
     ReportsModule,
     AuditLogsModule,
+    SettingsModule,
   ],
   providers: [SalesInvoicesService],
   controllers: [SalesInvoicesController],

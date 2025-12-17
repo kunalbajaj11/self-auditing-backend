@@ -2810,8 +2810,55 @@ export class ReportGeneratorService {
         const margin = 50;
         const contentWidth = pageWidth - 2 * margin;
 
-        // Color scheme - professional and clean
+        // Get template settings from metadata
+        const invoiceTemplate = (metadata as any).invoiceTemplate || {};
+        const templateSettings = {
+          logoUrl: invoiceTemplate.logoUrl || metadata.logoUrl,
+          headerText: invoiceTemplate.headerText,
+          colorScheme: invoiceTemplate.colorScheme || 'blue',
+          customColor: invoiceTemplate.customColor,
+          invoiceTitle: invoiceTemplate.invoiceTitle || 'TAX INVOICE',
+          showCompanyDetails: invoiceTemplate.showCompanyDetails ?? true,
+          showVatDetails: invoiceTemplate.showVatDetails ?? true,
+          showPaymentTerms: invoiceTemplate.showPaymentTerms ?? true,
+          showPaymentMethods: invoiceTemplate.showPaymentMethods ?? true,
+          showBankDetails: invoiceTemplate.showBankDetails ?? false,
+          showTermsAndConditions: invoiceTemplate.showTermsAndConditions ?? true,
+          paymentTerms: invoiceTemplate.paymentTerms,
+          defaultNotes: invoiceTemplate.defaultNotes,
+          termsAndConditions: invoiceTemplate.termsAndConditions,
+          footerText: invoiceTemplate.footerText,
+          showFooter: invoiceTemplate.showFooter ?? true,
+          showItemDescription: invoiceTemplate.showItemDescription ?? true,
+          showItemQuantity: invoiceTemplate.showItemQuantity ?? true,
+          showItemUnitPrice: invoiceTemplate.showItemUnitPrice ?? true,
+          showItemTotal: invoiceTemplate.showItemTotal ?? true,
+        };
+
+        // Color scheme based on template settings
+        const getColorScheme = () => {
+          const scheme = templateSettings.colorScheme || 'blue';
+          const customColor = templateSettings.customColor;
+          
+          if (scheme === 'custom' && customColor) {
+            return customColor;
+          }
+          
+          const colorMap: Record<string, string> = {
+            blue: '#1976d2',
+            green: '#2e7d32',
+            purple: '#7b1fa2',
+            orange: '#f57c00',
+            red: '#d32f2f',
+          };
+          
+          return colorMap[scheme] || colorMap.blue;
+        };
+
+        const primaryColor = getColorScheme();
+        
         const colors = {
+          primary: primaryColor,
           text: '#1a1a1a',
           textLight: '#666666',
           border: '#e0e0e0',
@@ -2821,14 +2868,57 @@ export class ReportGeneratorService {
         };
 
         // ============================================================================
-        // HEADER: TAX INVOICE TITLE
+        // HEADER: Logo and Title
         // ============================================================================
+        let headerY = margin;
+        
+        // Add logo if available
+        if (templateSettings.logoUrl) {
+          try {
+            const logoSize = 60;
+            const logoX = margin;
+            const logoY = headerY;
+            
+            if (templateSettings.logoUrl.startsWith('http://') || templateSettings.logoUrl.startsWith('https://')) {
+              doc.image(templateSettings.logoUrl, logoX, logoY, {
+                width: logoSize,
+                height: logoSize,
+                fit: [logoSize, logoSize],
+              });
+            } else if (fs.existsSync(templateSettings.logoUrl)) {
+              doc.image(templateSettings.logoUrl, logoX, logoY, {
+                width: logoSize,
+                height: logoSize,
+                fit: [logoSize, logoSize],
+              });
+            }
+            headerY += logoSize + 10;
+          } catch (error) {
+            // Logo failed to load, continue without it
+            console.warn('Failed to load invoice logo:', error);
+          }
+        }
+
+        // Invoice Title
         doc
           .fontSize(24)
           .font('Helvetica-Bold')
-          .fillColor(colors.text)
-          .text('TAX INVOICE', { align: 'center' });
-        doc.moveDown(1.5);
+          .fillColor(colors.primary);
+        const titleY = headerY;
+        doc.text(templateSettings.invoiceTitle, margin, titleY, { align: 'center', width: contentWidth });
+        
+        // Header text if provided
+        if (templateSettings.headerText) {
+          doc
+            .fontSize(12)
+            .font('Helvetica')
+            .fillColor(colors.textLight);
+          const headerTextY = headerY + 30;
+          doc.text(templateSettings.headerText, margin, headerTextY, { align: 'center', width: contentWidth });
+          doc.moveDown(1.5);
+        } else {
+          doc.moveDown(1.5);
+        }
 
         // ============================================================================
         // SENDER DETAILS (Left side - Organization)
@@ -2837,54 +2927,60 @@ export class ReportGeneratorService {
         const rightX = pageWidth / 2 + 10;
         let currentY = doc.y;
 
-        // Sender Section Header
-        doc.fontSize(12).font('Helvetica-Bold').fillColor(colors.text);
-        const orgName = organization?.name || metadata.organizationName || '';
-        doc.text(orgName, leftX, currentY, { width: contentWidth / 2 - 10 });
-        currentY += 16;
+        // Only show company details if enabled in template settings
+        if (templateSettings.showCompanyDetails) {
+          // Sender Section Header
+          doc.fontSize(12).font('Helvetica-Bold').fillColor(colors.text);
+          const orgName = organization?.name || metadata.organizationName || '';
+          doc.text(orgName, leftX, currentY, { width: contentWidth / 2 - 10 });
+          currentY += 16;
 
-        doc.fontSize(9).font('Helvetica').fillColor(colors.text);
-        const orgAddress = organization?.address || metadata.address || '';
-        if (orgAddress) {
-          doc.text(orgAddress, leftX, currentY, {
-            width: contentWidth / 2 - 10,
-          });
-          currentY += 13;
-        }
+          doc.fontSize(9).font('Helvetica').fillColor(colors.text);
+          const orgAddress = organization?.address || metadata.address || '';
+          if (orgAddress) {
+            doc.text(orgAddress, leftX, currentY, {
+              width: contentWidth / 2 - 10,
+            });
+            currentY += 13;
+          }
 
-        const orgEmirate = organization?.emirate || '';
-        if (orgEmirate) {
-          doc.fillColor(colors.textLight).text(`Emirate: `, leftX, currentY);
-          doc.fillColor(colors.text).text(orgEmirate, leftX + 55, currentY);
-          currentY += 13;
-        }
+          const orgEmirate = organization?.emirate || '';
+          if (orgEmirate) {
+            doc.fillColor(colors.textLight).text(`Emirate: `, leftX, currentY);
+            doc.fillColor(colors.text).text(orgEmirate, leftX + 55, currentY);
+            currentY += 13;
+          }
 
-        const orgTrn = organization?.vatNumber || metadata.vatNumber || '';
-        if (orgTrn) {
-          doc.fillColor(colors.textLight).text(`TRN: `, leftX, currentY);
-          doc.fillColor(colors.text).text(orgTrn, leftX + 32, currentY);
-          currentY += 13;
-        }
+          // Only show VAT details if enabled
+          if (templateSettings.showVatDetails) {
+            const orgTrn = organization?.vatNumber || metadata.vatNumber || '';
+            if (orgTrn) {
+              doc.fillColor(colors.textLight).text(`TRN: `, leftX, currentY);
+              doc.fillColor(colors.text).text(orgTrn, leftX + 32, currentY);
+              currentY += 13;
+            }
+          }
 
-        const orgPhone = organization?.phone || metadata.phone || '';
-        if (orgPhone) {
-          doc.fillColor(colors.textLight).text(`Contact: `, leftX, currentY);
-          doc.fillColor(colors.text).text(orgPhone, leftX + 55, currentY);
-          currentY += 13;
-        }
+          const orgPhone = organization?.phone || metadata.phone || '';
+          if (orgPhone) {
+            doc.fillColor(colors.textLight).text(`Contact: `, leftX, currentY);
+            doc.fillColor(colors.text).text(orgPhone, leftX + 55, currentY);
+            currentY += 13;
+          }
 
-        const orgEmail = organization?.contactEmail || metadata.email || '';
-        if (orgEmail) {
-          doc.fillColor(colors.textLight).text(`E-Mail: `, leftX, currentY);
-          doc.fillColor(colors.text).text(orgEmail, leftX + 55, currentY);
-          currentY += 13;
-        }
+          const orgEmail = organization?.contactEmail || metadata.email || '';
+          if (orgEmail) {
+            doc.fillColor(colors.textLight).text(`E-Mail: `, leftX, currentY);
+            doc.fillColor(colors.text).text(orgEmail, leftX + 55, currentY);
+            currentY += 13;
+          }
 
-        const orgWebsite = organization?.website || '';
-        if (orgWebsite) {
-          doc.fillColor(colors.textLight).text(`Website: `, leftX, currentY);
-          doc.fillColor(colors.text).text(orgWebsite, leftX + 55, currentY);
-          currentY += 13;
+          const orgWebsite = organization?.website || '';
+          if (orgWebsite) {
+            doc.fillColor(colors.textLight).text(`Website: `, leftX, currentY);
+            doc.fillColor(colors.text).text(orgWebsite, leftX + 55, currentY);
+            currentY += 13;
+          }
         }
 
         doc.fillColor(colors.text);
@@ -2915,9 +3011,13 @@ export class ReportGeneratorService {
         invoiceY += 14;
         drawDetailRow('Delivery Note:', '', invoiceY);
         invoiceY += 14;
-        const paymentTerms = customer?.paymentTerms
-          ? `${customer.paymentTerms} days`
-          : '';
+        
+        // Use payment terms from template settings if enabled
+        let paymentTerms = '';
+        if (templateSettings.showPaymentTerms) {
+          paymentTerms = templateSettings.paymentTerms || 
+            (customer?.paymentTerms ? `${customer.paymentTerms} days` : '');
+        }
         drawDetailRow('Mode/Terms of Payment:', paymentTerms, invoiceY);
         invoiceY += 14;
         drawDetailRow("Supplier's Ref.:", '', invoiceY);
@@ -3513,10 +3613,11 @@ export class ReportGeneratorService {
         doc.moveDown(1);
 
         // ============================================================================
-        // REMARKS SECTION
+        // REMARKS SECTION (using default notes from template if available)
         // ============================================================================
         doc.moveDown(1.5);
-        if (invoice.description || invoice.notes) {
+        const notesToShow = templateSettings.defaultNotes || invoice.description || invoice.notes;
+        if (notesToShow) {
           doc
             .fontSize(10)
             .font('Helvetica-Bold')
@@ -3524,13 +3625,19 @@ export class ReportGeneratorService {
             .text('Remarks:', margin, doc.y);
           doc.moveDown(0.5);
           doc.fontSize(9).font('Helvetica').fillColor(colors.text);
+          if (templateSettings.defaultNotes) {
+            doc.text(templateSettings.defaultNotes, margin, doc.y, {
+              width: contentWidth - 100,
+            });
+            doc.moveDown(0.5);
+          }
           if (invoice.description) {
             doc.text(invoice.description, margin, doc.y, {
               width: contentWidth - 100,
             });
           }
           if (invoice.notes) {
-            if (invoice.description) doc.moveDown(0.5);
+            if (invoice.description || templateSettings.defaultNotes) doc.moveDown(0.5);
             doc.text(invoice.notes, margin, doc.y, {
               width: contentWidth - 100,
             });
@@ -3539,9 +3646,26 @@ export class ReportGeneratorService {
         }
 
         // ============================================================================
-        // BANK DETAILS SECTION
+        // TERMS AND CONDITIONS SECTION
         // ============================================================================
-        if (organization?.bankAccountNumber || organization?.bankIban) {
+        if (templateSettings.showTermsAndConditions && templateSettings.termsAndConditions) {
+          doc
+            .fontSize(10)
+            .font('Helvetica-Bold')
+            .fillColor(colors.text)
+            .text('Terms & Conditions:', margin, doc.y);
+          doc.moveDown(0.5);
+          doc.fontSize(9).font('Helvetica').fillColor(colors.text);
+          doc.text(templateSettings.termsAndConditions, margin, doc.y, {
+            width: contentWidth - 100,
+          });
+          doc.moveDown(1.5);
+        }
+
+        // ============================================================================
+        // BANK DETAILS SECTION (only if enabled in template)
+        // ============================================================================
+        if (templateSettings.showBankDetails && (organization?.bankAccountNumber || organization?.bankIban)) {
           doc
             .fontSize(10)
             .font('Helvetica-Bold')
@@ -3595,18 +3719,30 @@ export class ReportGeneratorService {
         }
 
         // ============================================================================
-        // FOOTER
+        // FOOTER (only if enabled in template)
         // ============================================================================
-        const footerY = doc.page.height - 70;
-        doc.fontSize(8).font('Helvetica').fillColor(colors.textLight);
-        doc.text('This is a Computer Generated Invoice', margin, footerY, {
-          align: 'center',
-          width: contentWidth,
-        });
-        doc.fontSize(9).font('Helvetica').fillColor(colors.text);
-        doc.text('Authorised Signatory', margin, footerY + 20, {
-          align: 'left',
-        });
+        if (templateSettings.showFooter) {
+          const footerY = doc.page.height - 70;
+          doc.fontSize(8).font('Helvetica').fillColor(colors.textLight);
+          
+          // Footer text from template settings
+          if (templateSettings.footerText) {
+            doc.text(templateSettings.footerText, margin, footerY, {
+              width: contentWidth,
+              align: 'center',
+            });
+            doc.moveDown(0.3);
+          }
+          
+          doc.text('This is a Computer Generated Invoice', margin, doc.y, {
+            align: 'center',
+            width: contentWidth,
+          });
+          doc.fontSize(9).font('Helvetica').fillColor(colors.text);
+          doc.text('Authorised Signatory', margin, footerY + 20, {
+            align: 'left',
+          });
+        }
 
         doc.end();
       } catch (error) {

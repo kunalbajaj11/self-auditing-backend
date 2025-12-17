@@ -8,6 +8,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { randomBytes } from 'crypto';
 import { LicenseKey } from '../../entities/license-key.entity';
+import { Attachment } from '../../entities/attachment.entity';
 import { CreateLicenseKeyDto } from './dto/create-license-key.dto';
 import { RenewLicenseKeyDto } from './dto/renew-license-key.dto';
 import { LicenseKeyStatus } from '../../common/enums/license-key-status.enum';
@@ -19,6 +20,8 @@ export class LicenseKeysService {
   constructor(
     @InjectRepository(LicenseKey)
     private readonly licenseKeysRepository: Repository<LicenseKey>,
+    @InjectRepository(Attachment)
+    private readonly attachmentsRepository: Repository<Attachment>,
     private readonly emailService: EmailService,
   ) {}
 
@@ -39,6 +42,8 @@ export class LicenseKeysService {
       planType: dto.planType ?? null,
       maxUsers: dto.maxUsers ?? null,
       storageQuotaMb: dto.storageQuotaMb ?? null,
+      maxUploads: dto.maxUploads ?? 2000,
+      allocatedUploads: 0,
       expiresAt,
       notes: dto.notes ?? null,
       email: dto.email ?? null,
@@ -274,6 +279,70 @@ export class LicenseKeysService {
     }
 
     return license;
+  }
+
+  async allocateUploads(
+    licenseId: string,
+    additionalUploads: number,
+  ): Promise<LicenseKey> {
+    if (additionalUploads < 0) {
+      throw new BadRequestException('Additional uploads must be non-negative');
+    }
+    const license = await this.licenseKeysRepository.findOne({
+      where: { id: licenseId },
+    });
+    if (!license) {
+      throw new NotFoundException('License key not found');
+    }
+    license.allocatedUploads =
+      (license.allocatedUploads || 0) + additionalUploads;
+    return this.licenseKeysRepository.save(license);
+  }
+
+  async getUploadUsage(organizationId: string): Promise<{
+    maxUploads: number;
+    allocatedUploads: number;
+    totalAllowed: number;
+    usedUploads: number;
+    remainingUploads: number;
+  }> {
+    const license = await this.findByOrganizationId(organizationId);
+    if (!license) {
+      throw new NotFoundException(
+        'License key not found for this organization',
+      );
+    }
+
+    // Count attachments for this organization
+    const usedUploads = await this.attachmentsRepository.count({
+      where: { organization: { id: organizationId } },
+    });
+
+    const maxUploads = license.maxUploads || 2000;
+    const allocatedUploads = license.allocatedUploads || 0;
+    const totalAllowed = maxUploads + allocatedUploads;
+    const remainingUploads = Math.max(0, totalAllowed - usedUploads);
+
+    return {
+      maxUploads,
+      allocatedUploads,
+      totalAllowed,
+      usedUploads,
+      remainingUploads,
+    };
+  }
+
+  async checkUploadLimit(
+    organizationId: string,
+    newUploadsCount: number,
+  ): Promise<{ allowed: boolean; remaining: number; totalAllowed: number }> {
+    const usage = await this.getUploadUsage(organizationId);
+    const allowed = usage.remainingUploads >= newUploadsCount;
+    return {
+      allowed,
+      remaining: usage.remainingUploads,
+      totalAllowed: usage.totalAllowed,
+    };
   }
 
   private generateUniqueKey(): string {

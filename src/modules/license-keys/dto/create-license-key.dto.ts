@@ -26,6 +26,11 @@ export class CreateLicenseKeyDto {
   storageQuotaMb?: number;
 
   @IsOptional()
+  @IsInt()
+  @Min(1)
+  maxUploads?: number;
+
+  @IsOptional()
   @IsString()
   @MaxLength(255)
   notes?: string;

@@ -19,6 +19,7 @@ import { CreateExchangeRateDto } from './dto/create-exchange-rate.dto';
 import { UpdateNumberingSequenceDto } from './dto/update-numbering-sequence.dto';
 import { UpdateNumberingSettingsDto } from './dto/update-numbering-settings.dto';
 import { ForexRateService } from '../forex/forex-rate.service';
+import { FileStorageService } from '../attachments/file-storage.service';
 
 @Injectable()
 export class SettingsService {
@@ -34,6 +35,7 @@ export class SettingsService {
     @InjectRepository(Organization)
     private readonly organizationRepository: Repository<Organization>,
     private readonly forexRateService: ForexRateService,
+    private readonly fileStorageService: FileStorageService,
   ) {}
 
   // Organization Settings
@@ -76,6 +78,41 @@ export class SettingsService {
     organizationId: string,
   ): Promise<OrganizationSettings> {
     return this.getOrCreateSettings(organizationId);
+  }
+
+  async uploadInvoiceLogo(
+    organizationId: string,
+    file: Express.Multer.File,
+  ): Promise<{ logoUrl: string }> {
+    if (!file) {
+      throw new Error('No file provided');
+    }
+
+    // Validate file type
+    const allowedMimeTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/svg+xml'];
+    if (!allowedMimeTypes.includes(file.mimetype)) {
+      throw new Error('Invalid file type. Only JPEG, PNG, and SVG images are allowed.');
+    }
+
+    // Validate file size (max 5MB)
+    const maxSize = 5 * 1024 * 1024; // 5MB
+    if (file.size > maxSize) {
+      throw new Error('File size exceeds 5MB limit.');
+    }
+
+    // Upload to file storage
+    const uploadResult = await this.fileStorageService.uploadFile(
+      file,
+      organizationId,
+      'invoice-logos',
+    );
+
+    // Update settings with logo URL
+    const settings = await this.getOrCreateSettings(organizationId);
+    settings.invoiceLogoUrl = uploadResult.fileUrl;
+    await this.settingsRepository.save(settings);
+
+    return { logoUrl: uploadResult.fileUrl };
   }
 
   // Tax Settings

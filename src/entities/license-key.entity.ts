@@ -30,6 +30,12 @@ export class LicenseKey extends AbstractEntity {
   @Column({ type: 'integer', nullable: true })
   storageQuotaMb?: number | null;
 
+  @Column({ type: 'integer', default: 2000 })
+  maxUploads: number;
+
+  @Column({ type: 'integer', default: 0 })
+  allocatedUploads: number;
+
   @Column({ type: 'timestamp with time zone' })
   expiresAt: Date;
 

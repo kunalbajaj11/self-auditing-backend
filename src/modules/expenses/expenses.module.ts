@@ -13,6 +13,8 @@ import { AttachmentsModule } from '../attachments/attachments.module';
 import { ForexModule } from '../forex/forex.module';
 import { DuplicatesModule } from '../duplicates/duplicates.module';
 import { VendorsModule } from '../vendors/vendors.module';
+import { LicenseKeysModule } from '../license-keys/license-keys.module';
+import { SettingsModule } from '../settings/settings.module';
 import { Vendor } from '../vendors/vendor.entity';
 
 @Module({
@@ -31,6 +33,8 @@ import { Vendor } from '../vendors/vendor.entity';
     ForexModule,
     DuplicatesModule,
     VendorsModule,
+    LicenseKeysModule,
+    SettingsModule,
   ],
   providers: [ExpensesService],
   controllers: [ExpensesController],

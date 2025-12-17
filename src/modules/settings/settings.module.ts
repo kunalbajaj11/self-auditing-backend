@@ -8,6 +8,7 @@ import { NumberingSequence } from '../../entities/numbering-sequence.entity';
 import { ExchangeRate } from '../../entities/exchange-rate.entity';
 import { Organization } from '../../entities/organization.entity';
 import { ForexModule } from '../forex/forex.module';
+import { AttachmentsModule } from '../attachments/attachments.module';
 
 @Module({
   imports: [
@@ -19,6 +20,7 @@ import { ForexModule } from '../forex/forex.module';
       Organization,
     ]),
     ForexModule,
+    AttachmentsModule,
   ],
   controllers: [SettingsController],
   providers: [SettingsService],

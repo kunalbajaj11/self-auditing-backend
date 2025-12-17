@@ -21,6 +21,7 @@ import { AuditAction } from '../../common/enums/audit-action.enum';
 import { EmailService } from '../notifications/email.service';
 import { ReportGeneratorService } from '../reports/report-generator.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
+import { SettingsService } from '../settings/settings.service';
 import * as crypto from 'crypto';
 
 @Injectable()
@@ -45,6 +46,7 @@ export class SalesInvoicesService {
     private readonly emailService: EmailService,
     private readonly reportGeneratorService: ReportGeneratorService,
     private readonly auditLogsService: AuditLogsService,
+    private readonly settingsService: SettingsService,
     private readonly dataSource: DataSource,
   ) {}
 
@@ -210,6 +212,15 @@ export class SalesInvoicesService {
     // Generate public token
     const publicToken = this.generatePublicToken();
 
+    // Get tax settings for default VAT rate
+    const taxSettings = await this.settingsService.getTaxSettings(organizationId);
+    const defaultTaxRate = taxSettings.taxDefaultRate || 5;
+    const taxRates = await this.settingsService.getTaxRates(organizationId);
+    const activeStandardRate = taxRates.find(
+      (rate) => rate.isActive && rate.type === 'standard',
+    );
+    const effectiveDefaultRate = activeStandardRate?.rate || defaultTaxRate;
+
     // Calculate totals from line items
     let totalAmount = 0;
     let totalVatAmount = 0;
@@ -217,13 +228,37 @@ export class SalesInvoicesService {
     if (dto.lineItems && dto.lineItems.length > 0) {
       for (const item of dto.lineItems) {
         const amount = parseFloat(item.quantity) * parseFloat(item.unitPrice);
-        const vatAmount = amount * (parseFloat(item.vatRate || '5') / 100);
+        // Use VAT rate from item, or find matching tax rate, or use default
+        let itemVatRate = parseFloat(item.vatRate || '0');
+        
+        if (itemVatRate === 0) {
+          // Try to find matching tax rate by code or type
+          if (item.vatTaxType) {
+            const matchingRate = taxRates.find(
+              (rate) => rate.isActive && rate.type === item.vatTaxType,
+            );
+            if (matchingRate) {
+              itemVatRate = matchingRate.rate;
+            } else {
+              itemVatRate = effectiveDefaultRate;
+            }
+          } else {
+            itemVatRate = effectiveDefaultRate;
+          }
+        }
+        
+        const vatAmount = amount * (itemVatRate / 100);
         totalAmount += amount;
         totalVatAmount += vatAmount;
       }
     } else {
       totalAmount = parseFloat(dto.amount || '0');
-      totalVatAmount = parseFloat(dto.vatAmount || '0');
+      // If VAT amount not provided, calculate from default rate
+      if (!dto.vatAmount || dto.vatAmount === 0) {
+        totalVatAmount = totalAmount * (effectiveDefaultRate / 100);
+      } else {
+        totalVatAmount = parseFloat(dto.vatAmount || '0');
+      }
     }
 
     const invoice = this.invoicesRepository.create({
@@ -252,8 +287,26 @@ export class SalesInvoicesService {
     if (dto.lineItems && dto.lineItems.length > 0) {
       const lineItems = dto.lineItems.map((item: any, index: number) => {
         const amount = parseFloat(item.quantity) * parseFloat(item.unitPrice);
-        const vatRate = parseFloat(item.vatRate || '5');
-        const vatAmount = amount * (vatRate / 100);
+        
+        // Determine VAT rate for this line item
+        let itemVatRate = parseFloat(item.vatRate || '0');
+        if (itemVatRate === 0) {
+          // Try to find matching tax rate by code or type
+          if (item.vatTaxType) {
+            const matchingRate = taxRates.find(
+              (rate) => rate.isActive && rate.type === item.vatTaxType,
+            );
+            if (matchingRate) {
+              itemVatRate = matchingRate.rate;
+            } else {
+              itemVatRate = effectiveDefaultRate;
+            }
+          } else {
+            itemVatRate = effectiveDefaultRate;
+          }
+        }
+        
+        const vatAmount = amount * (itemVatRate / 100);
 
         return this.lineItemsRepository.create({
           invoice: savedInvoice,
@@ -263,7 +316,7 @@ export class SalesInvoicesService {
           quantity: item.quantity.toString(),
           unitPrice: item.unitPrice.toString(),
           unitOfMeasure: item.unitOfMeasure || 'unit',
-          vatRate: vatRate.toString(),
+          vatRate: itemVatRate.toString(),
           vatTaxType: item.vatTaxType || 'standard',
           amount: amount.toString(),
           vatAmount: vatAmount.toString(),
@@ -278,7 +331,7 @@ export class SalesInvoicesService {
   }
 
   /**
-   * Get invoice preview data (for PDF generation)
+   * Get invoice preview data (for PDF generation and preview)
    */
   async getInvoicePreviewData(
     invoiceId: string,
@@ -290,10 +343,38 @@ export class SalesInvoicesService {
       organizationId,
     );
 
+    // Get invoice template settings
+    const templateSettings = await this.settingsService.getInvoiceTemplate(
+      organizationId,
+    );
+
     return {
       invoice,
       outstandingBalance: outstanding,
       appliedCreditNotes: invoice.creditNoteApplications || [],
+      templateSettings: {
+        logoUrl: templateSettings.invoiceLogoUrl,
+        headerText: templateSettings.invoiceHeaderText,
+        colorScheme: templateSettings.invoiceColorScheme,
+        customColor: templateSettings.invoiceCustomColor,
+        title: templateSettings.invoiceTitle,
+        showCompanyDetails: templateSettings.invoiceShowCompanyDetails,
+        showVatDetails: templateSettings.invoiceShowVatDetails,
+        showPaymentTerms: templateSettings.invoiceShowPaymentTerms,
+        showPaymentMethods: templateSettings.invoiceShowPaymentMethods,
+        showBankDetails: templateSettings.invoiceShowBankDetails,
+        showTermsAndConditions: templateSettings.invoiceShowTermsConditions,
+        defaultPaymentTerms: templateSettings.invoiceDefaultPaymentTerms,
+        customPaymentTerms: templateSettings.invoiceCustomPaymentTerms,
+        defaultNotes: templateSettings.invoiceDefaultNotes,
+        termsAndConditions: templateSettings.invoiceTermsConditions,
+        footerText: templateSettings.invoiceFooterText,
+        showFooter: templateSettings.invoiceShowFooter,
+        showItemDescription: templateSettings.invoiceShowItemDescription,
+        showItemQuantity: templateSettings.invoiceShowItemQuantity,
+        showItemUnitPrice: templateSettings.invoiceShowItemUnitPrice,
+        showItemTotal: templateSettings.invoiceShowItemTotal,
+      },
     };
   }
 
@@ -489,7 +570,7 @@ export class SalesInvoicesService {
   }
 
   /**
-   * Generate invoice PDF
+   * Generate invoice PDF with template settings applied
    */
   async generateInvoicePDF(
     invoiceId: string,
@@ -503,6 +584,17 @@ export class SalesInvoicesService {
     if (!invoice) {
       throw new NotFoundException('Invoice not found');
     }
+
+    // Get invoice template settings
+    const templateSettings = await this.settingsService.getInvoiceTemplate(
+      organizationId,
+    );
+
+    // Determine payment terms
+    const paymentTerms =
+      templateSettings.invoiceDefaultPaymentTerms === 'Custom'
+        ? templateSettings.invoiceCustomPaymentTerms
+        : templateSettings.invoiceDefaultPaymentTerms;
 
     const reportData = {
       type: 'sales_invoice',
@@ -518,6 +610,27 @@ export class SalesInvoicesService {
         generatedAt: new Date(),
         generatedByName: invoice.user?.name,
         organizationId: invoice.organization?.id,
+        // Invoice template settings
+        logoUrl: templateSettings.invoiceLogoUrl,
+        headerText: templateSettings.invoiceHeaderText || invoice.organization?.name,
+        colorScheme: templateSettings.invoiceColorScheme || 'blue',
+        customColor: templateSettings.invoiceCustomColor,
+        invoiceTitle: templateSettings.invoiceTitle || 'TAX INVOICE',
+        showCompanyDetails: templateSettings.invoiceShowCompanyDetails ?? true,
+        showVatDetails: templateSettings.invoiceShowVatDetails ?? true,
+        showPaymentTerms: templateSettings.invoiceShowPaymentTerms ?? true,
+        showPaymentMethods: templateSettings.invoiceShowPaymentMethods ?? true,
+        showBankDetails: templateSettings.invoiceShowBankDetails ?? false,
+        showTermsAndConditions: templateSettings.invoiceShowTermsConditions ?? true,
+        paymentTerms: paymentTerms || 'Net 30',
+        defaultNotes: templateSettings.invoiceDefaultNotes,
+        termsAndConditions: templateSettings.invoiceTermsConditions,
+        footerText: templateSettings.invoiceFooterText,
+        showFooter: templateSettings.invoiceShowFooter ?? true,
+        showItemDescription: templateSettings.invoiceShowItemDescription ?? true,
+        showItemQuantity: templateSettings.invoiceShowItemQuantity ?? true,
+        showItemUnitPrice: templateSettings.invoiceShowItemUnitPrice ?? true,
+        showItemTotal: templateSettings.invoiceShowItemTotal ?? true,
       },
     };
 
@@ -561,19 +674,43 @@ export class SalesInvoicesService {
       throw new BadRequestException('Recipient email is required');
     }
 
+    // Get invoice template settings for email
+    const templateSettings = await this.settingsService.getInvoiceTemplate(
+      organizationId,
+    );
+
     // Generate PDF
     const pdfBuffer = await this.generateInvoicePDF(invoiceId, organizationId);
+
+    // Build email subject and message using template settings
+    const companyName = invoice.organization?.name || 'Company';
+    const totalAmount = parseFloat(invoice.totalAmount || '0').toFixed(2);
+    const currency = invoice.currency || 'AED';
+
+    // Replace template variables in email subject
+    let emailSubject =
+      emailData.subject || templateSettings.invoiceEmailSubject || `Invoice ${invoice.invoiceNumber} from ${companyName}`;
+    emailSubject = emailSubject
+      .replace(/\{\{invoiceNumber\}\}/g, invoice.invoiceNumber)
+      .replace(/\{\{companyName\}\}/g, companyName)
+      .replace(/\{\{totalAmount\}\}/g, totalAmount)
+      .replace(/\{\{currency\}\}/g, currency);
+
+    // Replace template variables in email message
+    let emailMessage =
+      emailData.message || templateSettings.invoiceEmailMessage || `Please find attached invoice ${invoice.invoiceNumber} for ${totalAmount} ${currency}.`;
+    emailMessage = emailMessage
+      .replace(/\{\{invoiceNumber\}\}/g, invoice.invoiceNumber)
+      .replace(/\{\{companyName\}\}/g, companyName)
+      .replace(/\{\{totalAmount\}\}/g, totalAmount)
+      .replace(/\{\{currency\}\}/g, currency);
 
     // Send email with PDF attachment
     await this.emailService.sendEmail({
       to: recipientEmail,
-      subject: emailData.subject || `Invoice ${invoice.invoiceNumber}`,
-      text:
-        emailData.message ||
-        `Please find attached invoice ${invoice.invoiceNumber}`,
-      html:
-        emailData.message ||
-        `<p>Please find attached invoice ${invoice.invoiceNumber}</p>`,
+      subject: emailSubject,
+      text: emailMessage,
+      html: `<p>${emailMessage.replace(/\n/g, '<br>')}</p>`,
       attachments: [
         {
           filename: `invoice-${invoice.invoiceNumber}.pdf`,

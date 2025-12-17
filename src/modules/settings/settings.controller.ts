@@ -6,8 +6,11 @@ import {
   Param,
   Patch,
   Post,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { SettingsService } from './settings.service';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -50,6 +53,18 @@ export class SettingsController {
     return this.settingsService.updateInvoiceTemplate(
       user?.organizationId as string,
       dto,
+    );
+  }
+
+  @Post('invoice-template/upload-logo')
+  @UseInterceptors(FileInterceptor('file'))
+  async uploadLogo(
+    @CurrentUser() user: AuthenticatedUser,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    return this.settingsService.uploadInvoiceLogo(
+      user?.organizationId as string,
+      file,
     );
   }
 

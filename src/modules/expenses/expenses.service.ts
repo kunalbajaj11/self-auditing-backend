@@ -24,6 +24,8 @@ import { NotificationChannel } from '../../common/enums/notification-channel.enu
 import { FileStorageService } from '../attachments/file-storage.service';
 import { DuplicateDetectionService } from '../duplicates/duplicate-detection.service';
 import { ForexRateService } from '../forex/forex-rate.service';
+import { LicenseKeysService } from '../license-keys/license-keys.service';
+import { SettingsService } from '../settings/settings.service';
 import { Vendor } from '../vendors/vendor.entity';
 import { Repository as TypeOrmRepository } from 'typeorm';
 import { ConflictException } from '@nestjs/common';
@@ -53,7 +55,79 @@ export class ExpensesService {
     private readonly fileStorageService: FileStorageService,
     private readonly duplicateDetectionService: DuplicateDetectionService,
     private readonly forexRateService: ForexRateService,
+    private readonly licenseKeysService: LicenseKeysService,
+    private readonly settingsService: SettingsService,
   ) {}
+
+  /**
+   * Calculate VAT amount based on tax settings
+   * Supports both inclusive and exclusive tax calculation methods
+   */
+  private async calculateVatAmount(
+    organizationId: string,
+    amount: number,
+    taxRate?: number,
+  ): Promise<{ vatAmount: number; baseAmount: number }> {
+    // Get tax settings
+    const taxSettings = await this.settingsService.getTaxSettings(organizationId);
+    const calculationMethod = taxSettings.taxCalculationMethod || 'inclusive';
+    const defaultTaxRate = taxSettings.taxDefaultRate || 5;
+    const effectiveTaxRate = taxRate ?? defaultTaxRate;
+
+    let vatAmount: number;
+    let baseAmount: number;
+
+    if (calculationMethod === 'inclusive') {
+      // Tax is included in the amount
+      // VAT = Amount * (TaxRate / (100 + TaxRate))
+      // Base = Amount - VAT
+      vatAmount = (amount * effectiveTaxRate) / (100 + effectiveTaxRate);
+      baseAmount = amount - vatAmount;
+    } else {
+      // Tax is exclusive (added on top)
+      // VAT = Amount * (TaxRate / 100)
+      // Base = Amount
+      vatAmount = (amount * effectiveTaxRate) / 100;
+      baseAmount = amount;
+    }
+
+    // Apply rounding method
+    const roundingMethod = taxSettings.taxRoundingMethod || 'standard';
+    if (roundingMethod === 'up') {
+      vatAmount = Math.ceil(vatAmount * 100) / 100;
+    } else if (roundingMethod === 'down') {
+      vatAmount = Math.floor(vatAmount * 100) / 100;
+    } else {
+      // standard rounding
+      vatAmount = Math.round(vatAmount * 100) / 100;
+    }
+
+    // Recalculate base amount for inclusive to ensure consistency
+    if (calculationMethod === 'inclusive') {
+      baseAmount = amount - vatAmount;
+    }
+
+    return { vatAmount, baseAmount };
+  }
+
+  /**
+   * Get default tax rate from settings or tax rates table
+   */
+  private async getDefaultTaxRate(organizationId: string): Promise<number> {
+    // First, try to get active tax rates
+    const taxRates = await this.settingsService.getTaxRates(organizationId);
+    const activeStandardRate = taxRates.find(
+      (rate) => rate.isActive && rate.type === 'standard',
+    );
+
+    if (activeStandardRate) {
+      return activeStandardRate.rate;
+    }
+
+    // Fall back to default rate from settings
+    const taxSettings = await this.settingsService.getTaxSettings(organizationId);
+    return taxSettings.taxDefaultRate || 5;
+  }
 
   private formatMoney(value: number | undefined): string {
     return Number(value ?? 0).toFixed(2);
@@ -207,7 +281,26 @@ export class ExpensesService {
       );
     }
 
-    // Handle currency and conversion
+    // Calculate VAT if not provided, using tax settings
+    // Note: totalAmount is auto-calculated as amount + vatAmount in the database
+    let vatAmount = dto.vatAmount;
+    let expenseAmount = dto.amount;
+
+    if (vatAmount === undefined || vatAmount === null) {
+      // Auto-calculate VAT from tax settings
+      const defaultTaxRate = await this.getDefaultTaxRate(organizationId);
+      const taxCalculation = await this.calculateVatAmount(
+        organizationId,
+        dto.amount,
+        defaultTaxRate,
+      );
+      vatAmount = taxCalculation.vatAmount;
+      // For inclusive tax, amount should be base amount (without VAT)
+      // For exclusive tax, amount stays as entered (base amount)
+      expenseAmount = taxCalculation.baseAmount;
+    }
+
+    // Handle currency and conversion (use final expense amount after tax calculation)
     const expenseCurrency = dto.currency || organization.currency || 'AED';
     const baseCurrency =
       organization.baseCurrency || organization.currency || 'AED';
@@ -223,10 +316,11 @@ export class ExpensesService {
         expenseDate,
       );
       exchangeRate = rate.toFixed(6);
+      // Convert the expense amount (base amount) to base currency
       baseAmount = (
         await this.forexRateService.convert(
           organization,
-          dto.amount,
+          expenseAmount,
           expenseCurrency,
           baseCurrency,
           expenseDate,
@@ -234,7 +328,7 @@ export class ExpensesService {
       ).toFixed(2);
     } else {
       exchangeRate = '1.000000';
-      baseAmount = this.formatMoney(dto.amount);
+      baseAmount = this.formatMoney(expenseAmount);
     }
 
     let linkedAccrualExpense: Expense | null = null;
@@ -260,8 +354,8 @@ export class ExpensesService {
       type: dto.type,
       category: category ?? null,
       vendor: vendor,
-      amount: this.formatMoney(dto.amount),
-      vatAmount: this.formatMoney(dto.vatAmount),
+      amount: this.formatMoney(expenseAmount),
+      vatAmount: this.formatMoney(vatAmount),
       currency: expenseCurrency,
       exchangeRate: exchangeRate,
       baseAmount: baseAmount,
@@ -276,6 +370,19 @@ export class ExpensesService {
         dto.ocrConfidence !== undefined ? dto.ocrConfidence.toFixed(2) : null,
       linkedAccrual: linkedAccrualExpense ?? null,
     });
+
+    // Check upload limit before creating attachments
+    if (dto.attachments?.length) {
+      const uploadLimitCheck = await this.licenseKeysService.checkUploadLimit(
+        organizationId,
+        dto.attachments.length,
+      );
+      if (!uploadLimitCheck.allowed) {
+        throw new BadRequestException(
+          `Upload limit exceeded. You have ${uploadLimitCheck.remaining} uploads remaining out of ${uploadLimitCheck.totalAllowed} total allowed. Please contact your administrator or sales team to request additional uploads. Email: support@selfaccounting.ai`,
+        );
+      }
+    }
 
     // Save expense first to get the ID
     const saved = await this.expensesRepository.save(expense);
@@ -637,9 +744,26 @@ export class ExpensesService {
     if (dto.type) {
       expense.type = dto.type;
     }
+    
+    // Recalculate VAT if amount changes and VAT not explicitly provided
     if (dto.amount !== undefined) {
-      expense.amount = this.formatMoney(dto.amount);
+      const newAmount = dto.amount;
+      expense.amount = this.formatMoney(newAmount);
+      
+      // If VAT amount not explicitly provided, recalculate from tax settings
+      if (dto.vatAmount === undefined) {
+        const defaultTaxRate = await this.getDefaultTaxRate(organizationId);
+        const taxCalculation = await this.calculateVatAmount(
+          organizationId,
+          newAmount,
+          defaultTaxRate,
+        );
+        expense.vatAmount = this.formatMoney(taxCalculation.vatAmount);
+        // Update amount to base amount for inclusive tax
+        expense.amount = this.formatMoney(taxCalculation.baseAmount);
+      }
     }
+    
     if (dto.vatAmount !== undefined) {
       expense.vatAmount = this.formatMoney(dto.vatAmount);
     }

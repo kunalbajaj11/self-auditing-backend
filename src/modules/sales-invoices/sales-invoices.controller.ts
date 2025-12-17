@@ -8,8 +8,10 @@ import {
   Body,
   Param,
   Query,
+  Res,
   UseGuards,
 } from '@nestjs/common';
+import { Response } from 'express';
 import { SalesInvoicesService } from './sales-invoices.service';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -81,6 +83,32 @@ export class SalesInvoicesController {
       id,
       user?.organizationId as string,
     );
+  }
+
+  @Get(':id/pdf')
+  @UseGuards(JwtAuthGuard, RolesGuard, TenantGuard)
+  @Roles(UserRole.ADMIN, UserRole.ACCOUNTANT, UserRole.EMPLOYEE)
+  async downloadInvoicePDF(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthenticatedUser,
+    @Res() res: Response,
+  ) {
+    const pdfBuffer = await this.salesInvoicesService.generateInvoicePDF(
+      id,
+      user?.organizationId as string,
+    );
+    
+    const invoice = await this.salesInvoicesService.findById(
+      user?.organizationId as string,
+      id,
+    );
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="invoice-${invoice.invoiceNumber}.pdf"`,
+    );
+    res.send(pdfBuffer);
   }
 
   @Post()
