@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, Optional, Inject } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { OrganizationSettings } from '../../entities/organization-settings.entity';
@@ -35,9 +35,9 @@ export class SettingsService {
     private readonly exchangeRateRepository: Repository<ExchangeRate>,
     @InjectRepository(Organization)
     private readonly organizationRepository: Repository<Organization>,
-    private readonly forexRateService: ForexRateService,
     private readonly fileStorageService: FileStorageService,
     private readonly dataSource: DataSource,
+    @Optional() @Inject(ForexRateService) private readonly forexRateService?: ForexRateService,
   ) {}
 
   // Organization Settings
@@ -316,6 +316,10 @@ export class SettingsService {
       throw new NotFoundException('Organization not found');
     }
 
+    if (!this.forexRateService) {
+      throw new Error('ForexRateService is not available');
+    }
+
     return this.forexRateService.saveRate(
       organization,
       dto.fromCurrency,
@@ -365,6 +369,9 @@ export class SettingsService {
       throw new NotFoundException('Organization not found');
     }
 
+    if (!this.forexRateService) {
+      throw new Error('ForexRateService is not available');
+    }
     await this.forexRateService.updateRates(organization);
   }
 

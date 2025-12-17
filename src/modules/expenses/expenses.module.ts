@@ -15,7 +15,6 @@ import { DuplicatesModule } from '../duplicates/duplicates.module';
 import { VendorsModule } from '../vendors/vendors.module';
 import { LicenseKeysModule } from '../license-keys/license-keys.module';
 import { SettingsModule } from '../settings/settings.module';
-import { JournalEntriesModule } from '../journal-entries/journal-entries.module';
 import { Vendor } from '../vendors/vendor.entity';
 
 @Module({
@@ -36,7 +35,6 @@ import { Vendor } from '../vendors/vendor.entity';
     VendorsModule,
     LicenseKeysModule,
     SettingsModule,
-    JournalEntriesModule,
   ],
   providers: [ExpensesService],
   controllers: [ExpensesController],

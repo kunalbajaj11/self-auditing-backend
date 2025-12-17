@@ -26,13 +26,9 @@ import { DuplicateDetectionService } from '../duplicates/duplicate-detection.ser
 import { ForexRateService } from '../forex/forex-rate.service';
 import { LicenseKeysService } from '../license-keys/license-keys.service';
 import { SettingsService } from '../settings/settings.service';
-import { JournalEntriesService } from '../journal-entries/journal-entries.service';
 import { Vendor } from '../vendors/vendor.entity';
 import { Repository as TypeOrmRepository } from 'typeorm';
 import { ConflictException } from '@nestjs/common';
-import { JournalEntryType } from '../../common/enums/journal-entry-type.enum';
-import { JournalEntryCategory } from '../../common/enums/journal-entry-category.enum';
-import { JournalEntryStatus } from '../../common/enums/journal-entry-status.enum';
 
 const DEFAULT_ACCRUAL_TOLERANCE = Number(
   process.env.ACCRUAL_AMOUNT_TOLERANCE ?? 5,
@@ -61,7 +57,6 @@ export class ExpensesService {
     private readonly forexRateService: ForexRateService,
     private readonly licenseKeysService: LicenseKeysService,
     private readonly settingsService: SettingsService,
-    private readonly journalEntriesService: JournalEntriesService,
   ) {}
 
   /**
