@@ -12,6 +12,7 @@ import { Response } from 'express';
 import { ReportsService } from './reports.service';
 import { ReportGeneratorService } from './report-generator.service';
 import { EmailService } from '../notifications/email.service';
+import { SettingsService } from '../settings/settings.service';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Organization } from '../../entities/organization.entity';
@@ -36,6 +37,7 @@ export class ReportsController {
     private readonly reportsService: ReportsService,
     private readonly reportGeneratorService: ReportGeneratorService,
     private readonly emailService: EmailService,
+    private readonly settingsService: SettingsService,
     @InjectRepository(Organization)
     private readonly organizationsRepository: Repository<Organization>,
     @InjectRepository(User)
@@ -108,6 +110,11 @@ export class ReportsController {
       where: { id: user?.userId as string },
     });
 
+    // Fetch organization logo buffer for PDF reports
+    const logoBuffer = await this.settingsService.getInvoiceLogoBuffer(
+      user?.organizationId as string,
+    );
+
     let buffer: Buffer;
     let contentType: string;
     let filename: string;
@@ -130,7 +137,7 @@ export class ReportsController {
       phone: organization?.contactPerson || undefined, // Using contactPerson as phone placeholder
       email: organization?.contactEmail || undefined,
       currency: organization?.currency || 'AED',
-      // logoUrl: (organization as any)?.logoUrl || undefined, // Using application logo by default
+      logoBuffer: logoBuffer || undefined, // Organization logo for PDF header
       generatedAt: reportData.generatedAt,
       generatedBy: user?.userId,
       generatedByName: generatedByUser?.name || 'System',
@@ -216,6 +223,11 @@ export class ReportsController {
       const format = dto.format || 'pdf';
       const reportName = `${dto.type}_${new Date().toISOString().split('T')[0]}`;
 
+      // Fetch organization logo buffer for PDF reports
+      const logoBuffer = await this.settingsService.getInvoiceLogoBuffer(
+        user?.organizationId as string,
+      );
+
       const metadata = {
         organizationName: organization?.name,
         vatNumber: organization?.vatNumber || undefined,
@@ -223,7 +235,7 @@ export class ReportsController {
         phone: organization?.contactPerson || undefined,
         email: organization?.contactEmail || undefined,
         currency: organization?.currency || 'AED',
-        // logoUrl: (organization as any)?.logoUrl || undefined, // Using application logo by default
+        logoBuffer: logoBuffer || undefined, // Organization logo for PDF header
         generatedAt: reportData.generatedAt,
         generatedBy: user?.userId,
         generatedByName: generatedByUser?.name || 'System',

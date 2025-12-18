@@ -69,8 +69,9 @@ export class ReportsService {
       .getRawMany();
 
     return {
+      // Note: Raw SQL queries return lowercase column names in PostgreSQL
       vendors: vendorResults
-        .map((r) => r.vendorName)
+        .map((r) => r.vendorname || r.vendorName)
         .filter((v) => v)
         .sort(),
       categories: [], // Can be populated if needed
@@ -211,10 +212,11 @@ export class ReportsService {
     const revenueRow = await revenueQuery.getRawOne();
 
     // Combine accounts
+    // Note: Raw SQL queries return lowercase column names in PostgreSQL
     const accounts = [
       ...expenseRows.map((row) => ({
-        accountName: row.accountName,
-        accountType: row.accountType,
+        accountName: row.accountname || row.accountName,
+        accountType: row.accounttype || row.accountType,
         debit: Number(row.debit || 0),
         credit: Number(row.credit || 0),
         balance: Number(row.debit || 0) - Number(row.credit || 0),
@@ -222,8 +224,8 @@ export class ReportsService {
       ...(revenueRow && Number(revenueRow.credit || 0) > 0
         ? [
             {
-              accountName: revenueRow.accountName,
-              accountType: revenueRow.accountType,
+              accountName: revenueRow.accountname || revenueRow.accountName,
+              accountType: revenueRow.accounttype || revenueRow.accountType,
               debit: Number(revenueRow.debit || 0),
               credit: Number(revenueRow.credit || 0),
               balance: Number(revenueRow.debit || 0) - Number(revenueRow.credit || 0),
@@ -549,12 +551,13 @@ export class ReportsService {
 
     const rows = await query.getRawMany();
 
+    // Note: Raw SQL queries return lowercase column names in PostgreSQL
     // Calculate overdue items
     const overdueItems = rows.filter(
       (row) =>
         row.status === AccrualStatus.PENDING_SETTLEMENT &&
-        row.expectedDate &&
-        new Date(row.expectedDate) < new Date(asOfDate),
+        (row.expecteddate || row.expectedDate) &&
+        new Date(row.expecteddate || row.expectedDate) < new Date(asOfDate),
     );
 
     const totalAmount = rows.reduce(
@@ -569,18 +572,18 @@ export class ReportsService {
     return {
       asOfDate,
       items: rows.map((row) => ({
-        accrualId: row.accrualId,
+        accrualId: row.accrualid || row.accrualId,
         vendor: row.vendor || 'N/A',
         amount: Number(row.amount || 0),
-        expectedDate: row.expectedDate,
-        settlementDate: row.settlementDate,
+        expectedDate: row.expecteddate || row.expectedDate,
+        settlementDate: row.settlementdate || row.settlementDate,
         status: row.status,
         category: row.category,
         description: row.description || 'N/A',
         isOverdue:
           row.status === AccrualStatus.PENDING_SETTLEMENT &&
-          row.expectedDate &&
-          new Date(row.expectedDate) < new Date(asOfDate),
+          (row.expecteddate || row.expectedDate) &&
+          new Date(row.expecteddate || row.expectedDate) < new Date(asOfDate),
       })),
       summary: {
         totalItems: rows.length,
@@ -675,30 +678,33 @@ export class ReportsService {
 
     const rows = await query.getRawMany();
 
+    // Note: Raw SQL queries return lowercase column names in PostgreSQL
     // Calculate outstanding amounts and overdue items
     const items = rows.map((row) => {
       const total = Number(row.total || 0);
-      const paid = Number(row.paidAmount || 0);
+      const paid = Number(row.paidamount || row.paidAmount || 0);
       const outstanding = total - paid;
+      const paymentStatus = row.paymentstatus || row.paymentStatus;
+      const dueDate = row.duedate || row.dueDate;
       const isOverdue =
-        row.paymentStatus !== PaymentStatus.PAID &&
-        row.dueDate &&
-        new Date(row.dueDate) < new Date(asOfDate);
+        paymentStatus !== PaymentStatus.PAID &&
+        dueDate &&
+        new Date(dueDate) < new Date(asOfDate);
 
       return {
-        invoiceId: row.invoiceId,
-        invoiceNumber: row.invoiceNumber,
+        invoiceId: row.invoiceid || row.invoiceId,
+        invoiceNumber: row.invoicenumber || row.invoiceNumber,
         customer: row.customer,
         amount: Number(row.amount || 0),
         vat: Number(row.vat || 0),
         total: total,
         paid: paid,
         outstanding: outstanding,
-        invoiceDate: row.invoiceDate,
-        dueDate: row.dueDate,
-        paidDate: row.paidDate,
+        invoiceDate: row.invoicedate || row.invoiceDate,
+        dueDate: dueDate,
+        paidDate: row.paiddate || row.paidDate,
         status: row.status,
-        paymentStatus: row.paymentStatus,
+        paymentStatus: paymentStatus,
         isOverdue,
       };
     });

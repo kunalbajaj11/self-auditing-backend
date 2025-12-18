@@ -89,6 +89,7 @@ export class SalesInvoicesService {
     const invoice = await this.invoicesRepository.findOne({
       where: { id, organization: { id: organizationId }, isDeleted: false },
       relations: [
+        'organization',
         'customer',
         'lineItems',
         'payments',
@@ -485,12 +486,17 @@ export class SalesInvoicesService {
       organizationId,
     );
 
+    // Use proxy URL for logo if logo is configured (to serve from private bucket)
+    const logoUrl = templateSettings.invoiceLogoUrl
+      ? '/api/settings/invoice-template/logo'
+      : null;
+
     return {
       invoice,
       outstandingBalance: outstanding,
       appliedCreditNotes: invoice.creditNoteApplications || [],
       templateSettings: {
-        logoUrl: templateSettings.invoiceLogoUrl,
+        logoUrl,
         headerText: templateSettings.invoiceHeaderText,
         colorScheme: templateSettings.invoiceColorScheme,
         customColor: templateSettings.invoiceCustomColor,
@@ -694,6 +700,9 @@ export class SalesInvoicesService {
     // Get tax settings for tax registration info
     const taxSettings = await this.settingsService.getTaxSettings(organizationId);
 
+    // Fetch logo buffer from storage for PDF generation
+    const logoBuffer = await this.settingsService.getInvoiceLogoBuffer(organizationId);
+
     // Get exchange rate if invoice currency differs from base currency
     let exchangeRate = null;
     if (currencySettings.currencyShowExchangeRate && invoice.currency !== invoice.organization?.baseCurrency) {
@@ -742,8 +751,9 @@ export class SalesInvoicesService {
         generatedAt: new Date(),
         generatedByName: invoice.user?.name,
         organizationId: invoice.organization?.id,
-        // Invoice template settings
-        logoUrl: templateSettings.invoiceLogoUrl,
+        // Invoice template settings - use logo buffer for PDF generation
+        logoBuffer: logoBuffer,
+        logoUrl: null, // Logo is provided as buffer, not URL
         headerText: templateSettings.invoiceHeaderText || invoice.organization?.name,
         colorScheme: templateSettings.invoiceColorScheme || 'blue',
         customColor: templateSettings.invoiceCustomColor,

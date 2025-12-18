@@ -165,7 +165,25 @@ export class SettingsService {
     dto: UpdateInvoiceTemplateDto,
   ): Promise<OrganizationSettings> {
     const settings = await this.getOrCreateSettings(organizationId);
-    Object.assign(settings, dto);
+    
+    // Create a copy of dto to avoid modifying the original
+    const updateData = { ...dto };
+    
+    // Ignore invoiceLogoUrl if it's the proxy URL (logo is only updated via upload endpoint)
+    // Also ignore if it's null/undefined/empty to preserve existing logo unless explicitly removed
+    if (
+      updateData.invoiceLogoUrl === undefined ||
+      updateData.invoiceLogoUrl?.startsWith('/api/') ||
+      updateData.invoiceLogoUrl?.includes('settings/invoice-template/logo')
+    ) {
+      delete updateData.invoiceLogoUrl;
+    } else if (updateData.invoiceLogoUrl === '' || updateData.invoiceLogoUrl === null) {
+      // Explicitly remove logo
+      settings.invoiceLogoUrl = null;
+      delete updateData.invoiceLogoUrl;
+    }
+    
+    Object.assign(settings, updateData);
     return this.settingsRepository.save(settings);
   }
 
@@ -202,12 +220,72 @@ export class SettingsService {
       'invoice-logos',
     );
 
-    // Update settings with logo URL
+    // Update settings with logo URL (store both the file key and original URL)
     const settings = await this.getOrCreateSettings(organizationId);
-    settings.invoiceLogoUrl = uploadResult.fileUrl;
+    settings.invoiceLogoUrl = uploadResult.fileKey; // Store the file key for retrieval
     await this.settingsRepository.save(settings);
 
-    return { logoUrl: uploadResult.fileUrl };
+    // Return the proxy URL that will be used to serve the logo
+    return { logoUrl: '/api/settings/invoice-template/logo' };
+  }
+
+  /**
+   * Get the invoice logo as a stream for proxy serving
+   * This allows serving logos from private storage buckets
+   */
+  async getInvoiceLogoStream(
+    organizationId: string,
+  ): Promise<{ stream: any; contentType?: string; contentLength?: number } | null> {
+    const settings = await this.getOrCreateSettings(organizationId);
+    
+    if (!settings.invoiceLogoUrl) {
+      return null;
+    }
+
+    // The invoiceLogoUrl now stores the file key
+    let fileKey = settings.invoiceLogoUrl;
+    
+    // Handle legacy URLs - extract file key from full URL if needed
+    if (fileKey.startsWith('http')) {
+      fileKey = this.fileStorageService.extractFileKeyFromUrl(fileKey) || fileKey;
+    }
+
+    try {
+      const result = await this.fileStorageService.getObject(fileKey);
+      return {
+        stream: result.body,
+        contentType: result.contentType,
+        contentLength: result.contentLength,
+      };
+    } catch (error) {
+      console.error('Error fetching logo from storage:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Get the invoice logo as a buffer for PDF generation
+   */
+  async getInvoiceLogoBuffer(
+    organizationId: string,
+  ): Promise<Buffer | null> {
+    const logoStream = await this.getInvoiceLogoStream(organizationId);
+    
+    if (!logoStream || !logoStream.stream) {
+      return null;
+    }
+
+    try {
+      // Convert stream to buffer
+      const chunks: Buffer[] = [];
+      for await (const chunk of logoStream.stream) {
+        chunks.push(Buffer.from(chunk));
+      }
+      return Buffer.concat(chunks);
+    } catch (error) {
+      console.error('Error converting logo stream to buffer:', error);
+      return null;
+    }
   }
 
   // Tax Settings

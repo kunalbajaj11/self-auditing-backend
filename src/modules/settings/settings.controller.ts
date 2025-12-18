@@ -6,10 +6,13 @@ import {
   Param,
   Patch,
   Post,
+  Res,
   UploadedFile,
   UseGuards,
   UseInterceptors,
+  NotFoundException,
 } from '@nestjs/common';
+import { Response } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { SettingsService } from './settings.service';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
@@ -40,9 +43,17 @@ export class SettingsController {
   // Invoice Template
   @Get('invoice-template')
   async getInvoiceTemplate(@CurrentUser() user: AuthenticatedUser) {
-    return this.settingsService.getInvoiceTemplate(
+    const settings = await this.settingsService.getInvoiceTemplate(
       user?.organizationId as string,
     );
+    
+    // Return proxy URL for logo if configured (to serve from private bucket)
+    return {
+      ...settings,
+      invoiceLogoUrl: settings.invoiceLogoUrl
+        ? '/api/settings/invoice-template/logo'
+        : null,
+    };
   }
 
   @Patch('invoice-template')
@@ -66,6 +77,32 @@ export class SettingsController {
       user?.organizationId as string,
       file,
     );
+  }
+
+  /**
+   * Proxy endpoint to serve the invoice logo image
+   * This allows serving images from private storage buckets
+   */
+  @Get('invoice-template/logo')
+  async getInvoiceLogo(
+    @CurrentUser() user: AuthenticatedUser,
+    @Res() res: Response,
+  ) {
+    const result = await this.settingsService.getInvoiceLogoStream(
+      user?.organizationId as string,
+    );
+
+    if (!result) {
+      throw new NotFoundException('Logo not found');
+    }
+
+    res.setHeader('Content-Type', result.contentType || 'image/png');
+    res.setHeader('Cache-Control', 'public, max-age=3600'); // Cache for 1 hour
+    if (result.contentLength) {
+      res.setHeader('Content-Length', result.contentLength);
+    }
+
+    result.stream.pipe(res);
   }
 
   // Tax Settings
