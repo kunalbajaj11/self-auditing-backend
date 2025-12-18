@@ -3,6 +3,7 @@ import * as PDFDocument from 'pdfkit';
 import * as ExcelJS from 'exceljs';
 import * as fs from 'fs';
 import * as path from 'path';
+import axios from 'axios';
 
 export interface ReportData {
   type: string;
@@ -15,6 +16,7 @@ export interface ReportData {
     email?: string;
     currency?: string;
     logoUrl?: string;
+    logoBuffer?: Buffer; // Pre-fetched logo image buffer for remote URLs
     generatedAt?: Date;
     generatedBy?: string;
     generatedByName?: string;
@@ -54,6 +56,23 @@ export interface ReportData {
 
 @Injectable()
 export class ReportGeneratorService {
+  /**
+   * Fetch image from URL and return as Buffer
+   * PDFKit cannot load images directly from URLs, so we need to fetch them first
+   */
+  private async fetchImageAsBuffer(url: string): Promise<Buffer | null> {
+    try {
+      const response = await axios.get(url, {
+        responseType: 'arraybuffer',
+        timeout: 10000, // 10 second timeout
+      });
+      return Buffer.from(response.data);
+    } catch (error) {
+      console.warn(`Failed to fetch image from URL: ${url}`, error);
+      return null;
+    }
+  }
+
   /**
    * Format currency amount based on organization settings
    */
@@ -249,6 +268,24 @@ export class ReportGeneratorService {
   }
 
   async generatePDF(reportData: ReportData): Promise<Buffer> {
+    // Pre-fetch remote logo if URL is provided
+    if (
+      reportData.metadata?.logoUrl &&
+      (reportData.metadata.logoUrl.startsWith('http://') ||
+        reportData.metadata.logoUrl.startsWith('https://'))
+    ) {
+      const logoBuffer = await this.fetchImageAsBuffer(reportData.metadata.logoUrl);
+      if (logoBuffer) {
+        reportData = {
+          ...reportData,
+          metadata: {
+            ...reportData.metadata,
+            logoBuffer,
+          },
+        };
+      }
+    }
+
     return new Promise((resolve, reject) => {
       try {
         // Special handling for sales invoice
@@ -406,43 +443,46 @@ export class ReportGeneratorService {
       return null;
     };
 
-    // Use organization logo if provided, otherwise use application logo
-    const logoToUse = reportData.metadata?.logoUrl || getApplicationLogoPath();
+    // Use pre-fetched logo buffer, organization logo URL, or application logo
+    const logoBuffer = reportData.metadata?.logoBuffer;
+    const logoUrl = reportData.metadata?.logoUrl;
+    const localLogoPath = getApplicationLogoPath();
 
-    if (logoToUse) {
-      try {
-        // Try to load and display the logo image
-        // PDFKit can handle file paths, URLs, and buffers
-        const logoUrl = logoToUse;
-
-        // Check if it's a file path or URL
-        if (logoUrl.startsWith('http://') || logoUrl.startsWith('https://')) {
-          // For HTTP/HTTPS URLs, PDFKit should handle them directly
-          doc.image(logoUrl, logoX, logoY, {
-            width: logoSize,
-            height: logoSize,
-            fit: [logoSize, logoSize],
-          });
-        } else if (fs.existsSync(logoUrl)) {
-          // For local file paths
-          doc.image(logoUrl, logoX, logoY, {
-            width: logoSize,
-            height: logoSize,
-            fit: [logoSize, logoSize],
-          });
-        } else {
-          // Invalid path/URL, show application name as fallback
-          doc.fontSize(10).font('Helvetica-Bold').fillColor('#1a1a1a');
-          doc.text('selfAccounting.AI', logoX, logoY, { width: logoSize });
-        }
-      } catch (error) {
-        // If logo fails to load, show application name
-        console.warn('Failed to load logo:', error);
-        doc.fontSize(10).font('Helvetica-Bold').fillColor('#1a1a1a');
-        doc.text('selfAccounting.AI', logoX, logoY, { width: logoSize });
+    let logoLoaded = false;
+    
+    try {
+      if (logoBuffer) {
+        // Use pre-fetched logo buffer (for remote URLs)
+        doc.image(logoBuffer, logoX, logoY, {
+          width: logoSize,
+          height: logoSize,
+          fit: [logoSize, logoSize],
+        });
+        logoLoaded = true;
+      } else if (logoUrl && !logoUrl.startsWith('http://') && !logoUrl.startsWith('https://') && fs.existsSync(logoUrl)) {
+        // For local file paths
+        doc.image(logoUrl, logoX, logoY, {
+          width: logoSize,
+          height: logoSize,
+          fit: [logoSize, logoSize],
+        });
+        logoLoaded = true;
+      } else if (localLogoPath) {
+        // Use application default logo
+        doc.image(localLogoPath, logoX, logoY, {
+          width: logoSize,
+          height: logoSize,
+          fit: [logoSize, logoSize],
+        });
+        logoLoaded = true;
       }
-    } else {
-      // No logo available, show application name
+    } catch (error) {
+      // If logo fails to load, show application name
+      console.warn('Failed to load logo:', error);
+    }
+
+    if (!logoLoaded) {
+      // Fallback: show application name as text
       doc.fontSize(10).font('Helvetica-Bold').fillColor('#1a1a1a');
       doc.text('selfAccounting.AI', logoX, logoY, { width: logoSize });
     }
@@ -596,26 +636,45 @@ export class ReportGeneratorService {
       ? `${this.formatDate(reportData.metadata.reportPeriod.startDate || '')} to ${this.formatDate(reportData.metadata.reportPeriod.endDate || '')}`
       : 'All Time';
 
-    // Summary box background - Clean professional styling
+    // Summary box background - Enhanced professional styling
     const summaryStartY = doc.y;
-    const summaryHeight = 180;
+    const summaryHeight = 190; // Slightly increased for better spacing
+    const summaryWidth = pageWidth - 2 * margin;
+    
+    // Outer border with brand color accent
     doc
-      .rect(margin, summaryStartY, pageWidth - 2 * margin, summaryHeight)
-      .fillColor('#fafafa')
+      .rect(margin, summaryStartY, summaryWidth, summaryHeight)
+      .fillColor('#f8f9fa')
       .fill()
+      .strokeColor('#0077c8')
+      .lineWidth(1.5)
+      .stroke();
+    
+    // Inner border for depth
+    doc
+      .rect(margin + 2, summaryStartY + 2, summaryWidth - 4, summaryHeight - 4)
       .strokeColor('#e0e0e0')
       .lineWidth(0.5)
       .stroke();
 
-    // Summary title
-    doc.fontSize(14).font('Helvetica-Bold').fillColor('#1a1a1a');
-    doc.text(`Summary (Period: ${period})`, margin + 10, summaryStartY + 10);
+    // Summary title with enhanced styling
+    doc.fontSize(15).font('Helvetica-Bold').fillColor('#0077c8');
+    const titleY = summaryStartY + 12;
+    doc.text(`Summary (Period: ${period})`, margin + 12, titleY);
+    
+    // Underline for title
+    doc
+      .moveTo(margin + 12, titleY + 16)
+      .lineTo(margin + 12 + doc.widthOfString(`Summary (Period: ${period})`), titleY + 16)
+      .strokeColor('#0077c8')
+      .lineWidth(1)
+      .stroke();
 
-    // Summary content in two columns
-    const leftX = margin + 10;
-    const rightX = pageWidth / 2 + 10;
-    let yPos = summaryStartY + 35;
-    doc.fontSize(10).font('Helvetica').fillColor('#666666');
+    // Summary content in two columns with better spacing
+    const leftX = margin + 15;
+    const rightX = pageWidth / 2 + 15;
+    let yPos = summaryStartY + 40;
+    doc.fontSize(10.5).font('Helvetica').fillColor('#374151');
 
     // Left column
     if (summary.totalExpenses !== undefined) {
@@ -661,8 +720,8 @@ export class ReportGeneratorService {
       yPos += 15;
     }
 
-    // Right column
-    yPos = summaryStartY + 35;
+    // Right column with better spacing
+    yPos = summaryStartY + 40;
     if (summary.highestCategorySpend) {
       doc.text(
         `Highest Category Spend: ${summary.highestCategorySpend.category} (${this.formatCurrency(summary.highestCategorySpend.amount, currency)})`,
@@ -926,36 +985,39 @@ export class ReportGeneratorService {
         };
       }
 
-      // Format currency columns - Enhanced borders
-      headers.forEach((header, colIndex) => {
-        const cell = dataRow.getCell(colIndex + 1);
-        const currencyFields = [
-          'amount',
-          'vat',
-          'total',
-          'totalAmount',
-          'vatAmount',
-          'baseAmount',
-        ];
-        if (
-          currencyFields.some((field) => header.toLowerCase().includes(field))
-        ) {
-          cell.numFmt = `"${currency}" #,##0.00`;
-          cell.alignment = { horizontal: 'right', vertical: 'middle' };
-        } else if (header.toLowerCase().includes('date')) {
-          cell.numFmt = 'dd-mmm-yyyy';
-          cell.alignment = { horizontal: 'center', vertical: 'middle' };
-        } else {
-          cell.alignment = { horizontal: 'left', vertical: 'middle' };
-        }
-        cell.border = {
-          top: { style: 'thin', color: { argb: 'FFE5E7EB' } },
-          bottom: { style: 'thin', color: { argb: 'FFE5E7EB' } },
-          left: { style: 'thin', color: { argb: 'FFE5E7EB' } },
-          right: { style: 'thin', color: { argb: 'FFE5E7EB' } },
-        };
-      });
-      dataRow.height = 20;
+        // Format currency columns - Enhanced borders with consistent styling
+        headers.forEach((header, colIndex) => {
+          const cell = dataRow.getCell(colIndex + 1);
+          const currencyFields = [
+            'amount',
+            'vat',
+            'total',
+            'totalAmount',
+            'vatAmount',
+            'baseAmount',
+          ];
+          if (
+            currencyFields.some((field) => header.toLowerCase().includes(field))
+          ) {
+            cell.numFmt = `"${currency}" #,##0.00`;
+            cell.alignment = { horizontal: 'right', vertical: 'middle', wrapText: false };
+          } else if (header.toLowerCase().includes('date')) {
+            cell.numFmt = 'dd-mmm-yyyy';
+            cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: false };
+          } else {
+            cell.alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
+          }
+          // Enhanced borders with consistent styling
+          cell.border = {
+            top: { style: 'thin', color: { argb: 'FFD1D5DB' } },
+            bottom: { style: 'thin', color: { argb: 'FFD1D5DB' } },
+            left: { style: 'thin', color: { argb: 'FFD1D5DB' } },
+            right: { style: 'thin', color: { argb: 'FFD1D5DB' } },
+          };
+          // Add padding for better readability
+          cell.font = { size: 10, color: { argb: 'FF1F2937' } };
+        });
+        dataRow.height = 22; // Increased height for better readability
     });
 
     // Freeze header row
@@ -1020,16 +1082,28 @@ export class ReportGeneratorService {
     data: any[],
     currency: string,
   ): void {
-    // Category Summary Sheet
+    // Category Summary Sheet with enhanced styling
     const categorySheet = workbook.addWorksheet('Category Summary');
     categorySheet.addRow(['Category', 'Count', 'Amount', 'VAT', 'Total']);
     const categoryHeaderRow = categorySheet.getRow(1);
-    categoryHeaderRow.font = { bold: true, color: { argb: 'FF1a1a1a' } };
+    categoryHeaderRow.font = { 
+      bold: true, 
+      size: 11,
+      color: { argb: 'FFFFFFFF' } // White text
+    };
     categoryHeaderRow.fill = {
       type: 'pattern',
       pattern: 'solid',
-      fgColor: { argb: 'FFF9FAFB' },
+      fgColor: { argb: 'FF0077C8' }, // Brand color
     };
+    categoryHeaderRow.alignment = { horizontal: 'center', vertical: 'middle' };
+    categoryHeaderRow.border = {
+      top: { style: 'medium', color: { argb: 'FF005A9A' } },
+      bottom: { style: 'medium', color: { argb: 'FF005A9A' } },
+      left: { style: 'thin', color: { argb: 'FF005A9A' } },
+      right: { style: 'thin', color: { argb: 'FF005A9A' } },
+    };
+    categoryHeaderRow.height = 22;
 
     const categoryMap = new Map<
       string,
@@ -1050,20 +1124,53 @@ export class ReportGeneratorService {
       cat.total += total;
     });
 
-    categoryMap.forEach((value, category) => {
-      categorySheet.addRow([
+    Array.from(categoryMap.entries()).forEach(([category, value], index) => {
+      const row = categorySheet.addRow([
         category,
         value.count,
         value.amount,
         value.vat,
         value.total,
       ]);
+      
+      // Alternate row colors
+      if (index % 2 === 0) {
+        row.fill = {
+          type: 'pattern',
+          pattern: 'solid',
+          fgColor: { argb: 'FFF8F9FA' },
+        };
+      }
+      
+      // Add borders to all cells
+      [1, 2, 3, 4, 5].forEach((colNum) => {
+        const cell = row.getCell(colNum);
+        cell.border = {
+          top: { style: 'thin', color: { argb: 'FFD1D5DB' } },
+          bottom: { style: 'thin', color: { argb: 'FFD1D5DB' } },
+          left: { style: 'thin', color: { argb: 'FFD1D5DB' } },
+          right: { style: 'thin', color: { argb: 'FFD1D5DB' } },
+        };
+        cell.font = { size: 10, color: { argb: 'FF1F2937' } };
+      });
+      
+      row.height = 20;
     });
 
-    // Format currency columns
+    // Format currency columns with proper alignment
     ['C', 'D', 'E'].forEach((col) => {
       categorySheet.getColumn(col).numFmt = `"${currency}" #,##0.00`;
-      categorySheet.getColumn(col).alignment = { horizontal: 'right' };
+      categorySheet.getColumn(col).alignment = { horizontal: 'right', vertical: 'middle' };
+    });
+    
+    // Format count column
+    categorySheet.getColumn('B').alignment = { horizontal: 'center', vertical: 'middle' };
+    
+    // Auto-fit columns
+    categorySheet.columns.forEach((column) => {
+      if (column.header) {
+        column.width = Math.max(15, column.header.length + 2);
+      }
     });
 
     // Vendor Summary Sheet
@@ -1108,20 +1215,53 @@ export class ReportGeneratorService {
       ven.total += total;
     });
 
-    vendorMap.forEach((value, vendor) => {
-      vendorSheet.addRow([
+    Array.from(vendorMap.entries()).forEach(([vendor, value], index) => {
+      const row = vendorSheet.addRow([
         vendor,
         value.count,
         value.amount,
         value.vat,
         value.total,
       ]);
+      
+      // Alternate row colors
+      if (index % 2 === 0) {
+        row.fill = {
+          type: 'pattern',
+          pattern: 'solid',
+          fgColor: { argb: 'FFF8F9FA' },
+        };
+      }
+      
+      // Add borders to all cells
+      [1, 2, 3, 4, 5].forEach((colNum) => {
+        const cell = row.getCell(colNum);
+        cell.border = {
+          top: { style: 'thin', color: { argb: 'FFD1D5DB' } },
+          bottom: { style: 'thin', color: { argb: 'FFD1D5DB' } },
+          left: { style: 'thin', color: { argb: 'FFD1D5DB' } },
+          right: { style: 'thin', color: { argb: 'FFD1D5DB' } },
+        };
+        cell.font = { size: 10, color: { argb: 'FF1F2937' } };
+      });
+      
+      row.height = 20;
     });
 
-    // Format currency columns
+    // Format currency columns with proper alignment
     ['C', 'D', 'E'].forEach((col) => {
       vendorSheet.getColumn(col).numFmt = `"${currency}" #,##0.00`;
-      vendorSheet.getColumn(col).alignment = { horizontal: 'right' };
+      vendorSheet.getColumn(col).alignment = { horizontal: 'right', vertical: 'middle' };
+    });
+    
+    // Format count column
+    vendorSheet.getColumn('B').alignment = { horizontal: 'center', vertical: 'middle' };
+    
+    // Auto-fit columns
+    vendorSheet.columns.forEach((column) => {
+      if (column.header) {
+        column.width = Math.max(15, column.header.length + 2);
+      }
     });
 
     // Monthly Breakdown Sheet
@@ -1171,14 +1311,47 @@ export class ReportGeneratorService {
       return new Date(a[0]).getTime() - new Date(b[0]).getTime();
     });
 
-    sortedMonths.forEach(([month, value]) => {
-      monthlySheet.addRow([month, value.spend, value.vat]);
+    sortedMonths.forEach(([month, value], index) => {
+      const row = monthlySheet.addRow([month, value.spend, value.vat]);
+      
+      // Alternate row colors
+      if (index % 2 === 0) {
+        row.fill = {
+          type: 'pattern',
+          pattern: 'solid',
+          fgColor: { argb: 'FFF8F9FA' },
+        };
+      }
+      
+      // Add borders to all cells
+      [1, 2, 3].forEach((colNum) => {
+        const cell = row.getCell(colNum);
+        cell.border = {
+          top: { style: 'thin', color: { argb: 'FFD1D5DB' } },
+          bottom: { style: 'thin', color: { argb: 'FFD1D5DB' } },
+          left: { style: 'thin', color: { argb: 'FFD1D5DB' } },
+          right: { style: 'thin', color: { argb: 'FFD1D5DB' } },
+        };
+        cell.font = { size: 10, color: { argb: 'FF1F2937' } };
+      });
+      
+      row.height = 20;
     });
 
-    // Format currency columns
+    // Format currency columns with proper alignment
     ['B', 'C'].forEach((col) => {
       monthlySheet.getColumn(col).numFmt = `"${currency}" #,##0.00`;
-      monthlySheet.getColumn(col).alignment = { horizontal: 'right' };
+      monthlySheet.getColumn(col).alignment = { horizontal: 'right', vertical: 'middle' };
+    });
+    
+    // Format month column
+    monthlySheet.getColumn('A').alignment = { horizontal: 'left', vertical: 'middle' };
+    
+    // Auto-fit columns
+    monthlySheet.columns.forEach((column) => {
+      if (column.header) {
+        column.width = Math.max(15, column.header.length + 2);
+      }
     });
 
     // Auto-fit columns for all pivot sheets
@@ -1194,10 +1367,15 @@ export class ReportGeneratorService {
   async generateCSV(reportData: ReportData): Promise<Buffer> {
     const lines: string[] = [];
 
-    // Header information
+    // Professional header section with clear separation
+    lines.push('='.repeat(80));
     lines.push(reportData.metadata?.organizationName || 'SmartExpense UAE');
-    lines.push(this.getReportTitle(reportData.type));
+    lines.push('='.repeat(80));
+    lines.push('');
+    lines.push(`Report Type: ${this.getReportTitle(reportData.type)}`);
+    lines.push('');
 
+    // Report metadata section
     if (
       reportData.metadata?.reportPeriod?.startDate ||
       reportData.metadata?.reportPeriod?.endDate
@@ -1210,14 +1388,70 @@ export class ReportGeneratorService {
       lines.push(`VAT Number: ${reportData.metadata.vatNumber}`);
     }
 
+    if (reportData.metadata?.address) {
+      lines.push(`Address: ${reportData.metadata.address}`);
+    }
+
+    if (reportData.metadata?.email) {
+      lines.push(`Email: ${reportData.metadata.email}`);
+    }
+
     const generatedDate = reportData.metadata?.generatedAt
       ? this.formatDate(reportData.metadata.generatedAt)
       : new Date().toLocaleDateString('en-GB');
     lines.push(`Generated: ${generatedDate}`);
+    
+    if (reportData.metadata?.generatedByName) {
+      lines.push(`Generated by: ${reportData.metadata.generatedByName}`);
+    }
+    
+    lines.push(`Currency: ${reportData.metadata?.currency || 'AED'}`);
     lines.push('');
+    lines.push('-'.repeat(80));
+    lines.push('');
+
+    // Add summary if available
+    if (reportData.metadata?.summary) {
+      lines.push('SUMMARY');
+      lines.push('-'.repeat(80));
+      const summary = reportData.metadata.summary;
+      const currency = reportData.metadata?.currency || 'AED';
+      
+      if (summary.totalExpenses !== undefined) {
+        lines.push(`Total Number of Expenses,${summary.totalExpenses}`);
+      }
+      if (summary.totalAmountBeforeVat !== undefined) {
+        lines.push(`Total Amount (Before VAT),${this.formatCurrency(summary.totalAmountBeforeVat, currency)}`);
+      }
+      if (summary.totalVatAmount !== undefined) {
+        lines.push(`Total VAT Amount,${this.formatCurrency(summary.totalVatAmount, currency)}`);
+      }
+      if (summary.totalAmountAfterVat !== undefined) {
+        lines.push(`Total Amount (After VAT),${this.formatCurrency(summary.totalAmountAfterVat, currency)}`);
+      }
+      if (summary.averageExpenseAmount !== undefined) {
+        lines.push(`Average Expense Amount,${this.formatCurrency(summary.averageExpenseAmount, currency)}`);
+      }
+      if (summary.highestCategorySpend) {
+        lines.push(`Highest Category Spend,${summary.highestCategorySpend.category},${this.formatCurrency(summary.highestCategorySpend.amount, currency)}`);
+      }
+      if (summary.topVendor) {
+        lines.push(`Top Vendor,${summary.topVendor.vendor},${this.formatCurrency(summary.topVendor.amount, currency)}`);
+      }
+      lines.push('');
+      lines.push('-'.repeat(80));
+      lines.push('');
+    }
 
     // Add content based on report type
     this.addCSVContent(lines, reportData);
+
+    // Footer
+    lines.push('');
+    lines.push('-'.repeat(80));
+    lines.push('End of Report');
+    lines.push('Generated by SelfAccounting.AI');
+    lines.push('-'.repeat(80));
 
     return Buffer.from(lines.join('\n'), 'utf-8');
   }
@@ -1245,119 +1479,169 @@ export class ReportGeneratorService {
 
       // Table header with enhanced professional styling
       const headerY = doc.y;
-      // Header background with brand color accent
+      const headerHeight = 32; // Increased height for better visual presence
+      
+      // Header background with brand color accent and shadow effect
       doc
-        .rect(margin, headerY, availableWidth, 28)
+        .rect(margin, headerY, availableWidth, headerHeight)
         .fillColor('#0077c8') // Brand color
         .fill();
       
-      // Header border
+      // Header border with enhanced styling
       doc
-        .rect(margin, headerY, availableWidth, 28)
+        .rect(margin, headerY, availableWidth, headerHeight)
         .strokeColor('#005a9a')
-        .lineWidth(1)
+        .lineWidth(1.5)
         .stroke();
 
-      doc.fontSize(11).font('Helvetica-Bold').fillColor('#ffffff'); // White text on colored background
-      let x = margin + 8;
+      // Add subtle inner highlight for depth
+      doc
+        .moveTo(margin, headerY + 1)
+        .lineTo(margin + availableWidth, headerY + 1)
+        .strokeColor('#0088d9')
+        .lineWidth(0.5)
+        .stroke();
+
+      doc.fontSize(11.5).font('Helvetica-Bold').fillColor('#ffffff'); // White text on colored background
+      let x = margin + 10;
       headers.forEach((header) => {
         const headerLabel = this.formatHeaderLabel(header);
-        doc.text(headerLabel, x, headerY + 9, {
-          width: colWidth - 16,
+        doc.text(headerLabel, x, headerY + 10, {
+          width: colWidth - 20,
           align: this.getColumnAlignment(header),
         });
         x += colWidth;
       });
       doc.fillColor('#1a1a1a');
 
-      // Data rows with alternating colors
-      let rowY = headerY + 25;
+      // Data rows with alternating colors and enhanced spacing
+      let rowY = headerY + headerHeight + 2;
+      const rowHeight = 24; // Increased row height for better readability
       data.forEach((row: any, index: number) => {
         // Check if we need a new page
-        if (rowY > doc.page.height - 80) {
+        if (rowY > doc.page.height - 100) {
           doc.addPage();
           this.addPDFHeader(doc, reportData);
           rowY = doc.y;
           // Redraw header on new page with enhanced styling
+          const newHeaderHeight = 32;
           doc
-            .rect(margin, rowY, availableWidth, 28)
+            .rect(margin, rowY, availableWidth, newHeaderHeight)
             .fillColor('#0077c8')
             .fill();
           doc
-            .rect(margin, rowY, availableWidth, 28)
+            .rect(margin, rowY, availableWidth, newHeaderHeight)
             .strokeColor('#005a9a')
-            .lineWidth(1)
+            .lineWidth(1.5)
             .stroke();
-          doc.fontSize(11).font('Helvetica-Bold').fillColor('#ffffff');
-          x = margin + 8;
+          doc
+            .moveTo(margin, rowY + 1)
+            .lineTo(margin + availableWidth, rowY + 1)
+            .strokeColor('#0088d9')
+            .lineWidth(0.5)
+            .stroke();
+          doc.fontSize(11.5).font('Helvetica-Bold').fillColor('#ffffff');
+          x = margin + 10;
           headers.forEach((header) => {
             const headerLabel = this.formatHeaderLabel(header);
-            doc.text(headerLabel, x, rowY + 9, {
-              width: colWidth - 16,
+            doc.text(headerLabel, x, rowY + 10, {
+              width: colWidth - 20,
               align: this.getColumnAlignment(header),
             });
             x += colWidth;
           });
           doc.fillColor('#1a1a1a');
-          rowY += 28;
+          rowY += newHeaderHeight + 2;
         }
 
-        // Draw row border for enhanced professional look
-        doc.strokeColor('#e5e7eb').lineWidth(0.5);
-        doc.rect(margin, rowY, availableWidth, 22).stroke();
+        // Draw row border for enhanced professional look with better borders
+        doc.strokeColor('#d1d5db').lineWidth(0.5);
+        doc.rect(margin, rowY, availableWidth, rowHeight).stroke();
 
         // Alternate row background with subtle colors
         if (index % 2 === 0) {
           doc
-            .rect(margin, rowY, availableWidth, 22)
-            .fillColor('#f8f9fa')
+            .rect(margin, rowY, availableWidth, rowHeight)
+            .fillColor('#f9fafb')
             .fill();
         } else {
           doc
-            .rect(margin, rowY, availableWidth, 22)
+            .rect(margin, rowY, availableWidth, rowHeight)
             .fillColor('#ffffff')
             .fill();
         }
 
-        doc.fontSize(9.5).font('Helvetica').fillColor('#1a1a1a');
-        x = margin + 8;
+        // Add subtle vertical dividers between columns
+        if (headers.length > 1) {
+          doc.strokeColor('#e5e7eb').lineWidth(0.3);
+          for (let i = 1; i < headers.length; i++) {
+            const dividerX = margin + i * colWidth;
+            doc
+              .moveTo(dividerX, rowY)
+              .lineTo(dividerX, rowY + rowHeight)
+              .stroke();
+          }
+        }
+
+        doc.fontSize(10).font('Helvetica').fillColor('#1a1a1a');
+        x = margin + 10;
         headers.forEach((header) => {
           const value = this.formatCellValue(row[header], header, currency);
-          doc.text(value, x, rowY + 6, {
-            width: colWidth - 16,
+          doc.text(value, x, rowY + 8, {
+            width: colWidth - 20,
             align: this.getColumnAlignment(header),
             lineBreak: false,
             ellipsis: true,
           });
           x += colWidth;
         });
-        rowY += 22;
+        rowY += rowHeight;
       });
 
-      // Total row if applicable - Enhanced styling
+      // Total row if applicable - Enhanced styling with better visual separation
       if (this.shouldShowTotal(reportData.type) && data.length > 0) {
         const totalRow = this.calculateTotalRow(data, headers, currency);
-        rowY += 8;
-        // Total row with professional styling
+        rowY += 6; // Add spacing before total row
+        
+        // Draw separator line above total
         doc
-          .rect(margin, rowY, availableWidth, 28)
+          .moveTo(margin, rowY)
+          .lineTo(margin + availableWidth, rowY)
+          .strokeColor('#0077c8')
+          .lineWidth(2)
+          .stroke();
+        
+        rowY += 4;
+        const totalRowHeight = 30; // Increased height for emphasis
+        
+        // Total row with professional styling and shadow effect
+        doc
+          .rect(margin, rowY, availableWidth, totalRowHeight)
           .fillColor('#e8f4f8') // Light brand color tint
           .fill()
           .strokeColor('#0077c8')
-          .lineWidth(1.5)
+          .lineWidth(2)
           .stroke();
 
-        doc.fontSize(11).font('Helvetica-Bold').fillColor('#0077c8');
-        x = margin + 8;
+        // Add inner border for depth
+        doc
+          .rect(margin + 1, rowY + 1, availableWidth - 2, totalRowHeight - 2)
+          .strokeColor('#b3d9f0')
+          .lineWidth(0.5)
+          .stroke();
+
+        doc.fontSize(11.5).font('Helvetica-Bold').fillColor('#005a9a');
+        x = margin + 10;
         headers.forEach((header) => {
           const value = totalRow[header] || '';
-          doc.text(value, x, rowY + 9, {
-            width: colWidth - 16,
+          doc.text(value, x, rowY + 10, {
+            width: colWidth - 20,
             align: this.getColumnAlignment(header),
           });
           x += colWidth;
         });
         doc.fillColor('#1a1a1a');
+        rowY += totalRowHeight;
       }
 
       doc.y = rowY + 30;
@@ -1934,7 +2218,7 @@ export class ReportGeneratorService {
         }
         dataRow.height = 20;
 
-        // Format currency columns
+        // Format currency columns with enhanced borders
         headers.forEach((header, colIndex) => {
           const cell = dataRow.getCell(colIndex + 1);
           const currencyFields = [
@@ -1951,17 +2235,21 @@ export class ReportGeneratorService {
             currencyFields.some((field) => header.toLowerCase().includes(field))
           ) {
             cell.numFmt = `"${currency}" #,##0.00`;
-            cell.alignment = { horizontal: 'right' };
+            cell.alignment = { horizontal: 'right', vertical: 'middle', wrapText: false };
           } else if (header.toLowerCase().includes('date')) {
             cell.numFmt = 'dd-mmm-yyyy';
-            cell.alignment = { horizontal: 'center' };
+            cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: false };
+          } else {
+            cell.alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
           }
+          // Enhanced borders with consistent styling
           cell.border = {
-            top: { style: 'thin', color: { argb: 'FFE5E7EB' } },
-            bottom: { style: 'thin', color: { argb: 'FFE5E7EB' } },
-            left: { style: 'thin', color: { argb: 'FFE5E7EB' } },
-            right: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+            top: { style: 'thin', color: { argb: 'FFD1D5DB' } },
+            bottom: { style: 'thin', color: { argb: 'FFD1D5DB' } },
+            left: { style: 'thin', color: { argb: 'FFD1D5DB' } },
+            right: { style: 'thin', color: { argb: 'FFD1D5DB' } },
           };
+          cell.font = { size: 10, color: { argb: 'FF1F2937' } };
         });
       });
 
@@ -1995,13 +2283,26 @@ export class ReportGeneratorService {
           pattern: 'solid',
           fgColor: { argb: 'FFE8F4F8' }, // Light brand color tint
         };
+        // Enhanced total row borders with double top border for emphasis
         totalDataRow.border = {
-          top: { style: 'medium', color: { argb: 'FF0077C8' } },
+          top: { style: 'double', color: { argb: 'FF0077C8' } },
           bottom: { style: 'medium', color: { argb: 'FF0077C8' } },
           left: { style: 'thin', color: { argb: 'FF0077C8' } },
           right: { style: 'thin', color: { argb: 'FF0077C8' } },
         };
-        totalDataRow.height = 24;
+        totalDataRow.height = 26; // Increased height for emphasis
+        
+        // Apply borders to all cells in total row
+        headers.forEach((header, colIndex) => {
+          const cell = totalDataRow.getCell(colIndex + 1);
+          cell.border = {
+            top: { style: 'double', color: { argb: 'FF0077C8' } },
+            bottom: { style: 'medium', color: { argb: 'FF0077C8' } },
+            left: { style: 'thin', color: { argb: 'FF0077C8' } },
+            right: { style: 'thin', color: { argb: 'FF0077C8' } },
+          };
+          cell.alignment = { horizontal: cell.alignment?.horizontal || 'left', vertical: 'middle' };
+        });
 
         headers.forEach((header, colIndex) => {
           const cell = totalDataRow.getCell(colIndex + 1);
@@ -2021,11 +2322,20 @@ export class ReportGeneratorService {
         });
       }
 
-      // Auto-fit columns
+      // Auto-fit columns with better width calculation
       worksheet.columns.forEach((column, index) => {
         if (column.header) {
           const headerLength = formattedHeaders[index]?.length || 10;
-          column.width = Math.max(headerLength + 2, 12);
+          // Calculate max content width for better fitting
+          let maxContentLength = headerLength;
+          data.forEach((row: any) => {
+            const value = String(row[headers[index]] || '');
+            if (value.length > maxContentLength) {
+              maxContentLength = value.length;
+            }
+          });
+          // Set width with padding, but cap at reasonable maximum
+          column.width = Math.min(Math.max(maxContentLength + 4, headerLength + 2), 50);
         }
       });
     } else if (typeof data === 'object') {
@@ -2744,6 +3054,7 @@ export class ReportGeneratorService {
 
   private addCSVContent(lines: string[], reportData: ReportData): void {
     const data = reportData.data;
+    const currency = reportData.metadata?.currency || 'AED';
 
     if (Array.isArray(data)) {
       if (data.length === 0) {
@@ -2751,23 +3062,28 @@ export class ReportGeneratorService {
         return;
       }
 
+      // Section header
+      lines.push('DATA');
+      lines.push('-'.repeat(80));
+
       // Headers with formatted labels
       const headers = Object.keys(data[0]);
       const formattedHeaders = headers.map((h) => this.formatHeaderLabel(h));
       lines.push(formattedHeaders.join(','));
 
       // Data rows with proper formatting
-      data.forEach((row: any) => {
+      data.forEach((row: any, index: number) => {
         const values = headers.map((h) => {
           let value = row[h];
 
-          // Format currency values
+          // Format currency values with proper formatting
           const currencyFields = [
             'amount',
             'vat',
             'total',
             'totalAmount',
             'vatAmount',
+            'baseAmount',
             'debit',
             'credit',
             'balance',
@@ -2775,7 +3091,12 @@ export class ReportGeneratorService {
           if (currencyFields.some((field) => h.toLowerCase().includes(field))) {
             const numValue =
               typeof value === 'string' ? parseFloat(value) : value;
-            value = isNaN(numValue) ? '0.00' : numValue.toFixed(2);
+            if (!isNaN(numValue)) {
+              // Format with currency symbol and proper decimal places
+              value = this.formatCurrency(numValue, currency);
+            } else {
+              value = this.formatCurrency(0, currency);
+            }
           }
           // Format dates
           else if (h.toLowerCase().includes('date') && value) {
@@ -2784,6 +3105,10 @@ export class ReportGeneratorService {
           // Format arrays
           else if (Array.isArray(value)) {
             value = value.length > 0 ? `${value.length} item(s)` : 'None';
+          }
+          // Format objects
+          else if (typeof value === 'object' && value !== null) {
+            value = JSON.stringify(value);
           } else {
             value = String(value ?? '');
           }
@@ -2798,6 +3123,33 @@ export class ReportGeneratorService {
         });
         lines.push(values.join(','));
       });
+
+      // Add totals row if applicable
+      if (this.shouldShowTotal(reportData.type) && data.length > 0) {
+        lines.push('');
+        lines.push('TOTALS');
+        lines.push('-'.repeat(80));
+        const totalRow = this.calculateTotalRow(data, headers, currency);
+        const totalValues = headers.map((h) => {
+          const currencyFields = [
+            'amount',
+            'vat',
+            'total',
+            'totalAmount',
+            'vatAmount',
+            'baseAmount',
+          ];
+          if (currencyFields.some((field) => h.toLowerCase().includes(field))) {
+            const val = totalRow[h];
+            if (val && typeof val === 'string') {
+              return val; // Already formatted
+            }
+            return this.formatCurrency(parseFloat(String(val || 0)), currency);
+          }
+          return totalRow[h] || '';
+        });
+        lines.push(totalValues.join(','));
+      }
     } else if (typeof data === 'object' && data !== null) {
       // Handle structured reports
       if (reportData.type === 'vat_report') {
@@ -2866,12 +3218,21 @@ export class ReportGeneratorService {
    * Premium design inspired by Xero/Tally with clean lines and professional styling
    */
   private async generateInvoicePDF(reportData: ReportData): Promise<Buffer> {
+    // Pre-fetch logo if it's a remote URL
+    const metadata = reportData.metadata || {};
+    const invoiceTemplate = (metadata as any).invoiceTemplate || {};
+    const logoUrl = invoiceTemplate.logoUrl || metadata.logoUrl;
+    let logoBuffer: Buffer | null = null;
+
+    if (logoUrl && (logoUrl.startsWith('http://') || logoUrl.startsWith('https://'))) {
+      logoBuffer = await this.fetchImageAsBuffer(logoUrl);
+    }
+
     return new Promise((resolve, reject) => {
       try {
         const invoice = reportData.data;
         const organization = invoice.organization;
         const customer = invoice.customer;
-        const metadata = reportData.metadata || {};
         const currency = metadata.currency || invoice.currency || 'AED';
         const currencySettings = metadata.currencySettings || {};
         const exchangeRate = metadata.exchangeRate || null;
@@ -2895,9 +3256,9 @@ export class ReportGeneratorService {
         const contentWidth = pageWidth - 2 * margin;
 
         // Get template settings from metadata
-        const invoiceTemplate = (metadata as any).invoiceTemplate || {};
         const templateSettings = {
-          logoUrl: invoiceTemplate.logoUrl || metadata.logoUrl,
+          logoUrl: logoUrl,
+          logoBuffer: logoBuffer, // Pre-fetched logo buffer for remote URLs
           headerText: invoiceTemplate.headerText,
           colorScheme: invoiceTemplate.colorScheme || 'blue',
           customColor: invoiceTemplate.customColor,
@@ -2957,26 +3318,29 @@ export class ReportGeneratorService {
         let headerY = margin;
         
         // Add logo if available
-        if (templateSettings.logoUrl) {
+        if (templateSettings.logoUrl || templateSettings.logoBuffer) {
           try {
             const logoSize = 60;
             const logoX = margin;
             const logoY = headerY;
             
-            if (templateSettings.logoUrl.startsWith('http://') || templateSettings.logoUrl.startsWith('https://')) {
+            if (templateSettings.logoBuffer) {
+              // Use pre-fetched logo buffer (for remote URLs)
+              doc.image(templateSettings.logoBuffer, logoX, logoY, {
+                width: logoSize,
+                height: logoSize,
+                fit: [logoSize, logoSize],
+              });
+              headerY += logoSize + 10;
+            } else if (templateSettings.logoUrl && !templateSettings.logoUrl.startsWith('http://') && !templateSettings.logoUrl.startsWith('https://') && fs.existsSync(templateSettings.logoUrl)) {
+              // For local file paths only
               doc.image(templateSettings.logoUrl, logoX, logoY, {
                 width: logoSize,
                 height: logoSize,
                 fit: [logoSize, logoSize],
               });
-            } else if (fs.existsSync(templateSettings.logoUrl)) {
-              doc.image(templateSettings.logoUrl, logoX, logoY, {
-                width: logoSize,
-                height: logoSize,
-                fit: [logoSize, logoSize],
-              });
+              headerY += logoSize + 10;
             }
-            headerY += logoSize + 10;
           } catch (error) {
             // Logo failed to load, continue without it
             console.warn('Failed to load invoice logo:', error);

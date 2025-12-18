@@ -40,7 +40,7 @@ export class ContactService {
   private async sendContactNotificationEmail(contact: Contact): Promise<void> {
     const adminEmail = this.configService.get<string>(
       'CONTACT_ADMIN_EMAIL',
-      this.configService.get<string>('SMTP_FROM', 'admin@smartexpense-uae.com'),
+      this.configService.get<string>('EMAIL_FROM', 'admin@smartexpense-uae.com'),
     );
 
     const subject = `New Contact Form Submission from ${contact.name}`;

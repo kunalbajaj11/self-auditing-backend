@@ -1,7 +1,6 @@
 import { Injectable, Inject, Optional, forwardRef } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import * as nodemailer from 'nodemailer';
-import { Transporter } from 'nodemailer';
+import { Resend } from 'resend';
 import { NotificationType } from '../../common/enums/notification-type.enum';
 import { EmailTemplateService } from './email-template.service';
 import * as fs from 'fs';
@@ -22,7 +21,8 @@ export interface EmailOptions {
 
 @Injectable()
 export class EmailService {
-  private transporter: Transporter | null = null;
+  private resend: Resend | null = null;
+  private fromEmail: string;
 
   constructor(
     private readonly configService: ConfigService,
@@ -30,167 +30,67 @@ export class EmailService {
     @Optional()
     private readonly emailTemplateService?: EmailTemplateService,
   ) {
-    const smtpHost = this.configService.get<string>('SMTP_HOST');
-    const smtpPort = this.configService.get<number>('SMTP_PORT', 587);
-    const smtpUser = this.configService.get<string>('SMTP_USER');
-    const smtpPassword = this.configService.get<string>('SMTP_PASSWORD');
+    const apiKey = this.configService.get<string>('RESEND_API_KEY');
+    this.fromEmail = this.configService.get<string>(
+      'EMAIL_FROM',
+      'smartexpense.uae@gmail.com',
+    );
 
-    if (smtpHost && smtpUser && smtpPassword) {
-      // Log SMTP configuration for debugging (without password)
-      console.log('Configuring SMTP:', {
-        host: smtpHost,
-        port: smtpPort,
-        user: smtpUser,
-        secure: smtpPort === 465,
-      });
-
-      this.transporter = nodemailer.createTransport({
-        host: smtpHost,
-        port: smtpPort,
-        secure: smtpPort === 465,
-        auth: {
-          user: smtpUser,
-          pass: smtpPassword,
-        },
-        connectionTimeout: 30000, // 30 seconds - increased for slow networks
-        greetingTimeout: 30000, // 30 seconds
-        socketTimeout: 30000, // 30 seconds
-        // For non-465 ports, use STARTTLS
-        requireTLS: smtpPort !== 465,
-        tls: {
-          rejectUnauthorized: false, // Allow self-signed certificates
-        },
-        // Pool connections for better reliability
-        pool: true,
-        maxConnections: 1,
-        maxMessages: 3,
-      });
-
-      // Verify connection asynchronously (non-blocking)
-      // This prevents startup delays if SMTP server is unreachable
-      setImmediate(() => {
-        const verifyTimeout = setTimeout(() => {
-          console.warn(
-            'SMTP verification timed out. Email service will attempt to connect when sending emails.',
-          );
-          this.transporter = null; // Disable until connection is verified
-        }, 15000); // 15 second timeout for verification
-
-        this.transporter?.verify((error) => {
-          clearTimeout(verifyTimeout);
-          if (error) {
-            console.warn('SMTP connection verification failed:', error.message);
-            console.warn(
-              'Email service will attempt to connect when sending emails. Verify SMTP settings if emails fail.',
-            );
-            // Don't disable transporter - let it try on actual send
-            // this.transporter = null;
-          } else {
-            console.log('Email service configured and verified successfully');
-          }
-        });
-      });
+    if (apiKey) {
+      this.resend = new Resend(apiKey);
+      console.log('Email service configured with Resend API');
     } else {
-      console.warn(
-        'SMTP configuration not found. Email service will be disabled.',
-      );
+      console.warn('RESEND_API_KEY not found. Email service will be disabled.');
     }
   }
 
   async sendEmail(options: EmailOptions): Promise<boolean> {
-    if (!this.transporter) {
+    if (!this.resend) {
       console.warn('Email service not configured. Skipping email send.');
       return false;
     }
 
-    const smtpHost = this.configService.get<string>('SMTP_HOST');
-    const smtpPort = this.configService.get<number>('SMTP_PORT', 587);
-
     try {
-      const from = this.configService.get<string>(
-        'SMTP_FROM',
-        'noreply@smartexpense-uae.com',
-      );
+      const toAddresses = Array.isArray(options.to) ? options.to : [options.to];
 
-      const mailOptions = {
-        from,
-        to: Array.isArray(options.to) ? options.to.join(', ') : options.to,
+      console.log(`Attempting to send email to: ${toAddresses.join(', ')}`);
+
+      // Transform attachments to Resend format
+      const attachments = options.attachments?.map((att) => ({
+        filename: att.filename,
+        content:
+          att.content ||
+          (att.path ? fs.readFileSync(att.path) : Buffer.alloc(0)),
+      }));
+
+      const { data, error } = await this.resend.emails.send({
+        from: this.fromEmail,
+        to: toAddresses,
         subject: options.subject,
         html: options.html,
         text: options.text,
-        attachments: options.attachments,
-      };
-
-      console.log(
-        `Attempting to send email to: ${mailOptions.to} via ${smtpHost}:${smtpPort}`,
-      );
-
-      // Add timeout wrapper for sendMail (60 seconds for slow networks)
-      const sendPromise = this.transporter.sendMail(mailOptions);
-      const timeoutPromise = new Promise<never>((_, reject) => {
-        setTimeout(
-          () => reject(new Error('Email send timeout after 60 seconds')),
-          60000,
-        );
+        attachments,
       });
 
-      const info = (await Promise.race([sendPromise, timeoutPromise])) as any;
-      console.log('Email sent successfully:', info.messageId);
+      if (error) {
+        console.error('Email send failed:', {
+          to: toAddresses.join(', '),
+          error: error.message,
+          name: error.name,
+        });
+        return false;
+      }
+
+      console.log('Email sent successfully:', data?.id);
       return true;
     } catch (error: any) {
       const errorMessage = error?.message || 'Unknown error';
-      const errorCode = error?.code || '';
 
       console.error('Email send failed:', {
         to: Array.isArray(options.to) ? options.to.join(', ') : options.to,
-        smtpHost,
-        smtpPort,
         error: errorMessage,
-        code: errorCode,
       });
 
-      if (
-        errorMessage.includes('timeout') ||
-        errorMessage.includes('ETIMEDOUT') ||
-        errorMessage.includes('Connection timeout') ||
-        errorCode === 'ETIMEDOUT'
-      ) {
-        console.error(
-          'SMTP connection timeout. Possible causes:',
-          '\n  1. SMTP server not reachable from deployment network',
-          '\n  2. Firewall blocking outbound SMTP ports (587, 465, 25)',
-          '\n  3. SMTP server is down or unreachable',
-          '\n  4. Network latency issues',
-          `\n  Attempted: ${smtpHost}:${smtpPort}`,
-          '\n  Solution: Consider using API-based email service (SendGrid, Mailgun, AWS SES)',
-        );
-      } else if (
-        errorMessage.includes('ECONNREFUSED') ||
-        errorCode === 'ECONNREFUSED'
-      ) {
-        console.error(
-          'SMTP connection refused. Check:',
-          `\n  - SMTP_HOST: ${smtpHost}`,
-          `\n  - SMTP_PORT: ${smtpPort}`,
-          '\n  - SMTP server is running and accessible',
-        );
-      } else if (
-        errorMessage.includes('authentication') ||
-        errorMessage.includes('535')
-      ) {
-        console.error(
-          'SMTP authentication failed. Check SMTP_USER and SMTP_PASSWORD credentials.',
-        );
-      } else if (
-        errorMessage.includes('EHLO') ||
-        errorMessage.includes('HELO')
-      ) {
-        console.error(
-          'SMTP handshake failed. Server may not support the connection method.',
-        );
-      } else {
-        console.error('Error sending email:', errorMessage, errorCode);
-      }
       return false;
     }
   }
@@ -257,12 +157,6 @@ export class EmailService {
   ): Promise<boolean> {
     const extension = reportType;
     const filename = `${reportName}.${extension}`;
-    const contentType =
-      reportType === 'pdf'
-        ? 'application/pdf'
-        : reportType === 'xlsx'
-          ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-          : 'text/csv';
 
     const subject = `SmartExpense Report: ${reportName}`;
     const html = this.buildReportEmailHtml(reportName);
@@ -275,7 +169,6 @@ export class EmailService {
         {
           filename,
           content: reportBuffer,
-          contentType,
         },
       ],
     });
@@ -423,7 +316,6 @@ export class EmailService {
           {
             filename: 'USER-MANUAL.pdf',
             content: pdfBuffer,
-            contentType: 'application/pdf',
           },
         ],
       });
@@ -521,6 +413,6 @@ This is an automated welcome email from SmartExpense UAE.`;
   }
 
   isConfigured(): boolean {
-    return this.transporter !== null;
+    return this.resend !== null;
   }
 }
