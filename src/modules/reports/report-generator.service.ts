@@ -461,7 +461,7 @@ export class ReportGeneratorService {
     if (!logoLoaded) {
       // Fallback: show application name as text
       doc.fontSize(10).font('Helvetica-Bold').fillColor('#1a1a1a');
-      doc.text('selfAccounting.AI', logoX, logoY, { width: logoSize });
+      doc.text('SelfAccounting.AI', logoX, logoY, { width: logoSize });
     }
 
     // Company name (to the right of the logo) - Enhanced styling

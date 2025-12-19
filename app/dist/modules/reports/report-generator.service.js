@@ -151,18 +151,18 @@ let ReportGeneratorService = class ReportGeneratorService {
                 }
                 else {
                     doc.fontSize(10).font('Helvetica-Bold').fillColor('#1e3a8a');
-                    doc.text('selfAccounting.AI', logoX, logoY, { width: logoSize });
+                    doc.text('SelfAccounting.AI', logoX, logoY, { width: logoSize });
                 }
             }
             catch (error) {
                 console.warn('Failed to load logo:', error);
                 doc.fontSize(10).font('Helvetica-Bold').fillColor('#1e3a8a');
-                doc.text('selfAccounting.AI', logoX, logoY, { width: logoSize });
+                doc.text('SelfAccounting.AI', logoX, logoY, { width: logoSize });
             }
         }
         else {
             doc.fontSize(10).font('Helvetica-Bold').fillColor('#1e3a8a');
-            doc.text('selfAccounting.AI', logoX, logoY, { width: logoSize });
+            doc.text('SelfAccounting.AI', logoX, logoY, { width: logoSize });
         }
         doc.fontSize(18).font('Helvetica-Bold').fillColor('#1e3a8a');
         const orgName = reportData.metadata?.organizationName || 'SmartExpense UAE';
