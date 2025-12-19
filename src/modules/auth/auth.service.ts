@@ -91,6 +91,7 @@ export class AuthService {
       contactPerson: dto.contactPerson ?? undefined,
       contactEmail: dto.contactEmail ?? dto.adminEmail,
       storageQuotaMb: license.storageQuotaMb ?? dto.storageQuotaMb ?? undefined,
+      region: dto.region,
       planId: undefined,
     });
 

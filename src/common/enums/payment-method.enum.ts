@@ -3,5 +3,6 @@ export enum PaymentMethod {
   CASH = 'cash',
   CHEQUE = 'cheque',
   CREDIT_CARD = 'credit_card',
+  ADJUSTMENT = 'adjustment',
   OTHER = 'other',
 }

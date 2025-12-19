@@ -154,6 +154,30 @@ export class SalesInvoicesService {
   }
 
   /**
+   * Check if all payments for an invoice are cash
+   */
+  private async areAllPaymentsCash(
+    invoiceId: string,
+    organizationId: string,
+  ): Promise<boolean> {
+    const payments = await this.paymentsRepository.find({
+      where: {
+        invoice: { id: invoiceId },
+        organization: { id: organizationId },
+      },
+    });
+
+    if (payments.length === 0) {
+      return false;
+    }
+
+    // Check if all payments are cash
+    return payments.every(
+      (payment) => payment.paymentMethod === PaymentMethod.CASH,
+    );
+  }
+
+  /**
    * Update payment status based on outstanding balance
    */
   async updatePaymentStatus(
@@ -176,7 +200,14 @@ export class SalesInvoicesService {
 
     if (outstanding <= 0) {
       invoice.paymentStatus = PaymentStatus.PAID;
-      invoice.status = InvoiceStatus.TAX_INVOICE_BANK_RECEIVED;
+      // Check if all payments are cash
+      const allPaymentsCash = await this.areAllPaymentsCash(
+        invoiceId,
+        organizationId,
+      );
+      invoice.status = allPaymentsCash
+        ? InvoiceStatus.TAX_INVOICE_CASH_RECEIVED
+        : InvoiceStatus.TAX_INVOICE_BANK_RECEIVED;
     } else if (paidAmount > 0) {
       invoice.paymentStatus = PaymentStatus.PARTIAL;
     } else {
@@ -370,7 +401,7 @@ export class SalesInvoicesService {
       currency: dto.currency || 'AED',
       description: dto.description,
       notes: dto.notes,
-      status: InvoiceStatus.PROFORMA_INVOICE,
+      status: dto.status ? (dto.status as InvoiceStatus) : InvoiceStatus.PROFORMA_INVOICE,
       paymentStatus: PaymentStatus.UNPAID,
       paidAmount: '0',
       customer: dto.customerId ? { id: dto.customerId } : undefined,
@@ -949,8 +980,23 @@ export class SalesInvoicesService {
       const newOutstanding = outstandingBalance - paymentAmount;
       if (newOutstanding <= 0) {
         invoice.paymentStatus = PaymentStatus.PAID;
-        invoice.status = InvoiceStatus.TAX_INVOICE_BANK_RECEIVED;
         invoice.paidDate = dto.paymentDate;
+        
+        // Check if all payments are cash
+        const allPayments = await manager.find(InvoicePayment, {
+          where: {
+            invoice: { id: invoiceId },
+            organization: { id: organizationId },
+          },
+        });
+        
+        const allPaymentsCash = allPayments.length > 0 && allPayments.every(
+          (p) => p.paymentMethod === PaymentMethod.CASH,
+        );
+        
+        invoice.status = allPaymentsCash
+          ? InvoiceStatus.TAX_INVOICE_CASH_RECEIVED
+          : InvoiceStatus.TAX_INVOICE_BANK_RECEIVED;
       } else if (currentPaidAmount > 0 || paymentAmount > 0) {
         invoice.paymentStatus = PaymentStatus.PARTIAL;
       } else {
@@ -997,8 +1043,33 @@ export class SalesInvoicesService {
         invoice: { id: invoiceId },
         organization: { id: organizationId },
       },
+      relations: ['invoice'],
       order: { paymentDate: 'DESC', createdAt: 'DESC' },
     });
+  }
+
+  /**
+   * List all invoice payments for an organization
+   */
+  async listAllPayments(
+    organizationId: string,
+    filters?: { paymentMethod?: PaymentMethod },
+  ): Promise<InvoicePayment[]> {
+    const query = this.paymentsRepository
+      .createQueryBuilder('payment')
+      .leftJoinAndSelect('payment.invoice', 'invoice')
+      .where('payment.organization_id = :organizationId', { organizationId });
+
+    if (filters?.paymentMethod) {
+      query.andWhere('payment.payment_method = :paymentMethod', {
+        paymentMethod: filters.paymentMethod,
+      });
+    }
+
+    return query
+      .orderBy('payment.payment_date', 'DESC')
+      .addOrderBy('payment.created_at', 'DESC')
+      .getMany();
   }
 
   /**
@@ -1049,23 +1120,53 @@ export class SalesInvoicesService {
 
       invoice.paidAmount = totalPaid.toString();
 
-      // Recalculate payment status
-      await this.updatePaymentStatus(invoiceId, organizationId);
+      // Calculate outstanding balance within transaction
+      const totalAmount = parseFloat(invoice.totalAmount);
+      const currentPaidAmount = parseFloat(invoice.paidAmount || '0');
+      
+      // Get applied credit notes within transaction
+      const applications = await manager.find(CreditNoteApplication, {
+        where: {
+          invoice: { id: invoiceId },
+          organization: { id: organizationId },
+        },
+      });
 
-      // Update invoice status if needed
-      const outstanding = await this.calculateOutstandingBalance(
-        invoiceId,
-        organizationId,
+      const appliedCreditAmount = applications.reduce(
+        (sum, app) => sum + parseFloat(app.appliedAmount),
+        0,
       );
-      if (outstanding <= 0) {
-        invoice.status = InvoiceStatus.TAX_INVOICE_BANK_RECEIVED;
+
+      const outstandingBalance = totalAmount - currentPaidAmount - appliedCreditAmount;
+
+      // Update payment status and invoice status
+      if (outstandingBalance <= 0) {
+        invoice.paymentStatus = PaymentStatus.PAID;
+        // Check if all remaining payments are cash
+        const allPaymentsCash = remainingPayments.length > 0 && remainingPayments.every(
+          (p) => p.paymentMethod === PaymentMethod.CASH,
+        );
+        invoice.status = allPaymentsCash
+          ? InvoiceStatus.TAX_INVOICE_CASH_RECEIVED
+          : InvoiceStatus.TAX_INVOICE_BANK_RECEIVED;
         invoice.paidDate =
           remainingPayments.length > 0
             ? remainingPayments[remainingPayments.length - 1].paymentDate
             : null;
-      } else if (invoice.status === InvoiceStatus.PAID || invoice.status === InvoiceStatus.TAX_INVOICE_BANK_RECEIVED) {
-        invoice.status = InvoiceStatus.TAX_INVOICE_RECEIVABLE;
-        invoice.paidDate = null;
+      } else if (currentPaidAmount > 0) {
+        invoice.paymentStatus = PaymentStatus.PARTIAL;
+        // If was fully paid but now has outstanding, revert to receivable
+        if (invoice.status === InvoiceStatus.PAID || invoice.status === InvoiceStatus.TAX_INVOICE_BANK_RECEIVED || invoice.status === InvoiceStatus.TAX_INVOICE_CASH_RECEIVED) {
+          invoice.status = InvoiceStatus.TAX_INVOICE_RECEIVABLE;
+          invoice.paidDate = null;
+        }
+      } else {
+        invoice.paymentStatus = PaymentStatus.UNPAID;
+        // If was fully paid but now unpaid, revert to receivable
+        if (invoice.status === InvoiceStatus.PAID || invoice.status === InvoiceStatus.TAX_INVOICE_BANK_RECEIVED || invoice.status === InvoiceStatus.TAX_INVOICE_CASH_RECEIVED) {
+          invoice.status = InvoiceStatus.TAX_INVOICE_RECEIVABLE;
+          invoice.paidDate = null;
+        }
       }
 
       await manager.save(invoice);
@@ -1097,7 +1198,7 @@ export class SalesInvoicesService {
   ): Promise<SalesInvoice> {
     const invoice = await this.findById(organizationId, invoiceId);
 
-    if (invoice.status === InvoiceStatus.PAID || invoice.status === InvoiceStatus.TAX_INVOICE_BANK_RECEIVED) {
+    if (invoice.status === InvoiceStatus.PAID || invoice.status === InvoiceStatus.TAX_INVOICE_BANK_RECEIVED || invoice.status === InvoiceStatus.TAX_INVOICE_CASH_RECEIVED) {
       throw new BadRequestException('Cannot update paid invoice');
     }
 
@@ -1106,6 +1207,26 @@ export class SalesInvoicesService {
     }
 
     // Update allowed fields
+    if (dto.status !== undefined) {
+      // Validate status transition
+      // Note: We already checked above that invoice is not in paid status, so we can safely update
+      const newStatus = dto.status as InvoiceStatus;
+      const paidStatuses = [
+        InvoiceStatus.PAID,
+        InvoiceStatus.TAX_INVOICE_BANK_RECEIVED,
+        InvoiceStatus.TAX_INVOICE_CASH_RECEIVED,
+      ];
+      
+      // Prevent changing from paid status to non-paid status (redundant check but kept for clarity)
+      const currentStatus = invoice.status as InvoiceStatus;
+      if (
+        paidStatuses.includes(currentStatus) &&
+        !paidStatuses.includes(newStatus)
+      ) {
+        throw new BadRequestException('Cannot change status of paid invoice');
+      }
+      invoice.status = newStatus;
+    }
     if (dto.invoiceDate !== undefined) {
       invoice.invoiceDate = dto.invoiceDate;
     }
@@ -1313,8 +1434,8 @@ export class SalesInvoicesService {
 
     // Validate status transition
     if (
-      (invoice.status === InvoiceStatus.PAID || invoice.status === InvoiceStatus.TAX_INVOICE_BANK_RECEIVED) &&
-      status !== InvoiceStatus.PAID && status !== InvoiceStatus.TAX_INVOICE_BANK_RECEIVED
+      (invoice.status === InvoiceStatus.PAID || invoice.status === InvoiceStatus.TAX_INVOICE_BANK_RECEIVED || invoice.status === InvoiceStatus.TAX_INVOICE_CASH_RECEIVED) &&
+      status !== InvoiceStatus.PAID && status !== InvoiceStatus.TAX_INVOICE_BANK_RECEIVED && status !== InvoiceStatus.TAX_INVOICE_CASH_RECEIVED
     ) {
       throw new BadRequestException('Cannot change status of paid invoice');
     }
@@ -1329,7 +1450,7 @@ export class SalesInvoicesService {
     }
 
     if (
-      (status === InvoiceStatus.PAID || status === InvoiceStatus.TAX_INVOICE_BANK_RECEIVED) &&
+      (status === InvoiceStatus.PAID || status === InvoiceStatus.TAX_INVOICE_BANK_RECEIVED || status === InvoiceStatus.TAX_INVOICE_CASH_RECEIVED) &&
       invoice.paymentStatus !== PaymentStatus.PAID
     ) {
       throw new BadRequestException(
@@ -1363,7 +1484,7 @@ export class SalesInvoicesService {
   ): Promise<void> {
     const invoice = await this.findById(organizationId, invoiceId);
 
-    if (invoice.status === InvoiceStatus.PAID || invoice.status === InvoiceStatus.TAX_INVOICE_BANK_RECEIVED) {
+    if (invoice.status === InvoiceStatus.PAID || invoice.status === InvoiceStatus.TAX_INVOICE_BANK_RECEIVED || invoice.status === InvoiceStatus.TAX_INVOICE_CASH_RECEIVED) {
       throw new BadRequestException('Cannot delete paid invoice');
     }
 

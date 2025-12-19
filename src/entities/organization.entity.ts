@@ -9,6 +9,7 @@ import {
 import { AbstractEntity } from './abstract.entity';
 import { PlanType } from '../common/enums/plan-type.enum';
 import { OrganizationStatus } from '../common/enums/organization-status.enum';
+import { Region } from '../common/enums/region.enum';
 import { User } from './user.entity';
 import { Category } from './category.entity';
 import { Expense } from './expense.entity';
@@ -76,6 +77,14 @@ export class Organization extends AbstractEntity {
 
   @Column({ length: 100, nullable: true })
   emirate?: string | null;
+
+  @Column({
+    type: 'varchar',
+    length: 20,
+    nullable: true,
+    default: 'UAE',
+  })
+  region?: Region | null;
 
   @Column({ name: 'bank_account_holder', length: 200, nullable: true })
   bankAccountHolder?: string | null;

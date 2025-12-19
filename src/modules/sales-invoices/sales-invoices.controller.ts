@@ -57,6 +57,19 @@ export class SalesInvoicesController {
     return { invoiceNumber };
   }
 
+  @Get('payments')
+  @UseGuards(JwtAuthGuard, RolesGuard, TenantGuard)
+  @Roles(UserRole.ADMIN, UserRole.ACCOUNTANT, UserRole.EMPLOYEE)
+  async listAllPayments(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query('paymentMethod') paymentMethod?: string,
+  ) {
+    return this.salesInvoicesService.listAllPayments(
+      user?.organizationId as string,
+      paymentMethod ? { paymentMethod: paymentMethod as any } : undefined,
+    );
+  }
+
   @Get('public/:token')
   async getPublicInvoice(@Param('token') token: string) {
     return this.salesInvoicesService.findByPublicToken(token);
@@ -125,6 +138,22 @@ export class SalesInvoicesController {
     );
   }
 
+  @Patch(':id/status')
+  @UseGuards(JwtAuthGuard, RolesGuard, TenantGuard)
+  @Roles(UserRole.ADMIN, UserRole.ACCOUNTANT)
+  async updateStatus(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: { status: InvoiceStatus },
+  ) {
+    return this.salesInvoicesService.updateStatus(
+      user?.organizationId as string,
+      id,
+      user?.userId as string,
+      dto.status,
+    );
+  }
+
   @Put(':id')
   @UseGuards(JwtAuthGuard, RolesGuard, TenantGuard)
   @Roles(UserRole.ADMIN, UserRole.ACCOUNTANT)
@@ -141,19 +170,19 @@ export class SalesInvoicesController {
     );
   }
 
-  @Patch(':id/status')
+  @Patch(':id')
   @UseGuards(JwtAuthGuard, RolesGuard, TenantGuard)
   @Roles(UserRole.ADMIN, UserRole.ACCOUNTANT)
-  async updateStatus(
+  async patch(
     @Param('id') id: string,
     @CurrentUser() user: AuthenticatedUser,
-    @Body() dto: { status: InvoiceStatus },
+    @Body() dto: any, // UpdateSalesInvoiceDto
   ) {
-    return this.salesInvoicesService.updateStatus(
+    return this.salesInvoicesService.update(
       user?.organizationId as string,
       id,
       user?.userId as string,
-      dto.status,
+      dto,
     );
   }
 

@@ -9,6 +9,11 @@ import { Report } from '../../entities/report.entity';
 import { Organization } from '../../entities/organization.entity';
 import { SalesInvoice } from '../../entities/sales-invoice.entity';
 import { User } from '../../entities/user.entity';
+import { ExpensePayment } from '../../entities/expense-payment.entity';
+import { InvoicePayment } from '../../entities/invoice-payment.entity';
+import { JournalEntry } from '../../entities/journal-entry.entity';
+import { CreditNote } from '../../entities/credit-note.entity';
+import { DebitNote } from '../../entities/debit-note.entity';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { SettingsModule } from '../settings/settings.module';
 
@@ -21,6 +26,11 @@ import { SettingsModule } from '../settings/settings.module';
       Organization,
       SalesInvoice,
       User,
+      ExpensePayment,
+      InvoicePayment,
+      JournalEntry,
+      CreditNote,
+      DebitNote,
     ]),
     NotificationsModule,
     SettingsModule,

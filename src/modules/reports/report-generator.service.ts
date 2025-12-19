@@ -354,6 +354,7 @@ export class ReportGeneratorService {
       expense_summary: 'Expense Summary Report',
       expense_detail: 'Expense Detail Report',
       vat_report: 'VAT Summary Report',
+      vat_control_account: 'VAT Control Account Report',
       bank_reconciliation: 'Bank Reconciliation Summary',
       attachments_report: 'Attachments Report',
       trial_balance: 'Trial Balance Report',
@@ -840,6 +841,12 @@ export class ReportGeneratorService {
     ) {
       // Receivables report
       this.addXLSXReceivables(workbook, reportData, currency);
+    } else if (
+      reportData.type === 'vat_control_account' &&
+      typeof reportData.data === 'object'
+    ) {
+      // VAT Control Account report
+      this.addXLSXVatControlAccount(workbook, reportData, currency);
     } else if (
       (reportData.type === 'expense_summary' ||
         reportData.type === 'expense_detail') &&
@@ -1945,6 +1952,10 @@ export class ReportGeneratorService {
     else if (reportData.type === 'payables') {
       this.addPDFPayables(doc, data, currency);
     }
+    // Handle VAT Control Account
+    else if (reportData.type === 'vat_control_account') {
+      this.addPDFVatControlAccount(doc, data, currency);
+    }
     // Default object display
     else {
       Object.entries(data).forEach(([key, value]) => {
@@ -2545,6 +2556,422 @@ export class ReportGeneratorService {
       doc.moveDown(0.3);
       this.addPDFTable(doc, data.items, ['vendor', 'amount', 'expectedDate', 'status', 'category'], currency);
     }
+  }
+
+  /**
+   * Professional VAT Control Account PDF Rendering
+   */
+  private addPDFVatControlAccount(
+    doc: PDFKit.PDFDocument,
+    data: any,
+    currency: string,
+  ): void {
+    const margin = 50;
+    const pageWidth = doc.page.width;
+    const contentWidth = pageWidth - 2 * margin;
+    
+    // Brand colors
+    const primaryColor = '#0077C8';
+    const accentColor = '#00A3E0';
+    const inputColor = '#dc2626'; // Red for input (expenses)
+    const outputColor = '#059669'; // Green for output (sales)
+    const borderColor = '#e1e8ed';
+    const textDark = '#1a1a1a';
+    const textMuted = '#6b7280';
+    const headerBg = '#f0f7fc';
+    const altRowBg = '#f8fafc';
+    
+    // Starting position
+    doc.y = 175;
+    
+    // ============ SUMMARY CARDS SECTION ============
+    const cardWidth = (contentWidth - 30) / 4; // 4 cards with gaps
+    const cardHeight = 70;
+    const cardY = doc.y;
+    
+    const summary = data.summary || {};
+    const netVat = summary.netVat || 0;
+    const netVatColor = netVat >= 0 ? outputColor : inputColor;
+    
+    const summaryItems = [
+      { 
+        label: 'VAT Input', 
+        value: summary.vatInput || 0, 
+        color: inputColor,
+        description: 'From Expenses/Purchases'
+      },
+      { 
+        label: 'VAT Output', 
+        value: summary.vatOutput || 0, 
+        color: outputColor,
+        description: 'From Sales/Invoices'
+      },
+      { 
+        label: 'Net VAT', 
+        value: netVat, 
+        color: netVatColor,
+        description: netVat >= 0 ? 'Payable to FTA' : 'Refundable from FTA',
+        bold: true
+      },
+      { 
+        label: 'Total Transactions', 
+        value: summary.totalTransactions || 0, 
+        color: primaryColor,
+        description: `${summary.inputTransactions || 0} Input / ${summary.outputTransactions || 0} Output`,
+        isCount: true
+      },
+    ];
+    
+    summaryItems.forEach((item, index) => {
+      const cardX = margin + index * (cardWidth + 10);
+      
+      // Card background with rounded corners effect
+      doc.rect(cardX, cardY, cardWidth, cardHeight)
+        .fillColor('#ffffff')
+        .fill()
+        .strokeColor(borderColor)
+        .lineWidth(1)
+        .stroke();
+      
+      // Top accent line
+      doc.rect(cardX, cardY, cardWidth, 3)
+        .fillColor(item.color)
+        .fill();
+      
+      // Label
+      doc.fontSize(8)
+        .font('Helvetica')
+        .fillColor(textMuted)
+        .text(item.label.toUpperCase(), cardX + 8, cardY + 12, {
+          width: cardWidth - 16,
+          align: 'left',
+        });
+      
+      // Value
+      const displayValue = item.isCount 
+        ? String(item.value) 
+        : this.formatCurrency(item.value as number, currency);
+      doc.fontSize(item.bold ? 16 : 14)
+        .font(item.bold ? 'Helvetica-Bold' : 'Helvetica-Bold')
+        .fillColor(textDark)
+        .text(displayValue, cardX + 8, cardY + 28, {
+          width: cardWidth - 16,
+          align: 'left',
+        });
+      
+      // Description
+      if (item.description) {
+        doc.fontSize(7)
+          .font('Helvetica')
+          .fillColor(textMuted)
+          .text(item.description, cardX + 8, cardY + 50, {
+            width: cardWidth - 16,
+            align: 'left',
+          });
+      }
+    });
+    
+    doc.y = cardY + cardHeight + 30;
+    
+    // ============ PERIOD INFORMATION ============
+    if (data.startDate || data.endDate) {
+      doc.fontSize(10)
+        .font('Helvetica')
+        .fillColor(textMuted)
+        .text(
+          `Report Period: ${data.startDate || 'N/A'} to ${data.endDate || 'N/A'}`,
+          margin,
+          doc.y
+        );
+      doc.moveDown(0.5);
+    }
+    
+    // ============ VAT INPUT SECTION ============
+    if (data.vatInputItems && Array.isArray(data.vatInputItems) && data.vatInputItems.length > 0) {
+      // Section header
+      const sectionHeaderY = doc.y;
+      const headerHeight = 35;
+      
+      doc.rect(margin, sectionHeaderY, contentWidth, headerHeight)
+        .fillColor(headerBg)
+        .fill();
+      doc.rect(margin, sectionHeaderY, 4, headerHeight)
+        .fillColor(inputColor)
+        .fill();
+      
+      doc.fontSize(14)
+        .font('Helvetica-Bold')
+        .fillColor(textDark)
+        .text('VAT Input (Purchases/Expenses)', margin + 15, sectionHeaderY + 10);
+      
+      doc.fontSize(9)
+        .font('Helvetica')
+        .fillColor(textMuted)
+        .text(
+          `Total: ${this.formatCurrency(summary.vatInput || 0, currency)} | ${data.vatInputItems.length} transactions`,
+          margin + 15,
+          sectionHeaderY + 25
+        );
+      
+      doc.y = sectionHeaderY + headerHeight + 10;
+      
+      // Table for VAT Input items
+      this.addVATItemsTable(
+        doc,
+        data.vatInputItems,
+        ['date', 'description', 'amount', 'vatRate', 'vatAmount', 'trn'],
+        currency,
+        margin,
+        contentWidth,
+        inputColor,
+        altRowBg,
+        borderColor,
+        textDark,
+        textMuted
+      );
+      
+      doc.moveDown(0.5);
+    }
+    
+    // Check if we need a new page
+    if (doc.y > doc.page.height - 200) {
+      doc.addPage();
+      doc.y = 50;
+    }
+    
+    // ============ VAT OUTPUT SECTION ============
+    if (data.vatOutputItems && Array.isArray(data.vatOutputItems) && data.vatOutputItems.length > 0) {
+      // Section header
+      const sectionHeaderY = doc.y;
+      const headerHeight = 35;
+      
+      doc.rect(margin, sectionHeaderY, contentWidth, headerHeight)
+        .fillColor(headerBg)
+        .fill();
+      doc.rect(margin, sectionHeaderY, 4, headerHeight)
+        .fillColor(outputColor)
+        .fill();
+      
+      doc.fontSize(14)
+        .font('Helvetica-Bold')
+        .fillColor(textDark)
+        .text('VAT Output (Sales/Invoices)', margin + 15, sectionHeaderY + 10);
+      
+      doc.fontSize(9)
+        .font('Helvetica')
+        .fillColor(textMuted)
+        .text(
+          `Total: ${this.formatCurrency(summary.vatOutput || 0, currency)} | ${data.vatOutputItems.length} transactions`,
+          margin + 15,
+          sectionHeaderY + 25
+        );
+      
+      doc.y = sectionHeaderY + headerHeight + 10;
+      
+      // Table for VAT Output items
+      this.addVATItemsTable(
+        doc,
+        data.vatOutputItems,
+        ['date', 'description', 'amount', 'vatRate', 'vatAmount', 'trn'],
+        currency,
+        margin,
+        contentWidth,
+        outputColor,
+        altRowBg,
+        borderColor,
+        textDark,
+        textMuted
+      );
+    } else if (!data.vatInputItems || data.vatInputItems.length === 0) {
+      // No data message
+      doc.fontSize(10)
+        .font('Helvetica-Oblique')
+        .fillColor(textMuted)
+        .text('No VAT transactions found for the selected period.', margin);
+    }
+  }
+
+  /**
+   * Helper method to render VAT items table
+   */
+  private addVATItemsTable(
+    doc: PDFKit.PDFDocument,
+    items: any[],
+    columns: string[],
+    currency: string,
+    margin: number,
+    contentWidth: number,
+    accentColor: string,
+    altRowBg: string,
+    borderColor: string,
+    textDark: string,
+    textMuted: string,
+  ): void {
+    if (!items || items.length === 0) return;
+    
+    // Column widths
+    const colWidths = [
+      contentWidth * 0.12, // Date
+      contentWidth * 0.28, // Description
+      contentWidth * 0.15, // Amount
+      contentWidth * 0.10, // VAT Rate
+      contentWidth * 0.15, // VAT Amount
+      contentWidth * 0.20, // TRN
+    ];
+    
+    // Table header
+    const headerY = doc.y;
+    const headerHeight = 28;
+    
+    doc.rect(margin, headerY, contentWidth, headerHeight)
+      .fillColor(accentColor)
+      .fill();
+    
+    doc.fontSize(9.5)
+      .font('Helvetica-Bold')
+      .fillColor('#ffffff');
+    
+    const headers = ['Date', 'Description', 'Amount', 'VAT Rate', 'VAT Amount', 'TRN'];
+    let x = margin + 8;
+    headers.forEach((header, i) => {
+      doc.text(header, x, headerY + 8, {
+        width: colWidths[i] - 16,
+        align: i >= 2 ? 'right' : 'left',
+      });
+      x += colWidths[i];
+    });
+    
+    doc.fillColor(textDark);
+    
+    // Data rows
+    let rowY = headerY + headerHeight;
+    const rowHeight = 22;
+    
+    items.forEach((item, index) => {
+      // Check if we need a new page
+      if (rowY > doc.page.height - 100) {
+        doc.addPage();
+        rowY = 50;
+        
+        // Re-draw header on new page
+        doc.rect(margin, rowY, contentWidth, headerHeight)
+          .fillColor(accentColor)
+          .fill();
+        doc.fontSize(9.5)
+          .font('Helvetica-Bold')
+          .fillColor('#ffffff');
+        x = margin + 8;
+        headers.forEach((header, i) => {
+          doc.text(header, x, rowY + 8, {
+            width: colWidths[i] - 16,
+            align: i >= 2 ? 'right' : 'left',
+          });
+          x += colWidths[i];
+        });
+        doc.fillColor(textDark);
+        rowY += headerHeight;
+      }
+      
+      // Alternate row background
+      if (index % 2 === 1) {
+        doc.rect(margin, rowY, contentWidth, rowHeight)
+          .fillColor(altRowBg)
+          .fill();
+      }
+      
+      // Row border
+      doc.strokeColor(borderColor)
+        .lineWidth(0.5)
+        .moveTo(margin, rowY)
+        .lineTo(margin + contentWidth, rowY)
+        .stroke();
+      
+      doc.fontSize(9).font('Helvetica');
+      x = margin + 8;
+      
+      // Date
+      const dateStr = item.date ? new Date(item.date).toLocaleDateString('en-GB') : 'N/A';
+      doc.text(dateStr, x, rowY + 7, { width: colWidths[0] - 16, align: 'left' });
+      x += colWidths[0];
+      
+      // Description
+      const desc = item.description || item.vendorName || item.customerName || item.invoiceNumber || 'N/A';
+      doc.text(desc.substring(0, 40), x, rowY + 7, { width: colWidths[1] - 16, align: 'left', ellipsis: true });
+      x += colWidths[1];
+      
+      // Amount
+      doc.text(this.formatCurrency(item.amount || 0, currency), x, rowY + 7, {
+        width: colWidths[2] - 16,
+        align: 'right',
+      });
+      x += colWidths[2];
+      
+      // VAT Rate
+      doc.text(`${item.vatRate || 0}%`, x, rowY + 7, {
+        width: colWidths[3] - 16,
+        align: 'right',
+      });
+      x += colWidths[3];
+      
+      // VAT Amount
+      doc.font('Helvetica-Bold');
+      doc.text(this.formatCurrency(item.vatAmount || 0, currency), x, rowY + 7, {
+        width: colWidths[4] - 16,
+        align: 'right',
+      });
+      doc.font('Helvetica');
+      x += colWidths[4];
+      
+      // TRN
+      doc.fillColor(textMuted);
+      doc.text(item.trn || 'N/A', x, rowY + 7, {
+        width: colWidths[5] - 16,
+        align: 'left',
+      });
+      doc.fillColor(textDark);
+      
+      rowY += rowHeight;
+    });
+    
+    // Total row
+    const totalRowHeight = 28;
+    const totalY = rowY;
+    doc.rect(margin, totalY, contentWidth, totalRowHeight)
+      .fillColor('#f0f7fc')
+      .fill();
+    
+    doc.strokeColor(accentColor)
+      .lineWidth(1.5)
+      .moveTo(margin, totalY)
+      .lineTo(margin + contentWidth, totalY)
+      .stroke();
+    
+    const totalVat = items.reduce((sum, item) => sum + (item.vatAmount || 0), 0);
+    const totalAmount = items.reduce((sum, item) => sum + (item.amount || 0), 0);
+    
+    doc.fontSize(10)
+      .font('Helvetica-Bold')
+      .fillColor(textDark);
+    
+    x = margin + 8;
+    doc.text('Total', x, totalY + 9, { width: colWidths[0] + colWidths[1] - 16, align: 'left' });
+    x += colWidths[0] + colWidths[1];
+    
+    doc.text(this.formatCurrency(totalAmount, currency), x, totalY + 9, {
+      width: colWidths[2] - 16,
+      align: 'right',
+    });
+    x += colWidths[2];
+    
+    doc.text('', x, totalY + 9, { width: colWidths[3] - 16 }); // Skip VAT Rate column
+    x += colWidths[3];
+    
+    doc.text(this.formatCurrency(totalVat, currency), x, totalY + 9, {
+      width: colWidths[4] - 16,
+      align: 'right',
+    });
+    
+    doc.y = totalY + totalRowHeight + 10;
   }
 
   private addPDFTable(
@@ -3520,6 +3947,218 @@ export class ReportGeneratorService {
     }
   }
 
+  private addXLSXVatControlAccount(
+    workbook: ExcelJS.Workbook,
+    reportData: ReportData,
+    currency: string,
+  ): void {
+    const data = reportData.data;
+
+    // Summary sheet
+    const summarySheet =
+      workbook.getWorksheet('Summary') || workbook.addWorksheet('Summary');
+    this.addXLSXHeader(summarySheet, reportData);
+
+    if (data.summary) {
+      summarySheet.addRow(['VAT Control Account Summary']);
+      summarySheet.addRow(['VAT Input', data.summary.vatInput || 0]);
+      summarySheet.addRow(['VAT Output', data.summary.vatOutput || 0]);
+      summarySheet.addRow(['Net VAT', data.summary.netVat || 0]);
+      summarySheet.addRow(['Total Transactions', data.summary.totalTransactions || 0]);
+      summarySheet.addRow(['Input Transactions', data.summary.inputTransactions || 0]);
+      summarySheet.addRow(['Output Transactions', data.summary.outputTransactions || 0]);
+      
+      if (data.startDate || data.endDate) {
+        summarySheet.addRow(['']);
+        summarySheet.addRow(['Report Period', `${data.startDate || 'N/A'} to ${data.endDate || 'N/A'}`]);
+      }
+
+      // Format currency cells
+      ['B2', 'B3', 'B4'].forEach((cellRef) => {
+        const cell = summarySheet.getCell(cellRef);
+        cell.numFmt = `"${currency}" #,##0.00`;
+        cell.font = { bold: true };
+      });
+      
+      // Net VAT cell with conditional formatting
+      const netVatCell = summarySheet.getCell('B4');
+      netVatCell.font = { bold: true, size: 12 };
+      if ((data.summary.netVat || 0) >= 0) {
+        netVatCell.font = { ...netVatCell.font, color: { argb: 'FF059669' } }; // Green
+      } else {
+        netVatCell.font = { ...netVatCell.font, color: { argb: 'FFDC2626' } }; // Red
+      }
+    }
+
+    // VAT Input sheet
+    if (data.vatInputItems && Array.isArray(data.vatInputItems) && data.vatInputItems.length > 0) {
+      const inputSheet = workbook.addWorksheet('VAT Input');
+      inputSheet.addRow([
+        'Date',
+        'Description',
+        'Vendor',
+        'Amount',
+        'VAT Rate (%)',
+        'VAT Amount',
+        'TRN',
+      ]);
+      
+      const headerRow = inputSheet.getRow(1);
+      headerRow.font = { 
+        bold: true, 
+        size: 11,
+        color: { argb: 'FFFFFFFF' } 
+      };
+      headerRow.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FFDC2626' }, // Red for input
+      };
+      headerRow.border = {
+        top: { style: 'medium', color: { argb: 'FFB91C1C' } },
+        bottom: { style: 'medium', color: { argb: 'FFB91C1C' } },
+        left: { style: 'thin', color: { argb: 'FFB91C1C' } },
+        right: { style: 'thin', color: { argb: 'FFB91C1C' } },
+      };
+      headerRow.height = 22;
+      headerRow.alignment = { horizontal: 'center', vertical: 'middle' };
+
+      data.vatInputItems.forEach((item: any) => {
+        inputSheet.addRow([
+          item.date || '',
+          item.description || item.vendorName || 'N/A',
+          item.vendorName || 'N/A',
+          item.amount || 0,
+          item.vatRate || 0,
+          item.vatAmount || 0,
+          item.trn || 'N/A',
+        ]);
+      });
+
+      // Add total row
+      const totalInput = data.vatInputItems.reduce((sum: number, item: any) => sum + (item.vatAmount || 0), 0);
+      const totalInputAmount = data.vatInputItems.reduce((sum: number, item: any) => sum + (item.amount || 0), 0);
+      inputSheet.addRow([
+        'Total',
+        '',
+        '',
+        totalInputAmount,
+        '',
+        totalInput,
+        '',
+      ]);
+      const totalRow = inputSheet.getRow(inputSheet.rowCount);
+      totalRow.font = { bold: true };
+      totalRow.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FFFFE5E5' },
+      };
+
+      // Format columns
+      inputSheet.getColumn('A').numFmt = 'dd-mmm-yyyy';
+      inputSheet.getColumn('A').alignment = { horizontal: 'center' };
+      inputSheet.getColumn('D').numFmt = `"${currency}" #,##0.00`;
+      inputSheet.getColumn('D').alignment = { horizontal: 'right' };
+      inputSheet.getColumn('E').numFmt = '0.00"%"';
+      inputSheet.getColumn('E').alignment = { horizontal: 'right' };
+      inputSheet.getColumn('F').numFmt = `"${currency}" #,##0.00`;
+      inputSheet.getColumn('F').alignment = { horizontal: 'right' };
+      inputSheet.getColumn('B').width = 30;
+      inputSheet.getColumn('C').width = 25;
+      inputSheet.getColumn('D').width = 18;
+      inputSheet.getColumn('E').width = 12;
+      inputSheet.getColumn('F').width = 18;
+      inputSheet.getColumn('G').width = 15;
+    }
+
+    // VAT Output sheet
+    if (data.vatOutputItems && Array.isArray(data.vatOutputItems) && data.vatOutputItems.length > 0) {
+      const outputSheet = workbook.addWorksheet('VAT Output');
+      outputSheet.addRow([
+        'Date',
+        'Description',
+        'Invoice Number',
+        'Customer',
+        'Amount',
+        'VAT Rate (%)',
+        'VAT Amount',
+        'TRN',
+      ]);
+      
+      const headerRow = outputSheet.getRow(1);
+      headerRow.font = { 
+        bold: true, 
+        size: 11,
+        color: { argb: 'FFFFFFFF' } 
+      };
+      headerRow.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FF059669' }, // Green for output
+      };
+      headerRow.border = {
+        top: { style: 'medium', color: { argb: 'FF047857' } },
+        bottom: { style: 'medium', color: { argb: 'FF047857' } },
+        left: { style: 'thin', color: { argb: 'FF047857' } },
+        right: { style: 'thin', color: { argb: 'FF047857' } },
+      };
+      headerRow.height = 22;
+      headerRow.alignment = { horizontal: 'center', vertical: 'middle' };
+
+      data.vatOutputItems.forEach((item: any) => {
+        outputSheet.addRow([
+          item.date || '',
+          item.description || item.invoiceNumber || item.customerName || 'N/A',
+          item.invoiceNumber || 'N/A',
+          item.customerName || 'N/A',
+          item.amount || 0,
+          item.vatRate || 0,
+          item.vatAmount || 0,
+          item.trn || 'N/A',
+        ]);
+      });
+
+      // Add total row
+      const totalOutput = data.vatOutputItems.reduce((sum: number, item: any) => sum + (item.vatAmount || 0), 0);
+      const totalOutputAmount = data.vatOutputItems.reduce((sum: number, item: any) => sum + (item.amount || 0), 0);
+      outputSheet.addRow([
+        'Total',
+        '',
+        '',
+        '',
+        totalOutputAmount,
+        '',
+        totalOutput,
+        '',
+      ]);
+      const totalRow = outputSheet.getRow(outputSheet.rowCount);
+      totalRow.font = { bold: true };
+      totalRow.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FFE5F5F0' },
+      };
+
+      // Format columns
+      outputSheet.getColumn('A').numFmt = 'dd-mmm-yyyy';
+      outputSheet.getColumn('A').alignment = { horizontal: 'center' };
+      outputSheet.getColumn('E').numFmt = `"${currency}" #,##0.00`;
+      outputSheet.getColumn('E').alignment = { horizontal: 'right' };
+      outputSheet.getColumn('F').numFmt = '0.00"%"';
+      outputSheet.getColumn('F').alignment = { horizontal: 'right' };
+      outputSheet.getColumn('G').numFmt = `"${currency}" #,##0.00`;
+      outputSheet.getColumn('G').alignment = { horizontal: 'right' };
+      outputSheet.getColumn('B').width = 30;
+      outputSheet.getColumn('C').width = 18;
+      outputSheet.getColumn('D').width = 25;
+      outputSheet.getColumn('E').width = 18;
+      outputSheet.getColumn('F').width = 12;
+      outputSheet.getColumn('G').width = 18;
+      outputSheet.getColumn('H').width = 15;
+    }
+  }
+
   private addXLSXReceivables(
     workbook: ExcelJS.Workbook,
     reportData: ReportData,
@@ -3721,7 +4360,81 @@ export class ReportGeneratorService {
       }
     } else if (typeof data === 'object' && data !== null) {
       // Handle structured reports
-      if (reportData.type === 'vat_report') {
+      if (reportData.type === 'vat_control_account') {
+        // VAT Control Account CSV format
+        const data = reportData.data;
+        const currency = reportData.metadata?.currency || 'AED';
+        
+        lines.push('VAT Control Account Report');
+        lines.push('');
+        if (data.startDate || data.endDate) {
+          lines.push(`Report Period,${data.startDate || 'N/A'} to ${data.endDate || 'N/A'}`);
+        }
+        lines.push('');
+        lines.push('Summary');
+        lines.push('-'.repeat(80));
+        if (data.summary) {
+          lines.push(`VAT Input,${this.formatCurrency(data.summary.vatInput || 0, currency)}`);
+          lines.push(`VAT Output,${this.formatCurrency(data.summary.vatOutput || 0, currency)}`);
+          lines.push(`Net VAT,${this.formatCurrency(data.summary.netVat || 0, currency)}`);
+          lines.push(`Total Transactions,${data.summary.totalTransactions || 0}`);
+          lines.push(`Input Transactions,${data.summary.inputTransactions || 0}`);
+          lines.push(`Output Transactions,${data.summary.outputTransactions || 0}`);
+        }
+        lines.push('');
+        lines.push('-'.repeat(80));
+        lines.push('');
+        
+        // VAT Input Items
+        if (data.vatInputItems && Array.isArray(data.vatInputItems) && data.vatInputItems.length > 0) {
+          lines.push('VAT Input (Purchases/Expenses)');
+          lines.push('-'.repeat(80));
+          lines.push('Date,Description,Vendor,Amount,VAT Rate (%),VAT Amount,TRN');
+          data.vatInputItems.forEach((item: any) => {
+            const date = item.date ? new Date(item.date).toLocaleDateString('en-GB') : 'N/A';
+            lines.push([
+              date,
+              item.description || item.vendorName || 'N/A',
+              item.vendorName || 'N/A',
+              this.formatCurrency(item.amount || 0, currency),
+              `${item.vatRate || 0}%`,
+              this.formatCurrency(item.vatAmount || 0, currency),
+              item.trn || 'N/A',
+            ].join(','));
+          });
+          const totalInput = data.vatInputItems.reduce((sum: number, item: any) => sum + (item.vatAmount || 0), 0);
+          const totalInputAmount = data.vatInputItems.reduce((sum: number, item: any) => sum + (item.amount || 0), 0);
+          lines.push('');
+          lines.push(`Total,,,${this.formatCurrency(totalInputAmount, currency)},,${this.formatCurrency(totalInput, currency)},`);
+          lines.push('');
+          lines.push('-'.repeat(80));
+          lines.push('');
+        }
+        
+        // VAT Output Items
+        if (data.vatOutputItems && Array.isArray(data.vatOutputItems) && data.vatOutputItems.length > 0) {
+          lines.push('VAT Output (Sales/Invoices)');
+          lines.push('-'.repeat(80));
+          lines.push('Date,Description,Invoice Number,Customer,Amount,VAT Rate (%),VAT Amount,TRN');
+          data.vatOutputItems.forEach((item: any) => {
+            const date = item.date ? new Date(item.date).toLocaleDateString('en-GB') : 'N/A';
+            lines.push([
+              date,
+              item.description || item.invoiceNumber || item.customerName || 'N/A',
+              item.invoiceNumber || 'N/A',
+              item.customerName || 'N/A',
+              this.formatCurrency(item.amount || 0, currency),
+              `${item.vatRate || 0}%`,
+              this.formatCurrency(item.vatAmount || 0, currency),
+              item.trn || 'N/A',
+            ].join(','));
+          });
+          const totalOutput = data.vatOutputItems.reduce((sum: number, item: any) => sum + (item.vatAmount || 0), 0);
+          const totalOutputAmount = data.vatOutputItems.reduce((sum: number, item: any) => sum + (item.amount || 0), 0);
+          lines.push('');
+          lines.push(`Total,,,,${this.formatCurrency(totalOutputAmount, currency)},,${this.formatCurrency(totalOutput, currency)},`);
+        }
+      } else if (reportData.type === 'vat_report') {
         lines.push('VAT Summary');
         lines.push(
           `Taxable Supplies,${data.taxableSupplies || data.taxableAmount || 0}`,

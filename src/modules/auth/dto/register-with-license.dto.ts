@@ -7,6 +7,7 @@ import {
   MinLength,
 } from 'class-validator';
 import { PlanType } from '../../../common/enums/plan-type.enum';
+import { Region } from '../../../common/enums/region.enum';
 
 export class RegisterWithLicenseDto {
   @IsNotEmpty()
@@ -32,6 +33,10 @@ export class RegisterWithLicenseDto {
   @IsOptional()
   @IsString()
   fiscalYearStart?: string;
+
+  @IsOptional()
+  @IsEnum(Region)
+  region?: Region;
 
   @IsOptional()
   @IsEnum(PlanType)

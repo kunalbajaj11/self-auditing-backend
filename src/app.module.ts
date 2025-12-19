@@ -33,6 +33,7 @@ import { DebitNotesModule } from './modules/debit-notes/debit-notes.module';
 import { ExpensePaymentsModule } from './modules/expense-payments/expense-payments.module';
 import { SettingsModule } from './modules/settings/settings.module';
 import { JournalEntriesModule } from './modules/journal-entries/journal-entries.module';
+import { RegionConfigModule } from './modules/region-config/region-config.module';
 import { AppBootstrapService } from './bootstrap/app-bootstrap.service';
 import { SanitizeAttachmentsInterceptor } from './common/interceptors/sanitize-attachments.interceptor';
 
@@ -78,6 +79,7 @@ import { SanitizeAttachmentsInterceptor } from './common/interceptors/sanitize-a
     ExpensePaymentsModule,
     SettingsModule,
     JournalEntriesModule,
+    RegionConfigModule,
   ],
   controllers: [AppController],
   providers: [

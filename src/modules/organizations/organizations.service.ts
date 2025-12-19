@@ -16,6 +16,8 @@ import { LicenseKeysService } from '../license-keys/license-keys.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { AuditAction } from '../../common/enums/audit-action.enum';
 import { UpgradeLicenseDto } from './dto/upgrade-license.dto';
+import { RegionConfigService } from '../region-config/region-config.service';
+import { Region } from '../../common/enums/region.enum';
 
 @Injectable()
 export class OrganizationsService {
@@ -26,6 +28,7 @@ export class OrganizationsService {
     private readonly plansRepository: Repository<Plan>,
     private readonly licenseKeysService: LicenseKeysService,
     private readonly auditLogsService: AuditLogsService,
+    private readonly regionConfigService: RegionConfigService,
   ) {}
 
   private normalizeDateString(value?: string | null): string | null {
@@ -42,17 +45,27 @@ export class OrganizationsService {
       throw new ConflictException('Organization with this name already exists');
     }
 
+    // Get region config for defaults (defaults to UAE if not provided)
+    const region = dto.region || Region.UAE;
+    const regionConfig = this.regionConfigService.getConfig(region);
+
+    // Use provided currency or default from region config
+    const currency = dto.currency ?? regionConfig.defaultCurrency;
+    const baseCurrency = regionConfig.baseCurrency;
+
     const organization = this.organizationsRepository.create({
       name: dto.name,
       vatNumber: dto.vatNumber,
       address: dto.address,
-      currency: dto.currency ?? 'AED',
+      currency: currency,
+      baseCurrency: baseCurrency,
       fiscalYearStart: this.normalizeDateString(dto.fiscalYearStart),
       planType: dto.planType,
       contactPerson: dto.contactPerson,
       contactEmail: dto.contactEmail,
       storageQuotaMb: dto.storageQuotaMb ?? 500,
       status: OrganizationStatus.ACTIVE,
+      region: region,
     });
 
     if (dto.planId) {
@@ -123,6 +136,9 @@ export class OrganizationsService {
     }
     if (dto.storageQuotaMb !== undefined) {
       organization.storageQuotaMb = dto.storageQuotaMb;
+    }
+    if (dto.region !== undefined) {
+      organization.region = dto.region;
     }
     if (dto.planId !== undefined) {
       if (dto.planId === null) {

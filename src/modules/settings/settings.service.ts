@@ -20,6 +20,8 @@ import { UpdateNumberingSequenceDto } from './dto/update-numbering-sequence.dto'
 import { UpdateNumberingSettingsDto } from './dto/update-numbering-settings.dto';
 import { ForexRateService } from '../forex/forex-rate.service';
 import { FileStorageService } from '../attachments/file-storage.service';
+import { RegionConfigService } from '../region-config/region-config.service';
+import { Region } from '../../common/enums/region.enum';
 import { DataSource } from 'typeorm';
 
 @Injectable()
@@ -36,6 +38,7 @@ export class SettingsService {
     @InjectRepository(Organization)
     private readonly organizationRepository: Repository<Organization>,
     private readonly fileStorageService: FileStorageService,
+    private readonly regionConfigService: RegionConfigService,
     private readonly dataSource: DataSource,
     @Optional() @Inject(ForexRateService) private readonly forexRateService?: ForexRateService,
   ) {}
@@ -57,12 +60,16 @@ export class SettingsService {
         throw new NotFoundException('Organization not found');
       }
 
-      // Initialize with default values
+      // Get region config for defaults
+      const region = (organization.region as Region) || Region.UAE;
+      const regionConfig = this.regionConfigService.getConfig(region);
+
+      // Initialize with default values from region config
       settings = this.settingsRepository.create({
         organization,
         // Invoice Template Defaults
         invoiceColorScheme: 'blue',
-        invoiceTitle: 'TAX INVOICE',
+        invoiceTitle: regionConfig.invoiceTitle,
         invoiceShowCompanyDetails: true,
         invoiceShowVatDetails: true,
         invoiceShowPaymentTerms: true,
@@ -77,10 +84,10 @@ export class SettingsService {
         invoiceShowItemTotal: true,
         invoiceEmailSubject: 'Invoice {{invoiceNumber}} from {{companyName}}',
         invoiceEmailMessage: 'Please find attached invoice {{invoiceNumber}} for {{totalAmount}} {{currency}}.',
-        // Tax Settings Defaults
-        taxAuthority: 'Federal Tax Authority',
+        // Tax Settings Defaults from region config
+        taxAuthority: regionConfig.taxAuthority,
         taxCalculationMethod: 'inclusive',
-        taxDefaultRate: 5.0,
+        taxDefaultRate: regionConfig.defaultTaxRate,
         taxRoundingMethod: 'standard',
         taxReportingPeriod: 'monthly',
         taxCalculateOnShipping: true,

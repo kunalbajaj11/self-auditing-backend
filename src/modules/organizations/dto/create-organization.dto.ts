@@ -6,6 +6,7 @@ import {
   IsString,
 } from 'class-validator';
 import { PlanType } from '../../../common/enums/plan-type.enum';
+import { Region } from '../../../common/enums/region.enum';
 
 export class CreateOrganizationDto {
   @IsNotEmpty()
@@ -41,6 +42,10 @@ export class CreateOrganizationDto {
 
   @IsOptional()
   storageQuotaMb?: number;
+
+  @IsOptional()
+  @IsEnum(Region)
+  region?: Region;
 
   @IsOptional()
   planId?: string;

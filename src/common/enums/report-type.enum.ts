@@ -4,4 +4,5 @@ export enum ReportType {
   PROFIT_AND_LOSS = 'profit_and_loss',
   PAYABLES = 'payables',
   RECEIVABLES = 'receivables',
+  VAT_CONTROL_ACCOUNT = 'vat_control_account',
 }

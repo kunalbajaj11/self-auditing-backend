@@ -1,0 +1,58 @@
+import { Region } from '../common/enums/region.enum';
+import { RegionConfig } from './region-config.interface';
+
+export const REGION_CONFIGS: Record<Region, RegionConfig> = {
+  [Region.UAE]: {
+    defaultCurrency: 'AED',
+    baseCurrency: 'AED',
+    taxAuthority: 'Federal Tax Authority',
+    defaultTaxRate: 5.0,
+    vatNumberLabel: 'VAT Number',
+    trnLabel: 'TRN',
+    supportedCurrencies: ['AED', 'USD', 'EUR', 'GBP', 'SAR'],
+    invoiceTitle: 'TAX INVOICE',
+    appBrandName: 'SmartExpense UAE',
+    complianceBody: 'FTA',
+    emailBrandName: 'SmartExpense UAE',
+  },
+  [Region.SAUDI]: {
+    defaultCurrency: 'SAR',
+    baseCurrency: 'SAR',
+    taxAuthority: 'Zakat, Tax and Customs Authority',
+    defaultTaxRate: 15.0,
+    vatNumberLabel: 'VAT Number',
+    trnLabel: 'VAT Registration Number',
+    supportedCurrencies: ['SAR', 'USD', 'EUR', 'GBP', 'AED'],
+    invoiceTitle: 'TAX INVOICE',
+    appBrandName: 'SmartExpense Saudi',
+    complianceBody: 'ZATCA',
+    emailBrandName: 'SmartExpense Saudi',
+  },
+  [Region.OMAN]: {
+    defaultCurrency: 'OMR',
+    baseCurrency: 'OMR',
+    taxAuthority: 'Tax Authority',
+    defaultTaxRate: 5.0,
+    vatNumberLabel: 'VAT Number',
+    trnLabel: 'Tax Registration Number',
+    supportedCurrencies: ['OMR', 'USD', 'EUR', 'GBP', 'AED'],
+    invoiceTitle: 'TAX INVOICE',
+    appBrandName: 'SmartExpense Oman',
+    complianceBody: 'Tax Authority',
+    emailBrandName: 'SmartExpense Oman',
+  },
+  [Region.INDIA]: {
+    defaultCurrency: 'INR',
+    baseCurrency: 'INR',
+    taxAuthority: 'Goods and Services Tax Authority',
+    defaultTaxRate: 18.0,
+    vatNumberLabel: 'GST Number',
+    trnLabel: 'GSTIN',
+    supportedCurrencies: ['INR', 'USD', 'EUR', 'GBP'],
+    invoiceTitle: 'TAX INVOICE',
+    appBrandName: 'SmartExpense India',
+    complianceBody: 'GST',
+    emailBrandName: 'SmartExpense India',
+  },
+};
+
