@@ -1917,10 +1917,30 @@ export class ReportGeneratorService {
       doc.moveDown(0.3);
       doc.fontSize(10).font('Helvetica');
       if (data.summary) {
-        doc.text(`Total Debit: ${this.formatCurrency(data.summary.totalDebit || 0, currency)}`, margin);
-        doc.text(`Total Credit: ${this.formatCurrency(data.summary.totalCredit || 0, currency)}`, margin);
+        doc.text('Opening Balances:', margin);
+        doc.text(`  Opening Debit: ${this.formatCurrency(data.summary.openingDebit || 0, currency)}`, margin + 10);
+        doc.text(`  Opening Credit: ${this.formatCurrency(data.summary.openingCredit || 0, currency)}`, margin + 10);
         doc.font('Helvetica-Bold');
-        doc.text(`Total Balance: ${this.formatCurrency(data.summary.totalBalance || 0, currency)}`, margin);
+        doc.text(`  Opening Balance: ${this.formatCurrency(data.summary.openingBalance || 0, currency)}`, margin + 10);
+        doc.font('Helvetica');
+        doc.moveDown(0.2);
+        doc.text('Period Transactions:', margin);
+        doc.text(`  Period Debit: ${this.formatCurrency(data.summary.periodDebit || 0, currency)}`, margin + 10);
+        doc.text(`  Period Credit: ${this.formatCurrency(data.summary.periodCredit || 0, currency)}`, margin + 10);
+        doc.text(`  Period Balance: ${this.formatCurrency(data.summary.periodBalance || 0, currency)}`, margin + 10);
+        doc.moveDown(0.2);
+        doc.text('Closing Balances:', margin);
+        doc.text(`  Closing Debit: ${this.formatCurrency(data.summary.closingDebit || 0, currency)}`, margin + 10);
+        doc.text(`  Closing Credit: ${this.formatCurrency(data.summary.closingCredit || 0, currency)}`, margin + 10);
+        doc.font('Helvetica-Bold');
+        doc.text(`  Closing Balance: ${this.formatCurrency(data.summary.closingBalance || 0, currency)}`, margin + 10);
+        doc.font('Helvetica');
+        doc.moveDown(0.2);
+        doc.text('Total Summary:', margin);
+        doc.font('Helvetica-Bold');
+        doc.text(`  Total Debit: ${this.formatCurrency(data.summary.closingDebit || data.summary.totalDebit || 0, currency)}`, margin + 10);
+        doc.text(`  Total Credit: ${this.formatCurrency(data.summary.closingCredit || data.summary.totalCredit || 0, currency)}`, margin + 10);
+        doc.text(`  Total Balance: ${this.formatCurrency(data.summary.closingBalance || data.summary.totalBalance || 0, currency)}`, margin + 10);
         doc.font('Helvetica');
       }
       
@@ -1930,10 +1950,24 @@ export class ReportGeneratorService {
         doc.fontSize(12).font('Helvetica-Bold');
         doc.text('Accounts', margin, doc.y, { underline: true });
         doc.moveDown(0.3);
+        // Update table to include opening/closing columns
+        const accountsWithBalances = data.accounts.map((acc: any) => ({
+          accountName: acc.accountName,
+          accountType: acc.accountType,
+          openingDebit: acc.openingDebit || 0,
+          openingCredit: acc.openingCredit || 0,
+          openingBalance: acc.openingBalance || 0,
+          periodDebit: acc.debit || 0,
+          periodCredit: acc.credit || 0,
+          periodBalance: acc.balance || 0,
+          closingDebit: acc.closingDebit || 0,
+          closingCredit: acc.closingCredit || 0,
+          closingBalance: acc.closingBalance || 0,
+        }));
         this.addPDFTable(
           doc,
-          data.accounts,
-          ['accountName', 'accountType', 'debit', 'credit', 'balance'],
+          accountsWithBalances,
+          ['accountName', 'accountType', 'openingDebit', 'openingCredit', 'openingBalance', 'periodDebit', 'periodCredit', 'periodBalance', 'closingDebit', 'closingCredit', 'closingBalance'],
           currency,
         );
       } else {
@@ -2006,17 +2040,34 @@ export class ReportGeneratorService {
     const cardY = doc.y;
     
     const summaryItems = [
-      { label: 'Total Assets', value: data.summary?.totalAssets || 0, color: primaryColor },
-      { label: 'Total Liabilities', value: data.summary?.totalLiabilities || 0, color: '#dc2626' },
-      { label: 'Total Equity', value: data.summary?.totalEquity || 0, color: '#059669' },
-      { label: 'Balance', value: data.summary?.balance || 0, color: accentColor },
+      { label: 'Opening Assets', value: data.summary?.openingAssets || 0, color: primaryColor },
+      { label: 'Opening Liabilities', value: data.summary?.openingLiabilities || 0, color: '#dc2626' },
+      { label: 'Opening Equity', value: data.summary?.openingEquity || 0, color: '#059669' },
+      { label: 'Opening Balance', value: data.summary?.openingBalance || 0, color: accentColor },
     ];
     
+    const periodItems = [
+      { label: 'Period Assets', value: data.summary?.periodAssets || data.summary?.totalAssets || 0, color: primaryColor },
+      { label: 'Period Liabilities', value: data.summary?.periodLiabilities || data.summary?.totalLiabilities || 0, color: '#dc2626' },
+      { label: 'Period Equity', value: data.summary?.periodEquity || data.summary?.totalEquity || 0, color: '#059669' },
+      { label: 'Period Balance', value: data.summary?.balance || 0, color: accentColor },
+    ];
+    
+    const closingItems = [
+      { label: 'Closing Assets', value: data.summary?.closingAssets || 0, color: primaryColor },
+      { label: 'Closing Liabilities', value: data.summary?.closingLiabilities || 0, color: '#dc2626' },
+      { label: 'Closing Equity', value: data.summary?.closingEquity || 0, color: '#059669' },
+      { label: 'Closing Balance', value: data.summary?.closingBalance || 0, color: accentColor },
+    ];
+    
+    // Opening Balances
+    doc.fontSize(10).font('Helvetica-Bold').fillColor(textDark).text('Opening Balances', margin, doc.y);
+    doc.y += 15;
     summaryItems.forEach((item, index) => {
       const cardX = margin + index * (cardWidth + 10);
       
       // Card background with rounded corners effect
-      doc.rect(cardX, cardY, cardWidth, cardHeight)
+      doc.rect(cardX, doc.y, cardWidth, cardHeight)
         .fillColor('#ffffff')
         .fill()
         .strokeColor(borderColor)
@@ -2024,7 +2075,7 @@ export class ReportGeneratorService {
         .stroke();
       
       // Top accent line
-      doc.rect(cardX, cardY, cardWidth, 3)
+      doc.rect(cardX, doc.y, cardWidth, 3)
         .fillColor(item.color)
         .fill();
       
@@ -2032,7 +2083,7 @@ export class ReportGeneratorService {
       doc.fontSize(8)
         .font('Helvetica')
         .fillColor(textMuted)
-        .text(item.label.toUpperCase(), cardX + 8, cardY + 12, {
+        .text(item.label.toUpperCase(), cardX + 8, doc.y + 12, {
           width: cardWidth - 16,
           align: 'left',
         });
@@ -2041,13 +2092,86 @@ export class ReportGeneratorService {
       doc.fontSize(14)
         .font('Helvetica-Bold')
         .fillColor(textDark)
-        .text(this.formatCurrency(item.value, currency), cardX + 8, cardY + 28, {
+        .text(this.formatCurrency(item.value, currency), cardX + 8, doc.y + 28, {
           width: cardWidth - 16,
           align: 'left',
         });
     });
     
-    doc.y = cardY + cardHeight + 25;
+    doc.y += cardHeight + 20;
+    
+    // Period Transactions
+    doc.fontSize(10).font('Helvetica-Bold').fillColor(textDark).text('Period Transactions', margin, doc.y);
+    doc.y += 15;
+    periodItems.forEach((item, index) => {
+      const cardX = margin + index * (cardWidth + 10);
+      
+      doc.rect(cardX, doc.y, cardWidth, cardHeight)
+        .fillColor('#ffffff')
+        .fill()
+        .strokeColor(borderColor)
+        .lineWidth(1)
+        .stroke();
+      
+      doc.rect(cardX, doc.y, cardWidth, 3)
+        .fillColor(item.color)
+        .fill();
+      
+      doc.fontSize(8)
+        .font('Helvetica')
+        .fillColor(textMuted)
+        .text(item.label.toUpperCase(), cardX + 8, doc.y + 12, {
+          width: cardWidth - 16,
+          align: 'left',
+        });
+      
+      doc.fontSize(14)
+        .font('Helvetica-Bold')
+        .fillColor(textDark)
+        .text(this.formatCurrency(item.value, currency), cardX + 8, doc.y + 28, {
+          width: cardWidth - 16,
+          align: 'left',
+        });
+    });
+    
+    doc.y += cardHeight + 20;
+    
+    // Closing Balances
+    doc.fontSize(10).font('Helvetica-Bold').fillColor(textDark).text('Closing Balances', margin, doc.y);
+    doc.y += 15;
+    closingItems.forEach((item, index) => {
+      const cardX = margin + index * (cardWidth + 10);
+      
+      doc.rect(cardX, doc.y, cardWidth, cardHeight)
+        .fillColor('#ffffff')
+        .fill()
+        .strokeColor(borderColor)
+        .lineWidth(2)
+        .strokeColor(primaryColor)
+        .stroke();
+      
+      doc.rect(cardX, doc.y, cardWidth, 3)
+        .fillColor(item.color)
+        .fill();
+      
+      doc.fontSize(8)
+        .font('Helvetica')
+        .fillColor(textMuted)
+        .text(item.label.toUpperCase(), cardX + 8, doc.y + 12, {
+          width: cardWidth - 16,
+          align: 'left',
+        });
+      
+      doc.fontSize(14)
+        .font('Helvetica-Bold')
+        .fillColor(textDark)
+        .text(this.formatCurrency(item.value, currency), cardX + 8, doc.y + 28, {
+          width: cardWidth - 16,
+          align: 'left',
+        });
+    });
+    
+    doc.y += cardHeight + 25;
     
     // ============ ASSETS SECTION ============
     this.addBalanceSheetSection(
@@ -2382,6 +2506,13 @@ export class ReportGeneratorService {
     const cardHeight = 60;
     const cardY = doc.y;
     
+    // Opening Retained Earnings
+    doc.fontSize(10).font('Helvetica-Bold').fillColor(textDark).text('Opening Retained Earnings', margin, doc.y);
+    doc.moveDown(0.2);
+    doc.fontSize(12).font('Helvetica-Bold').fillColor(primaryColor)
+      .text(this.formatCurrency(data.summary?.openingRetainedEarnings || 0, currency), margin);
+    doc.moveDown(0.5);
+    
     const summaryItems = [
       { label: 'Gross Revenue', value: data.summary?.grossProfit || data.revenue?.amount || 0, color: '#059669' },
       { label: 'Total Expenses', value: data.summary?.totalExpenses || data.expenses?.total || 0, color: '#dc2626' },
@@ -2389,24 +2520,33 @@ export class ReportGeneratorService {
       { label: 'Profit Margin', value: `${(data.summary?.netProfitMargin || 0).toFixed(1)}%`, isPercent: true, color: '#7c3aed' },
     ];
     
+    doc.fontSize(10).font('Helvetica-Bold').fillColor(textDark).text('Period Transactions', margin, doc.y);
+    doc.moveDown(0.2);
     summaryItems.forEach((item, index) => {
       const cardX = margin + index * (cardWidth + 10);
       
-      doc.rect(cardX, cardY, cardWidth, cardHeight)
+      doc.rect(cardX, doc.y, cardWidth, cardHeight)
         .fillColor('#ffffff').fill()
         .strokeColor('#e1e8ed').lineWidth(1).stroke();
       
-      doc.rect(cardX, cardY, cardWidth, 3).fillColor(item.color).fill();
+      doc.rect(cardX, doc.y, cardWidth, 3).fillColor(item.color).fill();
       
       doc.fontSize(8).font('Helvetica').fillColor(textMuted)
-        .text(item.label.toUpperCase(), cardX + 8, cardY + 12, { width: cardWidth - 16 });
+        .text(item.label.toUpperCase(), cardX + 8, doc.y + 12, { width: cardWidth - 16 });
       
       const displayValue = item.isPercent ? item.value : this.formatCurrency(item.value as number, currency);
       doc.fontSize(14).font('Helvetica-Bold').fillColor(textDark)
-        .text(displayValue, cardX + 8, cardY + 28, { width: cardWidth - 16 });
+        .text(displayValue, cardX + 8, doc.y + 28, { width: cardWidth - 16 });
     });
     
-    doc.y = cardY + cardHeight + 25;
+    doc.y += cardHeight + 20;
+    
+    // Closing Retained Earnings
+    doc.fontSize(10).font('Helvetica-Bold').fillColor(textDark).text('Closing Retained Earnings', margin, doc.y);
+    doc.moveDown(0.2);
+    doc.fontSize(12).font('Helvetica-Bold').fillColor(primaryColor)
+      .text(this.formatCurrency(data.summary?.closingRetainedEarnings || 0, currency), margin);
+    doc.moveDown(0.5);
     
     // Revenue Section
     doc.fontSize(14).font('Helvetica-Bold').fillColor(primaryColor).text('Revenue', margin);
@@ -2452,6 +2592,23 @@ export class ReportGeneratorService {
     const cardHeight = 60;
     const cardY = doc.y;
     
+    // Opening/Closing Balances
+    doc.fontSize(10).font('Helvetica-Bold').fillColor(textDark).text('Opening Balance', margin, doc.y);
+    doc.moveDown(0.2);
+    doc.fontSize(12).font('Helvetica-Bold').fillColor(primaryColor)
+      .text(this.formatCurrency(data.summary?.openingBalance || 0, currency), margin);
+    doc.moveDown(0.3);
+    doc.fontSize(10).font('Helvetica-Bold').fillColor(textDark).text('Period Outstanding', margin, doc.y);
+    doc.moveDown(0.2);
+    doc.fontSize(12).font('Helvetica-Bold').fillColor(primaryColor)
+      .text(this.formatCurrency(data.summary?.periodAmount || data.summary?.periodOutstanding || 0, currency), margin);
+    doc.moveDown(0.3);
+    doc.fontSize(10).font('Helvetica-Bold').fillColor(textDark).text('Closing Balance', margin, doc.y);
+    doc.moveDown(0.2);
+    doc.fontSize(12).font('Helvetica-Bold').fillColor(primaryColor)
+      .text(this.formatCurrency(data.summary?.closingBalance || 0, currency), margin);
+    doc.moveDown(0.5);
+    
     const summaryItems = [
       { label: 'Total Outstanding', value: data.summary?.totalOutstanding || 0, color: primaryColor },
       { label: 'Overdue Amount', value: data.summary?.overdueAmount || 0, color: '#dc2626' },
@@ -2461,21 +2618,21 @@ export class ReportGeneratorService {
     summaryItems.forEach((item, index) => {
       const cardX = margin + index * (cardWidth + 10);
       
-      doc.rect(cardX, cardY, cardWidth, cardHeight)
+      doc.rect(cardX, doc.y, cardWidth, cardHeight)
         .fillColor('#ffffff').fill()
         .strokeColor('#e1e8ed').lineWidth(1).stroke();
       
-      doc.rect(cardX, cardY, cardWidth, 3).fillColor(item.color).fill();
+      doc.rect(cardX, doc.y, cardWidth, 3).fillColor(item.color).fill();
       
       doc.fontSize(8).font('Helvetica').fillColor(textMuted)
-        .text(item.label.toUpperCase(), cardX + 8, cardY + 12, { width: cardWidth - 16 });
+        .text(item.label.toUpperCase(), cardX + 8, doc.y + 12, { width: cardWidth - 16 });
       
       const displayValue = item.isCount ? String(item.value) : this.formatCurrency(item.value as number, currency);
       doc.fontSize(14).font('Helvetica-Bold').fillColor(textDark)
-        .text(displayValue, cardX + 8, cardY + 28, { width: cardWidth - 16 });
+        .text(displayValue, cardX + 8, doc.y + 28, { width: cardWidth - 16 });
     });
     
-    doc.y = cardY + cardHeight + 25;
+    doc.y += cardHeight + 25;
     
     // Summary Stats
     doc.fontSize(12).font('Helvetica-Bold').fillColor(primaryColor).text('Invoice Status Summary', margin);
@@ -2516,6 +2673,23 @@ export class ReportGeneratorService {
     const cardHeight = 60;
     const cardY = doc.y;
     
+    // Opening/Closing Balances
+    doc.fontSize(10).font('Helvetica-Bold').fillColor(textDark).text('Opening Balance', margin, doc.y);
+    doc.moveDown(0.2);
+    doc.fontSize(12).font('Helvetica-Bold').fillColor(primaryColor)
+      .text(this.formatCurrency(data.summary?.openingBalance || 0, currency), margin);
+    doc.moveDown(0.3);
+    doc.fontSize(10).font('Helvetica-Bold').fillColor(textDark).text('Period Amount', margin, doc.y);
+    doc.moveDown(0.2);
+    doc.fontSize(12).font('Helvetica-Bold').fillColor(primaryColor)
+      .text(this.formatCurrency(data.summary?.periodAmount || 0, currency), margin);
+    doc.moveDown(0.3);
+    doc.fontSize(10).font('Helvetica-Bold').fillColor(textDark).text('Closing Balance', margin, doc.y);
+    doc.moveDown(0.2);
+    doc.fontSize(12).font('Helvetica-Bold').fillColor(primaryColor)
+      .text(this.formatCurrency(data.summary?.closingBalance || 0, currency), margin);
+    doc.moveDown(0.5);
+    
     const summaryItems = [
       { label: 'Total Payables', value: data.summary?.totalAmount || 0, color: primaryColor },
       { label: 'Overdue Amount', value: data.summary?.overdueAmount || 0, color: '#dc2626' },
@@ -2525,21 +2699,21 @@ export class ReportGeneratorService {
     summaryItems.forEach((item, index) => {
       const cardX = margin + index * (cardWidth + 10);
       
-      doc.rect(cardX, cardY, cardWidth, cardHeight)
+      doc.rect(cardX, doc.y, cardWidth, cardHeight)
         .fillColor('#ffffff').fill()
         .strokeColor('#e1e8ed').lineWidth(1).stroke();
       
-      doc.rect(cardX, cardY, cardWidth, 3).fillColor(item.color).fill();
+      doc.rect(cardX, doc.y, cardWidth, 3).fillColor(item.color).fill();
       
       doc.fontSize(8).font('Helvetica').fillColor(textMuted)
-        .text(item.label.toUpperCase(), cardX + 8, cardY + 12, { width: cardWidth - 16 });
+        .text(item.label.toUpperCase(), cardX + 8, doc.y + 12, { width: cardWidth - 16 });
       
       const displayValue = item.isCount ? String(item.value) : this.formatCurrency(item.value as number, currency);
       doc.fontSize(14).font('Helvetica-Bold').fillColor(textDark)
-        .text(displayValue, cardX + 8, cardY + 28, { width: cardWidth - 16 });
+        .text(displayValue, cardX + 8, doc.y + 28, { width: cardWidth - 16 });
     });
     
-    doc.y = cardY + cardHeight + 25;
+    doc.y += cardHeight + 25;
     
     // Summary Stats
     doc.fontSize(12).font('Helvetica-Bold').fillColor(primaryColor).text('Payables Summary', margin);
@@ -3524,11 +3698,28 @@ export class ReportGeneratorService {
 
     if (data.summary) {
       summarySheet.addRow(['Trial Balance Summary']);
-      summarySheet.addRow(['Total Debit', data.summary.totalDebit || 0]);
-      summarySheet.addRow(['Total Credit', data.summary.totalCredit || 0]);
-      summarySheet.addRow(['Total Balance', data.summary.totalBalance || 0]);
+      summarySheet.addRow([]);
+      summarySheet.addRow(['Opening Balances']);
+      summarySheet.addRow(['Opening Debit', data.summary.openingDebit || 0]);
+      summarySheet.addRow(['Opening Credit', data.summary.openingCredit || 0]);
+      summarySheet.addRow(['Opening Balance', data.summary.openingBalance || 0]);
+      summarySheet.addRow([]);
+      summarySheet.addRow(['Period Transactions']);
+      summarySheet.addRow(['Period Debit', data.summary.periodDebit || 0]);
+      summarySheet.addRow(['Period Credit', data.summary.periodCredit || 0]);
+      summarySheet.addRow(['Period Balance', data.summary.periodBalance || 0]);
+      summarySheet.addRow([]);
+      summarySheet.addRow(['Closing Balances']);
+      summarySheet.addRow(['Closing Debit', data.summary.closingDebit || 0]);
+      summarySheet.addRow(['Closing Credit', data.summary.closingCredit || 0]);
+      summarySheet.addRow(['Closing Balance', data.summary.closingBalance || 0]);
+      summarySheet.addRow([]);
+      summarySheet.addRow(['Total Summary']);
+      summarySheet.addRow(['Total Debit', data.summary.closingDebit || data.summary.totalDebit || 0]);
+      summarySheet.addRow(['Total Credit', data.summary.closingCredit || data.summary.totalCredit || 0]);
+      summarySheet.addRow(['Total Balance', data.summary.closingBalance || data.summary.totalBalance || 0]);
 
-      [2, 3, 4].forEach((rowNum) => {
+      [3, 4, 5, 7, 8, 9, 11, 12, 13, 15, 16, 17].forEach((rowNum) => {
         const cell = summarySheet.getCell(`B${rowNum}`);
         cell.numFmt = `"${currency}" #,##0.00`;
       });
@@ -3544,9 +3735,15 @@ export class ReportGeneratorService {
       accountsSheet.addRow([
         'Account Name',
         'Account Type',
-        'Debit',
-        'Credit',
-        'Balance',
+        'Opening Debit',
+        'Opening Credit',
+        'Opening Balance',
+        'Period Debit',
+        'Period Credit',
+        'Period Balance',
+        'Closing Debit',
+        'Closing Credit',
+        'Closing Balance',
       ]);
       const headerRow = accountsSheet.getRow(1);
       headerRow.font = { 
@@ -3572,20 +3769,26 @@ export class ReportGeneratorService {
         accountsSheet.addRow([
           item.accountName,
           item.accountType,
+          item.openingDebit || 0,
+          item.openingCredit || 0,
+          item.openingBalance || 0,
           item.debit || 0,
           item.credit || 0,
           item.balance || 0,
+          item.closingDebit || 0,
+          item.closingCredit || 0,
+          item.closingBalance || 0,
         ]);
       });
 
-      ['C', 'D', 'E'].forEach((col) => {
+      ['C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K'].forEach((col) => {
         accountsSheet.getColumn(col).numFmt = `"${currency}" #,##0.00`;
         accountsSheet.getColumn(col).alignment = { horizontal: 'right' };
       });
 
       accountsSheet.getColumn('A').width = 25;
       accountsSheet.getColumn('B').width = 15;
-      ['C', 'D', 'E'].forEach((col) => {
+      ['C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K'].forEach((col) => {
         accountsSheet.getColumn(col).width = 18;
       });
     }
@@ -3605,12 +3808,30 @@ export class ReportGeneratorService {
 
     if (data.summary) {
       summarySheet.addRow(['Balance Sheet Summary']);
-      summarySheet.addRow(['Total Assets', data.summary.totalAssets || 0]);
-      summarySheet.addRow(['Total Liabilities', data.summary.totalLiabilities || 0]);
-      summarySheet.addRow(['Total Equity', data.summary.totalEquity || 0]);
-      summarySheet.addRow(['Balance', data.summary.balance || 0]);
+      summarySheet.addRow([]);
+      summarySheet.addRow(['Opening Balances']);
+      summarySheet.addRow(['Opening Assets', data.summary.openingAssets || 0]);
+      summarySheet.addRow(['Opening Liabilities', data.summary.openingLiabilities || 0]);
+      summarySheet.addRow(['Opening Equity', data.summary.openingEquity || 0]);
+      summarySheet.addRow(['Opening Balance', data.summary.openingBalance || 0]);
+      summarySheet.addRow([]);
+      summarySheet.addRow(['Period Transactions']);
+      summarySheet.addRow(['Period Assets', data.summary.periodAssets || data.summary.totalAssets || 0]);
+      summarySheet.addRow(['Period Liabilities', data.summary.periodLiabilities || data.summary.totalLiabilities || 0]);
+      summarySheet.addRow(['Period Equity', data.summary.periodEquity || data.summary.totalEquity || 0]);
+      summarySheet.addRow([]);
+      summarySheet.addRow(['Closing Balances']);
+      summarySheet.addRow(['Closing Assets', data.summary.closingAssets || 0]);
+      summarySheet.addRow(['Closing Liabilities', data.summary.closingLiabilities || 0]);
+      summarySheet.addRow(['Closing Equity', data.summary.closingEquity || 0]);
+      summarySheet.addRow(['Closing Balance', data.summary.closingBalance || 0]);
+      summarySheet.addRow([]);
+      summarySheet.addRow(['Total Summary']);
+      summarySheet.addRow(['Total Assets', data.summary.closingAssets || data.summary.totalAssets || 0]);
+      summarySheet.addRow(['Total Liabilities', data.summary.closingLiabilities || data.summary.totalLiabilities || 0]);
+      summarySheet.addRow(['Total Equity', data.summary.closingEquity || data.summary.totalEquity || 0]);
 
-      [2, 3, 4, 5].forEach((rowNum) => {
+      [3, 4, 5, 6, 8, 9, 10, 12, 13, 14, 15].forEach((rowNum) => {
         const cell = summarySheet.getCell(`B${rowNum}`);
         cell.numFmt = `"${currency}" #,##0.00`;
       });
@@ -3734,17 +3955,27 @@ export class ReportGeneratorService {
 
     if (data.summary) {
       summarySheet.addRow(['Profit and Loss Summary']);
+      summarySheet.addRow([]);
+      summarySheet.addRow(['Opening Retained Earnings', data.summary.openingRetainedEarnings || 0]);
+      summarySheet.addRow([]);
+      summarySheet.addRow(['Period Transactions']);
       summarySheet.addRow(['Gross Profit', data.summary.grossProfit || 0]);
       summarySheet.addRow(['Total Expenses', data.summary.totalExpenses || 0]);
       summarySheet.addRow(['Net Profit', data.summary.netProfit || 0]);
       if (data.summary.netProfitMargin) {
         summarySheet.addRow(['Profit Margin (%)', data.summary.netProfitMargin]);
       }
+      summarySheet.addRow([]);
+      summarySheet.addRow(['Closing Retained Earnings', data.summary.closingRetainedEarnings || 0]);
 
-      [2, 3, 4].forEach((rowNum) => {
+      [3, 6, 7, 8, 11].forEach((rowNum) => {
         const cell = summarySheet.getCell(`B${rowNum}`);
         cell.numFmt = `"${currency}" #,##0.00`;
       });
+      if (data.summary.netProfitMargin) {
+        const marginCell = summarySheet.getCell(`B9`);
+        marginCell.numFmt = '0.00"%"';
+      }
     }
 
     // Revenue sheet
@@ -3866,11 +4097,20 @@ export class ReportGeneratorService {
 
     if (data.summary) {
       summarySheet.addRow(['Payables Summary']);
-      summarySheet.addRow(['Total Outstanding', data.summary.totalOutstanding || 0]);
-      summarySheet.addRow(['Total Count', data.summary.totalCount || 0]);
+      summarySheet.addRow([]);
+      summarySheet.addRow(['Opening Balance', data.summary?.openingBalance || 0]);
+      summarySheet.addRow(['Period Amount', data.summary?.periodAmount || 0]);
+      summarySheet.addRow(['Closing Balance', data.summary?.closingBalance || 0]);
+      summarySheet.addRow([]);
+      summarySheet.addRow(['Total Outstanding', data.summary.totalAmount || 0]);
+      summarySheet.addRow(['Total Items', data.summary.totalItems || 0]);
+      summarySheet.addRow(['Overdue Items', data.summary.overdueItems || 0]);
+      summarySheet.addRow(['Overdue Amount', data.summary.overdueAmount || 0]);
 
-      const cell = summarySheet.getCell('B2');
-      cell.numFmt = `"${currency}" #,##0.00`;
+      [3, 4, 5, 7, 9].forEach((rowNum) => {
+        const cell = summarySheet.getCell(`B${rowNum}`);
+        cell.numFmt = `"${currency}" #,##0.00`;
+      });
     }
 
     // Items sheet
@@ -4173,11 +4413,20 @@ export class ReportGeneratorService {
 
     if (data.summary) {
       summarySheet.addRow(['Receivables Summary']);
+      summarySheet.addRow([]);
+      summarySheet.addRow(['Opening Balance', data.summary?.openingBalance || 0]);
+      summarySheet.addRow(['Period Outstanding', data.summary?.periodAmount || data.summary?.periodOutstanding || 0]);
+      summarySheet.addRow(['Closing Balance', data.summary?.closingBalance || 0]);
+      summarySheet.addRow([]);
       summarySheet.addRow(['Total Outstanding', data.summary.totalOutstanding || 0]);
-      summarySheet.addRow(['Total Count', data.summary.totalCount || 0]);
+      summarySheet.addRow(['Total Items', data.summary.totalItems || 0]);
+      summarySheet.addRow(['Overdue Items', data.summary.overdueInvoices || 0]);
+      summarySheet.addRow(['Overdue Amount', data.summary.overdueAmount || 0]);
 
-      const cell = summarySheet.getCell('B2');
-      cell.numFmt = `"${currency}" #,##0.00`;
+      [3, 4, 5, 7, 8, 9].forEach((rowNum) => {
+        const cell = summarySheet.getCell(`B${rowNum}`);
+        cell.numFmt = `"${currency}" #,##0.00`;
+      });
     }
 
     // Items sheet
@@ -4478,6 +4727,250 @@ export class ReportGeneratorService {
             lines.push(
               `${item.date || ''},${item.description || ''},${item.amount || 0},${item.status || ''},${item.linkedExpenseId || ''}`,
             );
+          });
+        }
+      } else if (reportData.type === 'trial_balance') {
+        lines.push('Trial Balance Report');
+        lines.push('');
+        if (data.startDate || data.endDate) {
+          lines.push(`Report Period,${data.startDate || 'N/A'} to ${data.endDate || 'N/A'}`);
+        }
+        lines.push('');
+        lines.push('Summary');
+        lines.push('-'.repeat(80));
+        if (data.summary) {
+          if (data.summary.openingDebit !== undefined) {
+            lines.push(`Opening Debit,${this.formatCurrency(data.summary.openingDebit || 0, currency)}`);
+            lines.push(`Opening Credit,${this.formatCurrency(data.summary.openingCredit || 0, currency)}`);
+            lines.push(`Opening Balance,${this.formatCurrency(data.summary.openingBalance || 0, currency)}`);
+            lines.push('');
+            lines.push(`Period Debit,${this.formatCurrency(data.summary.periodDebit || 0, currency)}`);
+            lines.push(`Period Credit,${this.formatCurrency(data.summary.periodCredit || 0, currency)}`);
+            lines.push(`Period Balance,${this.formatCurrency(data.summary.periodBalance || 0, currency)}`);
+            lines.push('');
+            lines.push(`Closing Debit,${this.formatCurrency(data.summary.closingDebit || 0, currency)}`);
+            lines.push(`Closing Credit,${this.formatCurrency(data.summary.closingCredit || 0, currency)}`);
+            lines.push(`Closing Balance,${this.formatCurrency(data.summary.closingBalance || 0, currency)}`);
+            lines.push('');
+          }
+          lines.push('');
+          lines.push('Total Summary');
+          lines.push('-'.repeat(80));
+          lines.push(`Total Debit,${this.formatCurrency(data.summary.closingDebit || data.summary.totalDebit || 0, currency)}`);
+          lines.push(`Total Credit,${this.formatCurrency(data.summary.closingCredit || data.summary.totalCredit || 0, currency)}`);
+          lines.push(`Total Balance,${this.formatCurrency(data.summary.closingBalance || data.summary.totalBalance || 0, currency)}`);
+        }
+        lines.push('');
+        lines.push('-'.repeat(80));
+        lines.push('');
+        if (data.accounts && Array.isArray(data.accounts) && data.accounts.length > 0) {
+          lines.push('Accounts');
+          lines.push('Account Name,Account Type,Opening Debit,Opening Credit,Opening Balance,Period Debit,Period Credit,Period Balance,Closing Debit,Closing Credit,Closing Balance');
+          data.accounts.forEach((item: any) => {
+            lines.push([
+              item.accountName || 'N/A',
+              item.accountType || 'N/A',
+              this.formatCurrency(item.openingDebit || 0, currency),
+              this.formatCurrency(item.openingCredit || 0, currency),
+              this.formatCurrency(item.openingBalance || 0, currency),
+              this.formatCurrency(item.debit || 0, currency),
+              this.formatCurrency(item.credit || 0, currency),
+              this.formatCurrency(item.balance || 0, currency),
+              this.formatCurrency(item.closingDebit || 0, currency),
+              this.formatCurrency(item.closingCredit || 0, currency),
+              this.formatCurrency(item.closingBalance || 0, currency),
+            ].join(','));
+          });
+        }
+      } else if (reportData.type === 'balance_sheet') {
+        lines.push('Balance Sheet Report');
+        lines.push('');
+        if (data.startDate || data.endDate) {
+          lines.push(`Report Period,${data.startDate || 'N/A'} to ${data.endDate || 'N/A'}`);
+        }
+        lines.push('');
+        lines.push('Summary');
+        lines.push('-'.repeat(80));
+        if (data.summary) {
+          if (data.summary.openingAssets !== undefined) {
+            lines.push(`Opening Assets,${this.formatCurrency(data.summary.openingAssets || 0, currency)}`);
+            lines.push(`Opening Liabilities,${this.formatCurrency(data.summary.openingLiabilities || 0, currency)}`);
+            lines.push(`Opening Equity,${this.formatCurrency(data.summary.openingEquity || 0, currency)}`);
+            lines.push('');
+            lines.push(`Period Assets,${this.formatCurrency(data.summary.periodAssets || 0, currency)}`);
+            lines.push(`Period Liabilities,${this.formatCurrency(data.summary.periodLiabilities || 0, currency)}`);
+            lines.push(`Period Equity,${this.formatCurrency(data.summary.periodEquity || 0, currency)}`);
+            lines.push('');
+            lines.push(`Closing Assets,${this.formatCurrency(data.summary.closingAssets || 0, currency)}`);
+            lines.push(`Closing Liabilities,${this.formatCurrency(data.summary.closingLiabilities || 0, currency)}`);
+            lines.push(`Closing Equity,${this.formatCurrency(data.summary.closingEquity || 0, currency)}`);
+            lines.push('');
+          }
+          lines.push('');
+          lines.push('Total Summary');
+          lines.push('-'.repeat(80));
+          lines.push(`Total Assets,${this.formatCurrency(data.summary.closingAssets || data.summary.totalAssets || 0, currency)}`);
+          lines.push(`Total Liabilities,${this.formatCurrency(data.summary.closingLiabilities || data.summary.totalLiabilities || 0, currency)}`);
+          lines.push(`Total Equity,${this.formatCurrency(data.summary.closingEquity || data.summary.totalEquity || 0, currency)}`);
+        }
+        lines.push('');
+        lines.push('-'.repeat(80));
+        lines.push('');
+        if (data.assets && data.assets.items && Array.isArray(data.assets.items) && data.assets.items.length > 0) {
+          lines.push('Assets');
+          lines.push('Category,Amount');
+          data.assets.items.forEach((item: any) => {
+            lines.push([
+              item.category || 'N/A',
+              this.formatCurrency(item.amount || 0, currency),
+            ].join(','));
+          });
+          lines.push(`Total Assets,${this.formatCurrency(data.assets.total || 0, currency)}`);
+          lines.push('');
+        }
+        if (data.liabilities && data.liabilities.items && Array.isArray(data.liabilities.items) && data.liabilities.items.length > 0) {
+          lines.push('Liabilities');
+          lines.push('Vendor,Amount');
+          data.liabilities.items.forEach((item: any) => {
+            lines.push([
+              item.vendor || 'N/A',
+              this.formatCurrency(item.amount || 0, currency),
+            ].join(','));
+          });
+          lines.push(`Total Liabilities,${this.formatCurrency(data.liabilities.total || 0, currency)}`);
+          lines.push('');
+        }
+        if (data.equity && data.equity.items && Array.isArray(data.equity.items) && data.equity.items.length > 0) {
+          lines.push('Equity');
+          lines.push('Category,Amount');
+          data.equity.items.forEach((item: any) => {
+            lines.push([
+              item.category || 'N/A',
+              this.formatCurrency(item.amount || 0, currency),
+            ].join(','));
+          });
+          lines.push(`Total Equity,${this.formatCurrency(data.equity.total || 0, currency)}`);
+        }
+      } else if (reportData.type === 'profit_and_loss') {
+        lines.push('Profit and Loss Statement');
+        lines.push('');
+        if (data.startDate || data.endDate) {
+          lines.push(`Report Period,${data.startDate || 'N/A'} to ${data.endDate || 'N/A'}`);
+        }
+        lines.push('');
+        lines.push('Summary');
+        lines.push('-'.repeat(80));
+        if (data.summary) {
+          if (data.summary.openingRetainedEarnings !== undefined) {
+            lines.push(`Opening Retained Earnings,${this.formatCurrency(data.summary.openingRetainedEarnings || 0, currency)}`);
+            lines.push(`Period Net Profit,${this.formatCurrency(data.summary.netProfit || 0, currency)}`);
+            lines.push(`Closing Retained Earnings,${this.formatCurrency(data.summary.closingRetainedEarnings || 0, currency)}`);
+            lines.push('');
+          }
+          lines.push(`Gross Profit,${this.formatCurrency(data.summary.grossProfit || 0, currency)}`);
+          lines.push(`Total Expenses,${this.formatCurrency(data.summary.totalExpenses || 0, currency)}`);
+          lines.push(`Net Profit,${this.formatCurrency(data.summary.netProfit || 0, currency)}`);
+          if (data.summary.netProfitMargin) {
+            lines.push(`Profit Margin,${data.summary.netProfitMargin}%`);
+          }
+        }
+        lines.push('');
+        lines.push('-'.repeat(80));
+        lines.push('');
+        if (data.revenue) {
+          lines.push('Revenue');
+          lines.push(`Amount,${this.formatCurrency(data.revenue.amount || 0, currency)}`);
+          lines.push(`VAT,${this.formatCurrency(data.revenue.vat || 0, currency)}`);
+          lines.push(`Total,${this.formatCurrency(data.revenue.total || 0, currency)}`);
+          lines.push('');
+        }
+        if (data.expenses && data.expenses.items && Array.isArray(data.expenses.items) && data.expenses.items.length > 0) {
+          lines.push('Expenses');
+          lines.push('Category,Amount,VAT,Total');
+          data.expenses.items.forEach((item: any) => {
+            lines.push([
+              item.category || 'N/A',
+              this.formatCurrency(item.amount || 0, currency),
+              this.formatCurrency(item.vat || 0, currency),
+              this.formatCurrency(item.total || 0, currency),
+            ].join(','));
+          });
+          lines.push(`Total Expenses,${this.formatCurrency(data.expenses.grandTotal || 0, currency)},,`);
+        }
+      } else if (reportData.type === 'payables') {
+        lines.push('Payables (Accruals) Report');
+        lines.push('');
+        if (data.startDate || data.endDate) {
+          lines.push(`Report Period,${data.startDate || 'N/A'} to ${data.endDate || 'N/A'}`);
+        }
+        lines.push('');
+        lines.push('Summary');
+        lines.push('-'.repeat(80));
+        if (data.summary) {
+          if (data.summary.openingBalance !== undefined) {
+            lines.push(`Opening Balance,${this.formatCurrency(data.summary.openingBalance || 0, currency)}`);
+            lines.push(`Period Amount,${this.formatCurrency(data.summary.periodAmount || 0, currency)}`);
+            lines.push(`Closing Balance,${this.formatCurrency(data.summary.closingBalance || 0, currency)}`);
+            lines.push('');
+          }
+          lines.push(`Total Items,${data.summary.totalItems || 0}`);
+          lines.push(`Total Amount,${this.formatCurrency(data.summary.totalAmount || 0, currency)}`);
+          lines.push(`Overdue Items,${data.summary.overdueItems || 0}`);
+          lines.push(`Overdue Amount,${this.formatCurrency(data.summary.overdueAmount || 0, currency)}`);
+        }
+        lines.push('');
+        lines.push('-'.repeat(80));
+        lines.push('');
+        if (data.items && Array.isArray(data.items) && data.items.length > 0) {
+          lines.push('Payables');
+          lines.push('Vendor,Amount,Expected Date,Status');
+          data.items.forEach((item: any) => {
+            const date = item.expectedDate ? new Date(item.expectedDate).toLocaleDateString('en-GB') : 'N/A';
+            lines.push([
+              item.vendor || 'N/A',
+              this.formatCurrency(item.amount || 0, currency),
+              date,
+              item.status || 'N/A',
+            ].join(','));
+          });
+        }
+      } else if (reportData.type === 'receivables') {
+        lines.push('Receivables Report');
+        lines.push('');
+        if (data.startDate || data.endDate) {
+          lines.push(`Report Period,${data.startDate || 'N/A'} to ${data.endDate || 'N/A'}`);
+        }
+        lines.push('');
+        lines.push('Summary');
+        lines.push('-'.repeat(80));
+        if (data.summary) {
+          if (data.summary.openingBalance !== undefined) {
+            lines.push(`Opening Balance,${this.formatCurrency(data.summary.openingBalance || 0, currency)}`);
+            lines.push(`Period Amount,${this.formatCurrency(data.summary.periodAmount || data.summary.periodOutstanding || 0, currency)}`);
+            lines.push(`Closing Balance,${this.formatCurrency(data.summary.closingBalance || 0, currency)}`);
+            lines.push('');
+          }
+          lines.push(`Total Invoices,${data.summary.totalInvoices || 0}`);
+          lines.push(`Total Outstanding,${this.formatCurrency(data.summary.totalOutstanding || 0, currency)}`);
+          lines.push(`Overdue Invoices,${data.summary.overdueInvoices || 0}`);
+          lines.push(`Overdue Amount,${this.formatCurrency(data.summary.overdueAmount || 0, currency)}`);
+        }
+        lines.push('');
+        lines.push('-'.repeat(80));
+        lines.push('');
+        if (data.items && Array.isArray(data.items) && data.items.length > 0) {
+          lines.push('Receivables');
+          lines.push('Invoice Number,Customer,Total,Outstanding,Due Date,Payment Status');
+          data.items.forEach((item: any) => {
+            const dueDate = item.dueDate ? new Date(item.dueDate).toLocaleDateString('en-GB') : 'N/A';
+            lines.push([
+              item.invoiceNumber || 'N/A',
+              item.customer || 'N/A',
+              this.formatCurrency(item.total || 0, currency),
+              this.formatCurrency(item.outstanding || 0, currency),
+              dueDate,
+              item.paymentStatus || 'N/A',
+            ].join(','));
           });
         }
       } else {
