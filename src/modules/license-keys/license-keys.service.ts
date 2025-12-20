@@ -77,6 +77,8 @@ export class LicenseKeysService {
                 .content { padding: 20px; background-color: #f9f9f9; }
                 .license-key { background-color: #fff; border: 2px solid #1976d2; padding: 15px; margin: 20px 0; text-align: center; font-family: monospace; font-size: 18px; font-weight: bold; color: #1976d2; }
                 .details { background-color: #fff; padding: 15px; margin: 10px 0; border-left: 4px solid #1976d2; }
+                .button { display: inline-block; padding: 12px 24px; background-color: #1976d2; color: white; text-decoration: none; border-radius: 4px; margin: 20px 0; font-weight: bold; }
+                .button:hover { background-color: #1565c0; }
                 .footer { text-align: center; padding: 20px; font-size: 12px; color: #666; }
               </style>
             </head>
@@ -103,6 +105,12 @@ export class LicenseKeysService {
                   ${dto.notes ? `<p><strong>Notes:</strong> ${dto.notes}</p>` : ''}
                   
                   <p>Please keep this license key secure and use it during the registration process.</p>
+                  
+                  <p style="text-align: center; margin: 30px 0;">
+                    <a href="https://selfaccounting.ai/auth/login" class="button">Login to SelfAccounting.AI</a>
+                  </p>
+                  
+                  <p>Once you have registered, you can use the login link above to access your account.</p>
                 </div>
                 <div class="footer">
                   <p>This is an automated notification from SelfAccounting.AI.</p>
@@ -116,7 +124,7 @@ export class LicenseKeysService {
           to: dto.email,
           subject: emailSubject,
           html: emailHtml,
-          text: `Your License Key: ${savedLicense.key}\n\nPlan Type: ${planTypeText}\nValidity: ${validityText}\nExpires At: ${expiresAt.toLocaleDateString()}`,
+          text: `Your License Key: ${savedLicense.key}\n\nPlan Type: ${planTypeText}\nValidity: ${validityText}\nExpires At: ${expiresAt.toLocaleDateString()}\n\n${dto.notes ? `Notes: ${dto.notes}\n\n` : ''}Please keep this license key secure and use it during the registration process.\n\nLogin to your account: https://selfaccounting.ai/auth/login\n\nOnce you have registered, you can use the login link above to access your account.`,
         });
       } catch (error) {
         // Log error but don't fail license creation
