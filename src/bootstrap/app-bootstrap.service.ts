@@ -24,7 +24,7 @@ export class AppBootstrapService implements OnModuleInit {
 
     const name =
       this.configService.get<string>('SUPER_ADMIN_NAME') ??
-      'SmartExpense Super Admin';
+      'SelfAccounting.AI Super Admin';
 
     const existing = await this.usersService.findByEmail(email);
     if (existing) {

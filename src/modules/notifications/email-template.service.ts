@@ -135,7 +135,7 @@ export class EmailTemplateService {
             <body>
               <div class="container">
                 <div class="header">
-                  <h1>SmartExpense UAE</h1>
+                  <h1>SelfAccounting.AI</h1>
                 </div>
                 <div class="content">
                   <h2>Invoice Due in 3 Days</h2>
@@ -148,7 +148,7 @@ export class EmailTemplateService {
                   <p>This invoice is due in 3 days. Please follow up for payment.</p>
                 </div>
                 <div class="footer">
-                  <p>This is an automated notification from SmartExpense UAE.</p>
+                  <p>This is an automated notification from SelfAccounting.AI.</p>
                 </div>
               </div>
             </body>
@@ -177,7 +177,7 @@ export class EmailTemplateService {
             <body>
               <div class="container">
                 <div class="header">
-                  <h1>SmartExpense UAE</h1>
+                  <h1>SelfAccounting.AI</h1>
                 </div>
                 <div class="content">
                   <h2 class="urgent">Invoice Overdue</h2>
@@ -190,7 +190,7 @@ export class EmailTemplateService {
                   <p class="urgent">This invoice is overdue. Please take immediate action.</p>
                 </div>
                 <div class="footer">
-                  <p>This is an automated notification from SmartExpense UAE.</p>
+                  <p>This is an automated notification from SelfAccounting.AI.</p>
                 </div>
               </div>
             </body>
@@ -218,7 +218,7 @@ export class EmailTemplateService {
             <body>
               <div class="container">
                 <div class="header">
-                  <h1>SmartExpense UAE</h1>
+                  <h1>SelfAccounting.AI</h1>
                 </div>
                 <div class="content">
                   <h2>Expense Approval Pending</h2>
@@ -229,7 +229,7 @@ export class EmailTemplateService {
                   <p>You have expense(s) pending approval. Please review and approve them.</p>
                 </div>
                 <div class="footer">
-                  <p>This is an automated notification from SmartExpense UAE.</p>
+                  <p>This is an automated notification from SelfAccounting.AI.</p>
                 </div>
               </div>
             </body>
@@ -257,7 +257,7 @@ export class EmailTemplateService {
             <body>
               <div class="container">
                 <div class="header">
-                  <h1>SmartExpense UAE</h1>
+                  <h1>SelfAccounting.AI</h1>
                 </div>
                 <div class="content">
                   <h2>Accrual Payment Reminder</h2>
@@ -269,7 +269,7 @@ export class EmailTemplateService {
                   <p>This accrual payment is due soon. Please ensure settlement.</p>
                 </div>
                 <div class="footer">
-                  <p>This is an automated notification from SmartExpense UAE.</p>
+                  <p>This is an automated notification from SelfAccounting.AI.</p>
                 </div>
               </div>
             </body>

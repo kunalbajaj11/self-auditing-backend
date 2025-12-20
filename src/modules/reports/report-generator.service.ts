@@ -467,7 +467,7 @@ export class ReportGeneratorService {
 
     // Company name (to the right of the logo) - Enhanced styling
     doc.fontSize(20).font('Helvetica-Bold').fillColor('#0077c8'); // Brand color
-    const orgName = reportData.metadata?.organizationName || 'SmartExpense UAE';
+    const orgName = reportData.metadata?.organizationName || 'SelfAccounting.AI';
     const leftTextX = logoX + logoSize + 15;
     doc.text(orgName, leftTextX, 40, {
       width: pageWidth / 2 - (leftTextX - margin) - 20,
@@ -789,7 +789,7 @@ export class ReportGeneratorService {
 
   async generateXLSX(reportData: ReportData): Promise<Buffer> {
     const workbook = new ExcelJS.Workbook();
-    workbook.creator = 'SmartExpense UAE';
+    workbook.creator = 'SelfAccounting.AI';
     workbook.created = new Date();
 
     const currency = reportData.metadata?.currency || 'AED';
@@ -1353,7 +1353,7 @@ export class ReportGeneratorService {
 
     // Professional header section with clear separation
     lines.push('='.repeat(80));
-    lines.push(reportData.metadata?.organizationName || 'SmartExpense UAE');
+    lines.push(reportData.metadata?.organizationName || 'SelfAccounting.AI');
     lines.push('='.repeat(80));
     lines.push('');
     lines.push(`Report Type: ${this.getReportTitle(reportData.type)}`);
@@ -3243,7 +3243,7 @@ export class ReportGeneratorService {
   ): void {
     // Company header - Enhanced professional styling
     worksheet.addRow([
-      reportData.metadata?.organizationName || 'SmartExpense UAE',
+      reportData.metadata?.organizationName || 'SelfAccounting.AI',
     ]);
     worksheet.mergeCells(`A1:D1`);
     const headerCell = worksheet.getCell('A1');

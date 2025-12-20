@@ -64,7 +64,7 @@ export class LicenseKeysService {
           ? `Storage Quota: ${dto.storageQuotaMb} MB`
           : '';
 
-        const emailSubject = 'Your License Key - SmartExpense UAE';
+        const emailSubject = 'Your License Key - SelfAccounting.AI';
         const emailHtml = `
           <!DOCTYPE html>
           <html>
@@ -83,7 +83,7 @@ export class LicenseKeysService {
             <body>
               <div class="container">
                 <div class="header">
-                  <h1>SmartExpense UAE</h1>
+                  <h1>SelfAccounting.AI</h1>
                 </div>
                 <div class="content">
                   <h2>Your License Key</h2>
@@ -105,7 +105,7 @@ export class LicenseKeysService {
                   <p>Please keep this license key secure and use it during the registration process.</p>
                 </div>
                 <div class="footer">
-                  <p>This is an automated notification from SmartExpense UAE.</p>
+                  <p>This is an automated notification from SelfAccounting.AI.</p>
                 </div>
               </div>
             </body>

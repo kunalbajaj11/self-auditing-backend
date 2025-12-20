@@ -33,7 +33,7 @@ export class EmailService {
     const apiKey = this.configService.get<string>('RESEND_API_KEY');
     this.fromEmail = this.configService.get<string>(
       'EMAIL_FROM',
-      'smartexpense.uae@gmail.com',
+      'noreply@selfaccounting.ai',
     );
 
     if (apiKey) {
@@ -138,7 +138,7 @@ export class EmailService {
     }
 
     // Fallback to default email format
-    const subject = `SmartExpense: ${title}`;
+    const subject = `SelfAccounting.AI: ${title}`;
     const html = this.buildNotificationHtml(title, message);
 
     return this.sendEmail({
@@ -158,7 +158,7 @@ export class EmailService {
     const extension = reportType;
     const filename = `${reportName}.${extension}`;
 
-    const subject = `SmartExpense Report: ${reportName}`;
+    const subject = `SelfAccounting.AI Report: ${reportName}`;
     const html = this.buildReportEmailHtml(reportName);
 
     return this.sendEmail({
@@ -191,14 +191,14 @@ export class EmailService {
         <body>
           <div class="container">
             <div class="header">
-              <h1>SmartExpense UAE</h1>
+              <h1>SelfAccounting.AI</h1>
             </div>
             <div class="content">
               <h2>${title}</h2>
               <p>${message.replace(/\n/g, '<br>')}</p>
             </div>
             <div class="footer">
-              <p>This is an automated notification from SmartExpense UAE.</p>
+              <p>This is an automated notification from SelfAccounting.AI.</p>
             </div>
           </div>
         </body>
@@ -223,14 +223,14 @@ export class EmailService {
         <body>
           <div class="container">
             <div class="header">
-              <h1>SmartExpense UAE</h1>
+              <h1>SelfAccounting.AI</h1>
             </div>
             <div class="content">
               <h2>Report Ready: ${reportName}</h2>
               <p>Your requested report has been generated and is attached to this email.</p>
             </div>
             <div class="footer">
-              <p>This is an automated notification from SmartExpense UAE.</p>
+              <p>This is an automated notification from SelfAccounting.AI.</p>
             </div>
           </div>
         </body>
@@ -298,7 +298,7 @@ export class EmailService {
         );
         return this.sendEmail({
           to,
-          subject: 'Welcome to SmartExpense UAE',
+          subject: 'Welcome to SelfAccounting.AI',
           html: this.buildWelcomeEmailHtml(userName, organizationName),
           text: this.buildWelcomeEmailText(userName, organizationName),
         });
@@ -309,7 +309,7 @@ export class EmailService {
 
       return this.sendEmail({
         to,
-        subject: 'Welcome to SmartExpense UAE',
+        subject: 'Welcome to SelfAccounting.AI',
         html: this.buildWelcomeEmailHtml(userName, organizationName),
         text: this.buildWelcomeEmailText(userName, organizationName),
         attachments: [
@@ -324,7 +324,7 @@ export class EmailService {
       // Try to send without attachment if there's an error reading the PDF
       return this.sendEmail({
         to,
-        subject: 'Welcome to SmartExpense UAE',
+        subject: 'Welcome to SelfAccounting.AI',
         html: this.buildWelcomeEmailHtml(userName, organizationName),
         text: this.buildWelcomeEmailText(userName, organizationName),
       });
@@ -351,16 +351,16 @@ export class EmailService {
         <body>
           <div class="container">
             <div class="header">
-              <h1>Welcome to SmartExpense UAE</h1>
+              <h1>Welcome to SelfAccounting.AI</h1>
             </div>
             <div class="content">
               <h2>Hello ${userName}!</h2>
               ${
                 organizationName
-                  ? `<p>Welcome to <strong>${organizationName}</strong> on SmartExpense UAE!</p>`
-                  : '<p>Welcome to SmartExpense UAE!</p>'
+                  ? `<p>Welcome to <strong>${organizationName}</strong> on SelfAccounting.AI!</p>`
+                  : '<p>Welcome to SelfAccounting.AI!</p>'
               }
-              <p>We're excited to have you on board. SmartExpense UAE is a comprehensive expense management system designed to help you manage your expenses efficiently and stay compliant with UAE regulations.</p>
+              <p>We're excited to have you on board. SelfAccounting.AI is a comprehensive expense management system designed to help you manage your expenses efficiently and stay compliant with regulations.</p>
               <p>To help you get started, we've attached a comprehensive user manual that covers:</p>
               <ul>
                 <li>Getting started with the platform</li>
@@ -369,12 +369,12 @@ export class EmailService {
                 <li>Using advanced features</li>
                 <li>And much more!</li>
               </ul>
-              <p>Please take a moment to review the attached user manual. It will help you make the most of SmartExpense UAE.</p>
+              <p>Please take a moment to review the attached user manual. It will help you make the most of SelfAccounting.AI.</p>
               <p>If you have any questions or need assistance, please don't hesitate to reach out to our support team.</p>
-              <p>Best regards,<br>The SmartExpense UAE Team</p>
+              <p>Best regards,<br>The SelfAccounting.AI Team</p>
             </div>
             <div class="footer">
-              <p>This is an automated welcome email from SmartExpense UAE.</p>
+              <p>This is an automated welcome email from SelfAccounting.AI.</p>
             </div>
           </div>
         </body>
@@ -390,9 +390,9 @@ export class EmailService {
 
 ${
   organizationName
-    ? `Welcome to ${organizationName} on SmartExpense UAE!\n\n`
-    : 'Welcome to SmartExpense UAE!\n\n'
-}We're excited to have you on board. SmartExpense UAE is a comprehensive expense management system designed to help you manage your expenses efficiently and stay compliant with UAE regulations.
+    ? `Welcome to ${organizationName} on SelfAccounting.AI!\n\n`
+    : 'Welcome to SelfAccounting.AI!\n\n'
+}We're excited to have you on board. SelfAccounting.AI is a comprehensive expense management system designed to help you manage your expenses efficiently and stay compliant with regulations.
 
 To help you get started, we've attached a comprehensive user manual that covers:
 - Getting started with the platform
@@ -401,15 +401,15 @@ To help you get started, we've attached a comprehensive user manual that covers:
 - Using advanced features
 - And much more!
 
-Please take a moment to review the attached user manual. It will help you make the most of SmartExpense UAE.
+Please take a moment to review the attached user manual. It will help you make the most of SelfAccounting.AI.
 
 If you have any questions or need assistance, please don't hesitate to reach out to our support team.
 
 Best regards,
-The SmartExpense UAE Team
+The SelfAccounting.AI Team
 
 ---
-This is an automated welcome email from SmartExpense UAE.`;
+This is an automated welcome email from SelfAccounting.AI.`;
   }
 
   isConfigured(): boolean {

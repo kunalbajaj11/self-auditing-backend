@@ -189,7 +189,7 @@ export class ForexRateService {
   ): Promise<number> {
     const apiKey = process.env.FIXER_API_KEY;
     if (!apiKey) {
-      this.logger.warn('FIXER_API_KEY not set, cannot fetch exchange rates');
+      // Don't log here - let the caller handle logging to avoid duplicate messages
       throw new Error('Exchange rate API key not configured');
     }
 
@@ -252,6 +252,13 @@ export class ForexRateService {
    * Update exchange rates for all active currencies
    */
   async updateRates(organization: Organization): Promise<void> {
+    const apiKey = process.env.FIXER_API_KEY;
+    if (!apiKey) {
+      // Only log once instead of for each currency
+      this.logger.debug('FIXER_API_KEY not set, skipping exchange rate updates');
+      return;
+    }
+
     const currencies = ['USD', 'EUR', 'GBP', 'INR', 'SAR', 'AED'];
     const baseCurrency =
       organization.baseCurrency || organization.currency || 'AED';
@@ -276,9 +283,12 @@ export class ForexRateService {
           false,
         );
       } catch (error) {
-        this.logger.error(
-          `Failed to update rate for ${currency}: ${error.message}`,
-        );
+        // Only log actual API errors, not missing key errors (already handled above)
+        if (!error.message.includes('Exchange rate API key not configured')) {
+          this.logger.error(
+            `Failed to update rate for ${currency}: ${error.message}`,
+          );
+        }
       }
     }
   }

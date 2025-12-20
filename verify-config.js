@@ -48,7 +48,7 @@ if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASSWORD)
   if (process.env.SMTP_FROM) {
     checks.passed.push(`SMTP_FROM is set: ${process.env.SMTP_FROM}`);
   } else {
-    checks.warnings.push('SMTP_FROM not set (will use default: noreply@smartexpense-uae.com)');
+    checks.warnings.push('SMTP_FROM not set (will use default: noreply@selfaccounting.ai)');
   }
 } else {
   checks.failed.push('SMTP_HOST, SMTP_USER, or SMTP_PASSWORD is missing');

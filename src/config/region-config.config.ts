@@ -11,9 +11,9 @@ export const REGION_CONFIGS: Record<Region, RegionConfig> = {
     trnLabel: 'TRN',
     supportedCurrencies: ['AED', 'USD', 'EUR', 'GBP', 'SAR'],
     invoiceTitle: 'TAX INVOICE',
-    appBrandName: 'SmartExpense UAE',
+    appBrandName: 'SelfAccounting.AI',
     complianceBody: 'FTA',
-    emailBrandName: 'SmartExpense UAE',
+    emailBrandName: 'SelfAccounting.AI',
   },
   [Region.SAUDI]: {
     defaultCurrency: 'SAR',
@@ -24,9 +24,9 @@ export const REGION_CONFIGS: Record<Region, RegionConfig> = {
     trnLabel: 'VAT Registration Number',
     supportedCurrencies: ['SAR', 'USD', 'EUR', 'GBP', 'AED'],
     invoiceTitle: 'TAX INVOICE',
-    appBrandName: 'SmartExpense Saudi',
+    appBrandName: 'SelfAccounting.AI',
     complianceBody: 'ZATCA',
-    emailBrandName: 'SmartExpense Saudi',
+    emailBrandName: 'SelfAccounting.AI',
   },
   [Region.OMAN]: {
     defaultCurrency: 'OMR',
@@ -37,9 +37,9 @@ export const REGION_CONFIGS: Record<Region, RegionConfig> = {
     trnLabel: 'Tax Registration Number',
     supportedCurrencies: ['OMR', 'USD', 'EUR', 'GBP', 'AED'],
     invoiceTitle: 'TAX INVOICE',
-    appBrandName: 'SmartExpense Oman',
+    appBrandName: 'SelfAccounting.AI',
     complianceBody: 'Tax Authority',
-    emailBrandName: 'SmartExpense Oman',
+    emailBrandName: 'SelfAccounting.AI',
   },
   [Region.INDIA]: {
     defaultCurrency: 'INR',
@@ -50,9 +50,9 @@ export const REGION_CONFIGS: Record<Region, RegionConfig> = {
     trnLabel: 'GSTIN',
     supportedCurrencies: ['INR', 'USD', 'EUR', 'GBP'],
     invoiceTitle: 'TAX INVOICE',
-    appBrandName: 'SmartExpense India',
+    appBrandName: 'SelfAccounting.AI',
     complianceBody: 'GST',
-    emailBrandName: 'SmartExpense India',
+    emailBrandName: 'SelfAccounting.AI',
   },
 };
 

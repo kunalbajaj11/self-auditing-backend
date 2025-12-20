@@ -272,9 +272,9 @@ export class AuthService {
     // Send email
     await this.emailService.sendEmail({
       to: user.email,
-      subject: 'Reset Your Password - SmartExpense',
+      subject: 'Reset Your Password - SelfAccounting.AI',
       html: this.buildPasswordResetEmailHtml(user.name, resetUrl),
-      text: `Hello ${user.name},\n\nYou requested to reset your password. Please click the following link to reset your password:\n\n${resetUrl}\n\nThis link will expire in 1 hour.\n\nIf you did not request this, please ignore this email.\n\nBest regards,\nSmartExpense Team`,
+      text: `Hello ${user.name},\n\nYou requested to reset your password. Please click the following link to reset your password:\n\n${resetUrl}\n\nThis link will expire in 1 hour.\n\nIf you did not request this, please ignore this email.\n\nBest regards,\nSelfAccounting.AI Team`,
     });
 
     return { success: true };
@@ -330,7 +330,7 @@ export class AuthService {
         <body>
           <div class="container">
             <div class="header">
-              <h1>SmartExpense UAE</h1>
+              <h1>SelfAccounting.AI</h1>
             </div>
             <div class="content">
               <h2>Reset Your Password</h2>
@@ -345,7 +345,7 @@ export class AuthService {
               <p>If you did not request a password reset, please ignore this email. Your password will remain unchanged.</p>
             </div>
             <div class="footer">
-              <p>This is an automated email from SmartExpense UAE.</p>
+              <p>This is an automated email from SelfAccounting.AI.</p>
               <p>For security reasons, please do not share this link with anyone.</p>
             </div>
           </div>
