@@ -47,6 +47,7 @@ export class LicenseKeysService {
       expiresAt,
       notes: dto.notes ?? null,
       email: dto.email ?? null,
+      region: dto.region ?? null,
       createdById,
     });
     const savedLicense = await this.licenseKeysRepository.save(license);

@@ -2,6 +2,7 @@ import { Column, Entity, Index, ManyToOne } from 'typeorm';
 import { AbstractEntity } from './abstract.entity';
 import { PlanType } from '../common/enums/plan-type.enum';
 import { LicenseKeyStatus } from '../common/enums/license-key-status.enum';
+import { Region } from '../common/enums/region.enum';
 import { User } from './user.entity';
 
 @Entity({ name: 'license_keys' })
@@ -53,6 +54,13 @@ export class LicenseKey extends AbstractEntity {
 
   @Column({ nullable: true })
   email?: string | null;
+
+  @Column({
+    type: 'varchar',
+    length: 20,
+    nullable: true,
+  })
+  region?: Region | null;
 
   @ManyToOne(() => User, { nullable: true })
   createdBy?: User | null;

@@ -9,6 +9,7 @@ import {
   Min,
 } from 'class-validator';
 import { PlanType } from '../../../common/enums/plan-type.enum';
+import { Region } from '../../../common/enums/region.enum';
 
 export class CreateLicenseKeyDto {
   @IsOptional()
@@ -34,6 +35,10 @@ export class CreateLicenseKeyDto {
   @IsString()
   @MaxLength(255)
   notes?: string;
+
+  @IsOptional()
+  @IsEnum(Region)
+  region?: Region;
 
   @IsOptional()
   @IsInt()

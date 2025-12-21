@@ -110,7 +110,7 @@ export class SalesInvoicesController {
       id,
       user?.organizationId as string,
     );
-    
+
     const invoice = await this.salesInvoicesService.findById(
       user?.organizationId as string,
       id,

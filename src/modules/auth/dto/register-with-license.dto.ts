@@ -31,10 +31,6 @@ export class RegisterWithLicenseDto {
   currency?: string;
 
   @IsOptional()
-  @IsString()
-  fiscalYearStart?: string;
-
-  @IsOptional()
   @IsEnum(Region)
   region?: Region;
 

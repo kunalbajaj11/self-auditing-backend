@@ -66,6 +66,7 @@ export class AuthService {
       storageQuotaMb: license.storageQuotaMb,
       expiresAt: license.expiresAt,
       status: license.status,
+      region: license.region,
     };
   }
 
@@ -87,11 +88,10 @@ export class AuthService {
       vatNumber: dto.vatNumber,
       address: dto.address,
       currency: dto.currency,
-      fiscalYearStart: dto.fiscalYearStart,
       contactPerson: dto.contactPerson ?? undefined,
       contactEmail: dto.contactEmail ?? dto.adminEmail,
-      storageQuotaMb: license.storageQuotaMb ?? dto.storageQuotaMb ?? undefined,
-      region: dto.region,
+      storageQuotaMb: license.storageQuotaMb ?? null,
+      region: dto.region ?? license.region ?? undefined,
       planId: undefined,
     });
 

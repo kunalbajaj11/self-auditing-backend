@@ -25,10 +25,6 @@ export class CreateOrganizationDto {
   @IsString()
   currency?: string;
 
-  @IsOptional()
-  @IsString()
-  fiscalYearStart?: string;
-
   @IsEnum(PlanType)
   planType: PlanType;
 

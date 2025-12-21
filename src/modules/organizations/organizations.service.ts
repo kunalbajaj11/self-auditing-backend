@@ -31,12 +31,6 @@ export class OrganizationsService {
     private readonly regionConfigService: RegionConfigService,
   ) {}
 
-  private normalizeDateString(value?: string | null): string | null {
-    if (value === undefined || value === null) return null;
-    const trimmed = String(value).trim();
-    return trimmed.length > 0 ? trimmed : null;
-  }
-
   async create(dto: CreateOrganizationDto): Promise<Organization> {
     const existing = await this.organizationsRepository.findOne({
       where: { name: dto.name },
@@ -59,11 +53,10 @@ export class OrganizationsService {
       address: dto.address,
       currency: currency,
       baseCurrency: baseCurrency,
-      fiscalYearStart: this.normalizeDateString(dto.fiscalYearStart),
       planType: dto.planType,
       contactPerson: dto.contactPerson,
       contactEmail: dto.contactEmail,
-      storageQuotaMb: dto.storageQuotaMb ?? 500,
+      storageQuotaMb: dto.storageQuotaMb ?? null,
       status: OrganizationStatus.ACTIVE,
       region: region,
     });
@@ -119,11 +112,6 @@ export class OrganizationsService {
     }
     if (dto.currency !== undefined) {
       organization.currency = dto.currency;
-    }
-    if (dto.fiscalYearStart !== undefined) {
-      organization.fiscalYearStart = this.normalizeDateString(
-        dto.fiscalYearStart,
-      );
     }
     if (dto.planType !== undefined) {
       organization.planType = dto.planType;

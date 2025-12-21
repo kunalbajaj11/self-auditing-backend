@@ -45,9 +45,6 @@ export class Organization extends AbstractEntity {
   @Column({ name: 'base_currency', length: 10, default: 'AED' })
   baseCurrency: string; // Base currency for all conversions
 
-  @Column({ name: 'fiscal_year_start', type: 'date', nullable: true })
-  fiscalYearStart?: string | null;
-
   @Column({
     name: 'plan_type',
     type: 'enum',
@@ -104,8 +101,8 @@ export class Organization extends AbstractEntity {
   @Column({ name: 'bank_swift_code', length: 20, nullable: true })
   bankSwiftCode?: string | null;
 
-  @Column({ name: 'storage_quota_mb', type: 'int', default: 500 })
-  storageQuotaMb: number;
+  @Column({ name: 'storage_quota_mb', type: 'int', nullable: true })
+  storageQuotaMb?: number | null;
 
   @ManyToOne(() => Plan, (plan) => plan.organizations, {
     nullable: true,
