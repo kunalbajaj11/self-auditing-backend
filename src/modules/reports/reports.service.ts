@@ -1076,7 +1076,8 @@ export class ReportsService {
   /**
    * Balance Sheet Report
    * Shows Assets, Liabilities, and Equity
-   * Includes: Expenses, Accounts Receivable, Cash/Bank, VAT, Accruals, Journal Entries
+   * Includes: Accounts Receivable, Cash/Bank, VAT Receivable, Accounts Payable (Accruals), VAT Payable, and Equity (Revenue - Expenses + Journal Entries)
+   * Note: Expenses reduce equity (retained earnings), they are NOT assets
    */
   private async buildBalanceSheet(
     organizationId: string,
@@ -1091,42 +1092,10 @@ export class ReportsService {
     const assets: Array<{ category: string; amount: number }> = [];
     let totalAssets = 0;
 
-    // 1. Assets: Expenses by category (what we've spent)
-    // Exclude type='credit' expenses as they are sales/revenue, not expenses
-    const expensesQuery = this.expensesRepository
-      .createQueryBuilder('expense')
-      .leftJoin('expense.category', 'category')
-      .select([
-        "COALESCE(category.name, 'Uncategorized') AS category",
-        'SUM(COALESCE(expense.base_amount, expense.amount)) AS amount',
-      ])
-      .where('expense.organization_id = :organizationId', { organizationId })
-      .andWhere('expense.is_deleted = false')
-      .andWhere('expense.expense_date >= :startDate', { startDate })
-      .andWhere('expense.expense_date <= :asOfDate', { asOfDate })
-      .andWhere("(expense.type IS NULL OR expense.type != 'credit')")
-      .groupBy('category.name');
+    // Note: Expenses are NOT assets - they reduce equity (retained earnings)
+    // Expenses are calculated separately and deducted from equity in the equity section
 
-    if (filters?.['type']) {
-      const types = Array.isArray(filters.type)
-        ? filters.type
-        : [filters.type];
-      expensesQuery.andWhere('expense.type IN (:...types)', { types });
-    }
-
-    const expensesRows = await expensesQuery.getRawMany();
-    expensesRows.forEach((row) => {
-      const amount = Number(row.amount || 0);
-      if (amount > 0) {
-        assets.push({
-          category: row.category,
-          amount,
-        });
-        totalAssets += amount;
-      }
-    });
-
-    // 2. Assets: Accounts Receivable (unpaid invoices as of asOfDate)
+    // 1. Assets: Accounts Receivable (unpaid invoices as of asOfDate)
     // Credit Notes reduce receivables, Debit Notes increase receivables
     const receivablesQuery = this.salesInvoicesRepository
       .createQueryBuilder('invoice')
@@ -1183,7 +1152,7 @@ export class ReportsService {
       totalAssets += netReceivablesAmount;
     }
 
-    // 3. Assets: Cash/Bank balances (net of payments)
+    // 2. Assets: Cash/Bank balances (net of payments)
     // Cash = Invoice Payments - Expense Payments + Journal Entries (cash/bank received - paid)
     const invoicePaymentsQuery = this.invoicePaymentsRepository
       .createQueryBuilder('payment')
@@ -1234,7 +1203,7 @@ export class ReportsService {
       totalAssets += netCash;
     }
 
-    // 4. Assets: VAT Receivable (Input VAT from expenses)
+    // 3. Assets: VAT Receivable (Input VAT from expenses)
     // Exclude type='credit' expenses as they are sales/revenue, not expenses
     const vatReceivableQuery = this.expensesRepository
       .createQueryBuilder('expense')
@@ -1267,7 +1236,7 @@ export class ReportsService {
     }
 
     // Liabilities
-    const liabilities: Array<{ vendor: string; amount: number; status: string }> = [];
+    const liabilities: Array<{ vendor: string; amount: number; status: string; category?: string }> = [];
     let totalLiabilities = 0;
 
     // 1. Liabilities: Unpaid accruals (Accounts Payable)
@@ -1297,6 +1266,7 @@ export class ReportsService {
     }
 
     const accrualsRows = await accrualsQuery.getRawMany();
+    let totalAccountsPayable = 0;
     accrualsRows.forEach((row) => {
       const amount = Number(row.amount || 0);
       if (amount > 0) {
@@ -1304,10 +1274,17 @@ export class ReportsService {
           vendor: row.vendor || 'N/A',
           amount,
           status: row.status,
+          category: 'Accounts Payable',
         });
         totalLiabilities += amount;
+        totalAccountsPayable += amount;
       }
     });
+
+    // Add summary entry for Accounts Payable if there are any accruals
+    if (totalAccountsPayable > 0) {
+      // The individual vendor entries are already added above, but we ensure they're clearly labeled
+    }
 
     // 2. Liabilities: VAT Payable (Output VAT from sales invoices)
     // Include Credit Notes (reduce VAT Payable) and Debit Notes (increase VAT Payable)
@@ -1413,37 +1390,75 @@ export class ReportsService {
         statuses: [DebitNoteStatus.ISSUED, DebitNoteStatus.APPLIED],
       });
 
-    // Get Journal Entries (equity items)
+    // Get Journal Entries (equity items) - grouped by type for ledger details
     const journalEntriesQuery = this.journalEntriesRepository
       .createQueryBuilder('entry')
       .select([
-        "SUM(CASE WHEN entry.type IN ('share_capital', 'retained_earnings') THEN entry.amount ELSE 0 END) AS equity",
-        "SUM(CASE WHEN entry.type = 'shareholder_account' THEN entry.amount ELSE 0 END) AS shareholder",
+        "entry.type AS type",
+        "SUM(entry.amount) AS amount",
       ])
       .where('entry.organization_id = :organizationId', { organizationId })
       .andWhere('entry.entry_date >= :startDate', { startDate })
-      .andWhere('entry.entry_date <= :asOfDate', { asOfDate });
+      .andWhere('entry.entry_date <= :asOfDate', { asOfDate })
+      .andWhere("entry.type IN ('share_capital', 'retained_earnings', 'shareholder_account')")
+      .groupBy('entry.type');
 
-    const [revenueRow, creditNotesRow, debitNotesRow, journalRow] = await Promise.all([
+    const [revenueRow, creditNotesRow, debitNotesRow, journalRows] = await Promise.all([
       revenueQuery.getRawOne(),
       creditNotesQuery.getRawOne(),
       debitNotesQuery.getRawOne(),
-      journalEntriesQuery.getRawOne(),
+      journalEntriesQuery.getRawMany(),
     ]);
 
     const totalRevenue = Number(revenueRow?.revenue || 0);
     const creditNotesAmount = Number(creditNotesRow?.creditNotes || 0);
     const debitNotesAmount = Number(debitNotesRow?.debitNotes || 0);
-    const journalEquity = Number(journalRow?.equity || 0);
-    const journalShareholder = Number(journalRow?.shareholder || 0);
+    
+    // Process journal entries by type
+    const journalEquityMap = new Map<string, number>();
+    let journalEquity = 0;
+    let journalShareholder = 0;
+    
+    journalRows.forEach((row) => {
+      const amount = Number(row.amount || 0);
+      const type = row.type;
+      journalEquityMap.set(type, amount);
+      
+      if (type === 'share_capital' || type === 'retained_earnings') {
+        journalEquity += amount;
+      } else if (type === 'shareholder_account') {
+        journalShareholder += amount;
+      }
+    });
 
     // Net revenue = Revenue - Credit Notes + Debit Notes
     const netRevenue = totalRevenue - creditNotesAmount + debitNotesAmount;
     
-    // Calculate total expenses (sum of expense amounts, not totalAssets which includes other assets)
-    const totalExpenses = expensesRows.reduce((sum, row) => sum + Number(row.amount || 0), 0);
+    // Calculate total expenses (expenses reduce equity, they are NOT assets)
+    // Exclude type='credit' expenses as they are sales/revenue, not expenses
+    const expensesQuery = this.expensesRepository
+      .createQueryBuilder('expense')
+      .select([
+        'SUM(COALESCE(expense.base_amount, expense.amount)) AS amount',
+      ])
+      .where('expense.organization_id = :organizationId', { organizationId })
+      .andWhere('expense.is_deleted = false')
+      .andWhere('expense.expense_date >= :startDate', { startDate })
+      .andWhere('expense.expense_date <= :asOfDate', { asOfDate })
+      .andWhere("(expense.type IS NULL OR expense.type != 'credit')");
+
+    if (filters?.['type']) {
+      const types = Array.isArray(filters.type)
+        ? filters.type
+        : [filters.type];
+      expensesQuery.andWhere('expense.type IN (:...types)', { types });
+    }
+
+    const expensesRow = await expensesQuery.getRawOne();
+    const totalExpenses = Number(expensesRow?.amount || 0);
     
     // Equity = Net Revenue - Expenses + Journal Entries (equity increases, shareholder decreases)
+    // Expenses reduce retained earnings (equity), they are NOT assets
     const totalEquity = netRevenue - totalExpenses + journalEquity - journalShareholder;
 
     // Calculate opening balances (before startDate)
@@ -1542,14 +1557,37 @@ export class ReportsService {
       .where('invoice.organization_id = :organizationId', { organizationId })
       .andWhere('invoice.invoice_date < :startDate', { startDate });
 
+    // Opening Credit Notes
+    const openingCreditNotesQuery = this.creditNotesRepository
+      .createQueryBuilder('creditNote')
+      .select(['SUM(COALESCE(creditNote.base_amount, creditNote.amount)) AS credit'])
+      .where('creditNote.organization_id = :organizationId', { organizationId })
+      .andWhere('creditNote.credit_note_date < :startDate', { startDate })
+      .andWhere('creditNote.status IN (:...statuses)', {
+        statuses: [CreditNoteStatus.ISSUED, CreditNoteStatus.APPLIED],
+      });
+
+    // Opening Debit Notes
+    const openingDebitNotesQuery = this.debitNotesRepository
+      .createQueryBuilder('debitNote')
+      .select(['SUM(COALESCE(debitNote.base_amount, debitNote.amount)) AS debit'])
+      .where('debitNote.organization_id = :organizationId', { organizationId })
+      .andWhere('debitNote.debit_note_date < :startDate', { startDate })
+      .andWhere('debitNote.status IN (:...statuses)', {
+        statuses: [DebitNoteStatus.ISSUED, DebitNoteStatus.APPLIED],
+      });
+
+    // Opening Journal Entries - grouped by type for ledger details
     const openingJournalQuery = this.journalEntriesRepository
       .createQueryBuilder('entry')
       .select([
-        "SUM(CASE WHEN entry.type IN ('share_capital', 'retained_earnings') THEN entry.amount ELSE 0 END) AS equity",
-        "SUM(CASE WHEN entry.type = 'shareholder_account' THEN entry.amount ELSE 0 END) AS shareholder",
+        "entry.type AS type",
+        "SUM(entry.amount) AS amount",
       ])
       .where('entry.organization_id = :organizationId', { organizationId })
-      .andWhere('entry.entry_date < :startDate', { startDate });
+      .andWhere('entry.entry_date < :startDate', { startDate })
+      .andWhere("entry.type IN ('share_capital', 'retained_earnings', 'shareholder_account')")
+      .groupBy('entry.type');
 
     const [
       openingExpensesRow,
@@ -1562,7 +1600,9 @@ export class ReportsService {
       openingAccrualsRow,
       openingVatPayableRow,
       openingRevenueRow,
-      openingJournalRow,
+      openingCreditNotesRow,
+      openingDebitNotesRow,
+      openingJournalRows,
       openingCashBankJournalEntriesRow,
     ] = await Promise.all([
       openingExpensesQuery.getRawOne(),
@@ -1575,7 +1615,9 @@ export class ReportsService {
       openingAccrualsQuery.getRawOne(),
       openingVatPayableQuery.getRawOne(),
       openingRevenueQuery.getRawOne(),
-      openingJournalQuery.getRawOne(),
+      openingCreditNotesQuery.getRawOne(),
+      openingDebitNotesQuery.getRawOne(),
+      openingJournalQuery.getRawMany(),
       openingCashBankJournalEntriesQuery.getRawOne(),
     ]);
 
@@ -1591,36 +1633,35 @@ export class ReportsService {
     const openingJournalPaid = Number(openingCashBankJournalEntriesRow?.paid || 0);
     const openingCash = openingCashReceipts - openingCashPayments + openingJournalReceived - openingJournalPaid;
     const openingVatReceivable = Number(openingVatReceivableRow?.amount || 0);
-    const openingAssets = openingExpenses + openingReceivables + openingCash + openingVatReceivable;
+    // Opening Assets: Only actual assets (receivables, cash, VAT receivable) - NOT expenses
+    // Expenses reduce equity, they are NOT assets
+    const openingAssets = openingReceivables + openingCash + openingVatReceivable;
 
     const openingAccruals = Number(openingAccrualsRow?.amount || 0);
     const openingVatPayable = Number(openingVatPayableRow?.amount || 0);
 
     // Opening Revenue: Include Credit Notes and Debit Notes
     const openingRevenue = Number(openingRevenueRow?.revenue || 0);
-    const openingCreditNotesQuery = this.creditNotesRepository
-      .createQueryBuilder('creditNote')
-      .select(['SUM(COALESCE(creditNote.base_amount, creditNote.amount)) AS amount'])
-      .where('creditNote.organization_id = :organizationId', { organizationId })
-      .andWhere('creditNote.credit_note_date < :startDate', { startDate })
-      .andWhere('creditNote.status IN (:...statuses)', {
-        statuses: [CreditNoteStatus.ISSUED, CreditNoteStatus.APPLIED],
-      });
-    const openingDebitNotesQuery = this.debitNotesRepository
-      .createQueryBuilder('debitNote')
-      .select(['SUM(COALESCE(debitNote.base_amount, debitNote.amount)) AS amount'])
-      .where('debitNote.organization_id = :organizationId', { organizationId })
-      .andWhere('debitNote.debit_note_date < :startDate', { startDate })
-      .andWhere('debitNote.status IN (:...statuses)', {
-        statuses: [DebitNoteStatus.ISSUED, DebitNoteStatus.APPLIED],
-      });
-    const [openingCreditNotesRow, openingDebitNotesRow] = await Promise.all([
-      openingCreditNotesQuery.getRawOne(),
-      openingDebitNotesQuery.getRawOne(),
-    ]);
-    const openingCreditNotes = Number(openingCreditNotesRow?.amount || 0);
-    const openingDebitNotes = Number(openingDebitNotesRow?.amount || 0);
+    const openingCreditNotes = Number(openingCreditNotesRow?.credit || 0);
+    const openingDebitNotes = Number(openingDebitNotesRow?.debit || 0);
     const openingNetRevenue = openingRevenue - openingCreditNotes + openingDebitNotes;
+    
+    // Process opening journal entries by type
+    const openingJournalEquityMap = new Map<string, number>();
+    let openingJournalEquity = 0;
+    let openingJournalShareholder = 0;
+    
+    openingJournalRows.forEach((row) => {
+      const amount = Number(row.amount || 0);
+      const type = row.type;
+      openingJournalEquityMap.set(type, amount);
+      
+      if (type === 'share_capital' || type === 'retained_earnings') {
+        openingJournalEquity += amount;
+      } else if (type === 'shareholder_account') {
+        openingJournalShareholder += amount;
+      }
+    });
 
     // Opening VAT Payable: Include Credit Notes and Debit Notes VAT
     const openingVatCreditNotesQuery = this.creditNotesRepository
@@ -1650,14 +1691,56 @@ export class ReportsService {
     const openingNetVatPayable = openingVatPayable - openingVatCreditNotes + openingVatDebitNotes;
     const openingLiabilities = openingAccruals + openingNetVatPayable;
 
-    const openingJournalEquity = Number(openingJournalRow?.equity || 0);
-    const openingJournalShareholder = Number(openingJournalRow?.shareholder || 0);
+    // Calculate opening equity using processed journal entries
     const openingEquity = openingNetRevenue - openingExpenses + openingJournalEquity - openingJournalShareholder;
 
     // Closing balances (opening + period)
     const closingAssets = openingAssets + totalAssets;
     const closingLiabilities = openingLiabilities + totalLiabilities;
     const closingEquity = openingEquity + totalEquity;
+
+    // Build equity ledger items with opening, period, and closing balances
+    const equityItems: Array<{
+      account: string;
+      opening: number;
+      period: number;
+      closing: number;
+    }> = [];
+
+    // 1. Share Capital
+    const openingShareCapital = Number(openingJournalEquityMap.get('share_capital') || 0);
+    const periodShareCapital = Number(journalEquityMap.get('share_capital') || 0);
+    const closingShareCapital = openingShareCapital + periodShareCapital;
+    equityItems.push({
+      account: 'Share Capital',
+      opening: Number(openingShareCapital.toFixed(2)),
+      period: Number(periodShareCapital.toFixed(2)),
+      closing: Number(closingShareCapital.toFixed(2)),
+    });
+
+    // 2. Retained Earnings (includes revenue - expenses + retained_earnings journal entries)
+    const openingRetainedEarningsJournal = Number(openingJournalEquityMap.get('retained_earnings') || 0);
+    const periodRetainedEarningsJournal = Number(journalEquityMap.get('retained_earnings') || 0);
+    const openingRetainedEarnings = openingNetRevenue - openingExpenses + openingRetainedEarningsJournal;
+    const periodRetainedEarnings = netRevenue - totalExpenses + periodRetainedEarningsJournal;
+    const closingRetainedEarnings = openingRetainedEarnings + periodRetainedEarnings;
+    equityItems.push({
+      account: 'Retained Earnings',
+      opening: Number(openingRetainedEarnings.toFixed(2)),
+      period: Number(periodRetainedEarnings.toFixed(2)),
+      closing: Number(closingRetainedEarnings.toFixed(2)),
+    });
+
+    // 3. Shareholder Account (reduces equity)
+    const openingShareholderAccount = Number(openingJournalEquityMap.get('shareholder_account') || 0);
+    const periodShareholderAccount = Number(journalEquityMap.get('shareholder_account') || 0);
+    const closingShareholderAccount = openingShareholderAccount + periodShareholderAccount;
+    equityItems.push({
+      account: 'Shareholder Account',
+      opening: Number(openingShareholderAccount.toFixed(2)),
+      period: Number(periodShareholderAccount.toFixed(2)),
+      closing: Number(closingShareholderAccount.toFixed(2)),
+    });
 
     return {
       asOfDate,
@@ -1680,6 +1763,7 @@ export class ReportsService {
         total: Number(totalLiabilities.toFixed(2)),
       },
       equity: {
+        items: equityItems,
         revenue: Number(totalRevenue.toFixed(2)),
         creditNotes: Number(creditNotesAmount.toFixed(2)),
         debitNotes: Number(debitNotesAmount.toFixed(2)),
