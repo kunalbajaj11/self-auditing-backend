@@ -98,18 +98,26 @@ export class ReportGeneratorService {
     const roundingMethod = currencySettings?.roundingMethod || 'standard';
     const decimalPlaces = currencySettings?.rounding ?? 2;
     let rounded: number;
-    
+
     if (roundingMethod === 'up') {
-      rounded = Math.ceil(numValue * Math.pow(10, decimalPlaces)) / Math.pow(10, decimalPlaces);
+      rounded =
+        Math.ceil(numValue * Math.pow(10, decimalPlaces)) /
+        Math.pow(10, decimalPlaces);
     } else if (roundingMethod === 'down') {
-      rounded = Math.floor(numValue * Math.pow(10, decimalPlaces)) / Math.pow(10, decimalPlaces);
+      rounded =
+        Math.floor(numValue * Math.pow(10, decimalPlaces)) /
+        Math.pow(10, decimalPlaces);
     } else {
       // standard rounding
-      rounded = Math.round(numValue * Math.pow(10, decimalPlaces)) / Math.pow(10, decimalPlaces);
+      rounded =
+        Math.round(numValue * Math.pow(10, decimalPlaces)) /
+        Math.pow(10, decimalPlaces);
     }
 
-    const formatted = rounded.toFixed(decimalPlaces).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-    
+    const formatted = rounded
+      .toFixed(decimalPlaces)
+      .replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+
     // If showOnInvoices is false, return only the number
     if (currencySettings?.showOnInvoices === false) {
       return formatted;
@@ -276,7 +284,9 @@ export class ReportGeneratorService {
       (reportData.metadata.logoUrl.startsWith('http://') ||
         reportData.metadata.logoUrl.startsWith('https://'))
     ) {
-      const logoBuffer = await this.fetchImageAsBuffer(reportData.metadata.logoUrl);
+      const logoBuffer = await this.fetchImageAsBuffer(
+        reportData.metadata.logoUrl,
+      );
       if (logoBuffer) {
         reportData = {
           ...reportData,
@@ -427,7 +437,7 @@ export class ReportGeneratorService {
     const localLogoPath = getApplicationLogoPath();
 
     let logoLoaded = false;
-    
+
     try {
       if (logoBuffer) {
         // Use pre-fetched logo buffer (for remote URLs)
@@ -437,7 +447,12 @@ export class ReportGeneratorService {
           fit: [logoSize, logoSize],
         });
         logoLoaded = true;
-      } else if (logoUrl && !logoUrl.startsWith('http://') && !logoUrl.startsWith('https://') && fs.existsSync(logoUrl)) {
+      } else if (
+        logoUrl &&
+        !logoUrl.startsWith('http://') &&
+        !logoUrl.startsWith('https://') &&
+        fs.existsSync(logoUrl)
+      ) {
         // For local file paths
         doc.image(logoUrl, logoX, logoY, {
           width: logoSize,
@@ -467,7 +482,8 @@ export class ReportGeneratorService {
 
     // Company name (to the right of the logo) - Enhanced styling
     doc.fontSize(20).font('Helvetica-Bold').fillColor('#0077c8'); // Brand color
-    const orgName = reportData.metadata?.organizationName || 'SelfAccounting.AI';
+    const orgName =
+      reportData.metadata?.organizationName || 'SelfAccounting.AI';
     const leftTextX = logoX + logoSize + 15;
     doc.text(orgName, leftTextX, 40, {
       width: pageWidth / 2 - (leftTextX - margin) - 20,
@@ -589,7 +605,7 @@ export class ReportGeneratorService {
       .strokeColor('#0077c8') // Brand color accent
       .lineWidth(2)
       .stroke();
-    
+
     // Additional subtle line for depth
     doc
       .moveTo(margin, 30 + headerHeight + 7)
@@ -618,7 +634,7 @@ export class ReportGeneratorService {
     const summaryStartY = doc.y;
     const summaryHeight = 190; // Slightly increased for better spacing
     const summaryWidth = pageWidth - 2 * margin;
-    
+
     // Outer border with brand color accent
     doc
       .rect(margin, summaryStartY, summaryWidth, summaryHeight)
@@ -627,7 +643,7 @@ export class ReportGeneratorService {
       .strokeColor('#0077c8')
       .lineWidth(1.5)
       .stroke();
-    
+
     // Inner border for depth
     doc
       .rect(margin + 2, summaryStartY + 2, summaryWidth - 4, summaryHeight - 4)
@@ -639,11 +655,14 @@ export class ReportGeneratorService {
     doc.fontSize(15).font('Helvetica-Bold').fillColor('#0077c8');
     const titleY = summaryStartY + 12;
     doc.text(`Summary (Period: ${period})`, margin + 12, titleY);
-    
+
     // Underline for title
     doc
       .moveTo(margin + 12, titleY + 16)
-      .lineTo(margin + 12 + doc.widthOfString(`Summary (Period: ${period})`), titleY + 16)
+      .lineTo(
+        margin + 12 + doc.widthOfString(`Summary (Period: ${period})`),
+        titleY + 16,
+      )
       .strokeColor('#0077c8')
       .lineWidth(1)
       .stroke();
@@ -909,29 +928,29 @@ export class ReportGeneratorService {
       expenseSheet.addRow([]);
     }
 
-      // Headers - Enhanced professional styling
-      const headers = Object.keys(data[0]);
-      const formattedHeaders = headers.map((h) => this.formatHeaderLabel(h));
-      expenseSheet.addRow(formattedHeaders);
-      const headerRow = expenseSheet.getRow(expenseSheet.rowCount);
-      headerRow.font = { 
-        bold: true, 
-        size: 11,
-        color: { argb: 'FFFFFFFF' } // White text
-      };
-      headerRow.fill = {
-        type: 'pattern',
-        pattern: 'solid',
-        fgColor: { argb: 'FF0077C8' }, // Brand color
-      };
-      headerRow.alignment = { horizontal: 'center', vertical: 'middle' };
-      headerRow.border = {
-        top: { style: 'medium', color: { argb: 'FF005A9A' } },
-        bottom: { style: 'medium', color: { argb: 'FF005A9A' } },
-        left: { style: 'thin', color: { argb: 'FF005A9A' } },
-        right: { style: 'thin', color: { argb: 'FF005A9A' } },
-      };
-      headerRow.height = 22;
+    // Headers - Enhanced professional styling
+    const headers = Object.keys(data[0]);
+    const formattedHeaders = headers.map((h) => this.formatHeaderLabel(h));
+    expenseSheet.addRow(formattedHeaders);
+    const headerRow = expenseSheet.getRow(expenseSheet.rowCount);
+    headerRow.font = {
+      bold: true,
+      size: 11,
+      color: { argb: 'FFFFFFFF' }, // White text
+    };
+    headerRow.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FF0077C8' }, // Brand color
+    };
+    headerRow.alignment = { horizontal: 'center', vertical: 'middle' };
+    headerRow.border = {
+      top: { style: 'medium', color: { argb: 'FF005A9A' } },
+      bottom: { style: 'medium', color: { argb: 'FF005A9A' } },
+      left: { style: 'thin', color: { argb: 'FF005A9A' } },
+      right: { style: 'thin', color: { argb: 'FF005A9A' } },
+    };
+    headerRow.height = 22;
 
     // Data rows
     data.forEach((row: any, index: number) => {
@@ -969,39 +988,51 @@ export class ReportGeneratorService {
         };
       }
 
-        // Format currency columns - Enhanced borders with consistent styling
-        headers.forEach((header, colIndex) => {
-          const cell = dataRow.getCell(colIndex + 1);
-          const currencyFields = [
-            'amount',
-            'vat',
-            'total',
-            'totalAmount',
-            'vatAmount',
-            'baseAmount',
-          ];
-          if (
-            currencyFields.some((field) => header.toLowerCase().includes(field))
-          ) {
-            cell.numFmt = `"${currency}" #,##0.00`;
-            cell.alignment = { horizontal: 'right', vertical: 'middle', wrapText: false };
-          } else if (header.toLowerCase().includes('date')) {
-            cell.numFmt = 'dd-mmm-yyyy';
-            cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: false };
-          } else {
-            cell.alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
-          }
-          // Enhanced borders with consistent styling
-          cell.border = {
-            top: { style: 'thin', color: { argb: 'FFD1D5DB' } },
-            bottom: { style: 'thin', color: { argb: 'FFD1D5DB' } },
-            left: { style: 'thin', color: { argb: 'FFD1D5DB' } },
-            right: { style: 'thin', color: { argb: 'FFD1D5DB' } },
+      // Format currency columns - Enhanced borders with consistent styling
+      headers.forEach((header, colIndex) => {
+        const cell = dataRow.getCell(colIndex + 1);
+        const currencyFields = [
+          'amount',
+          'vat',
+          'total',
+          'totalAmount',
+          'vatAmount',
+          'baseAmount',
+        ];
+        if (
+          currencyFields.some((field) => header.toLowerCase().includes(field))
+        ) {
+          cell.numFmt = `"${currency}" #,##0.00`;
+          cell.alignment = {
+            horizontal: 'right',
+            vertical: 'middle',
+            wrapText: false,
           };
-          // Add padding for better readability
-          cell.font = { size: 10, color: { argb: 'FF1F2937' } };
-        });
-        dataRow.height = 22; // Increased height for better readability
+        } else if (header.toLowerCase().includes('date')) {
+          cell.numFmt = 'dd-mmm-yyyy';
+          cell.alignment = {
+            horizontal: 'center',
+            vertical: 'middle',
+            wrapText: false,
+          };
+        } else {
+          cell.alignment = {
+            horizontal: 'left',
+            vertical: 'middle',
+            wrapText: true,
+          };
+        }
+        // Enhanced borders with consistent styling
+        cell.border = {
+          top: { style: 'thin', color: { argb: 'FFD1D5DB' } },
+          bottom: { style: 'thin', color: { argb: 'FFD1D5DB' } },
+          left: { style: 'thin', color: { argb: 'FFD1D5DB' } },
+          right: { style: 'thin', color: { argb: 'FFD1D5DB' } },
+        };
+        // Add padding for better readability
+        cell.font = { size: 10, color: { argb: 'FF1F2937' } };
+      });
+      dataRow.height = 22; // Increased height for better readability
     });
 
     // Freeze header row
@@ -1070,10 +1101,10 @@ export class ReportGeneratorService {
     const categorySheet = workbook.addWorksheet('Category Summary');
     categorySheet.addRow(['Category', 'Count', 'Amount', 'VAT', 'Total']);
     const categoryHeaderRow = categorySheet.getRow(1);
-    categoryHeaderRow.font = { 
-      bold: true, 
+    categoryHeaderRow.font = {
+      bold: true,
       size: 11,
-      color: { argb: 'FFFFFFFF' } // White text
+      color: { argb: 'FFFFFFFF' }, // White text
     };
     categoryHeaderRow.fill = {
       type: 'pattern',
@@ -1116,7 +1147,7 @@ export class ReportGeneratorService {
         value.vat,
         value.total,
       ]);
-      
+
       // Alternate row colors
       if (index % 2 === 0) {
         row.fill = {
@@ -1125,7 +1156,7 @@ export class ReportGeneratorService {
           fgColor: { argb: 'FFF8F9FA' },
         };
       }
-      
+
       // Add borders to all cells
       [1, 2, 3, 4, 5].forEach((colNum) => {
         const cell = row.getCell(colNum);
@@ -1137,19 +1168,25 @@ export class ReportGeneratorService {
         };
         cell.font = { size: 10, color: { argb: 'FF1F2937' } };
       });
-      
+
       row.height = 20;
     });
 
     // Format currency columns with proper alignment
     ['C', 'D', 'E'].forEach((col) => {
       categorySheet.getColumn(col).numFmt = `"${currency}" #,##0.00`;
-      categorySheet.getColumn(col).alignment = { horizontal: 'right', vertical: 'middle' };
+      categorySheet.getColumn(col).alignment = {
+        horizontal: 'right',
+        vertical: 'middle',
+      };
     });
-    
+
     // Format count column
-    categorySheet.getColumn('B').alignment = { horizontal: 'center', vertical: 'middle' };
-    
+    categorySheet.getColumn('B').alignment = {
+      horizontal: 'center',
+      vertical: 'middle',
+    };
+
     // Auto-fit columns
     categorySheet.columns.forEach((column) => {
       if (column.header) {
@@ -1160,25 +1197,25 @@ export class ReportGeneratorService {
     // Vendor Summary Sheet
     const vendorSheet = workbook.addWorksheet('Vendor Summary');
     vendorSheet.addRow(['Vendor', 'Count', 'Amount', 'VAT', 'Total']);
-      const vendorHeaderRow = vendorSheet.getRow(1);
-      vendorHeaderRow.font = { 
-        bold: true, 
-        size: 11,
-        color: { argb: 'FFFFFFFF' } 
-      };
-      vendorHeaderRow.fill = {
-        type: 'pattern',
-        pattern: 'solid',
-        fgColor: { argb: 'FF0077C8' },
-      };
-      vendorHeaderRow.border = {
-        top: { style: 'medium', color: { argb: 'FF005A9A' } },
-        bottom: { style: 'medium', color: { argb: 'FF005A9A' } },
-        left: { style: 'thin', color: { argb: 'FF005A9A' } },
-        right: { style: 'thin', color: { argb: 'FF005A9A' } },
-      };
-      vendorHeaderRow.height = 22;
-      vendorHeaderRow.alignment = { horizontal: 'center', vertical: 'middle' };
+    const vendorHeaderRow = vendorSheet.getRow(1);
+    vendorHeaderRow.font = {
+      bold: true,
+      size: 11,
+      color: { argb: 'FFFFFFFF' },
+    };
+    vendorHeaderRow.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FF0077C8' },
+    };
+    vendorHeaderRow.border = {
+      top: { style: 'medium', color: { argb: 'FF005A9A' } },
+      bottom: { style: 'medium', color: { argb: 'FF005A9A' } },
+      left: { style: 'thin', color: { argb: 'FF005A9A' } },
+      right: { style: 'thin', color: { argb: 'FF005A9A' } },
+    };
+    vendorHeaderRow.height = 22;
+    vendorHeaderRow.alignment = { horizontal: 'center', vertical: 'middle' };
 
     const vendorMap = new Map<
       string,
@@ -1207,7 +1244,7 @@ export class ReportGeneratorService {
         value.vat,
         value.total,
       ]);
-      
+
       // Alternate row colors
       if (index % 2 === 0) {
         row.fill = {
@@ -1216,7 +1253,7 @@ export class ReportGeneratorService {
           fgColor: { argb: 'FFF8F9FA' },
         };
       }
-      
+
       // Add borders to all cells
       [1, 2, 3, 4, 5].forEach((colNum) => {
         const cell = row.getCell(colNum);
@@ -1228,19 +1265,25 @@ export class ReportGeneratorService {
         };
         cell.font = { size: 10, color: { argb: 'FF1F2937' } };
       });
-      
+
       row.height = 20;
     });
 
     // Format currency columns with proper alignment
     ['C', 'D', 'E'].forEach((col) => {
       vendorSheet.getColumn(col).numFmt = `"${currency}" #,##0.00`;
-      vendorSheet.getColumn(col).alignment = { horizontal: 'right', vertical: 'middle' };
+      vendorSheet.getColumn(col).alignment = {
+        horizontal: 'right',
+        vertical: 'middle',
+      };
     });
-    
+
     // Format count column
-    vendorSheet.getColumn('B').alignment = { horizontal: 'center', vertical: 'middle' };
-    
+    vendorSheet.getColumn('B').alignment = {
+      horizontal: 'center',
+      vertical: 'middle',
+    };
+
     // Auto-fit columns
     vendorSheet.columns.forEach((column) => {
       if (column.header) {
@@ -1251,25 +1294,25 @@ export class ReportGeneratorService {
     // Monthly Breakdown Sheet
     const monthlySheet = workbook.addWorksheet('Monthly Breakdown');
     monthlySheet.addRow(['Month', 'Total Spend', 'VAT']);
-      const monthlyHeaderRow = monthlySheet.getRow(1);
-      monthlyHeaderRow.font = { 
-        bold: true, 
-        size: 11,
-        color: { argb: 'FFFFFFFF' } 
-      };
-      monthlyHeaderRow.fill = {
-        type: 'pattern',
-        pattern: 'solid',
-        fgColor: { argb: 'FF0077C8' },
-      };
-      monthlyHeaderRow.border = {
-        top: { style: 'medium', color: { argb: 'FF005A9A' } },
-        bottom: { style: 'medium', color: { argb: 'FF005A9A' } },
-        left: { style: 'thin', color: { argb: 'FF005A9A' } },
-        right: { style: 'thin', color: { argb: 'FF005A9A' } },
-      };
-      monthlyHeaderRow.height = 22;
-      monthlyHeaderRow.alignment = { horizontal: 'center', vertical: 'middle' };
+    const monthlyHeaderRow = monthlySheet.getRow(1);
+    monthlyHeaderRow.font = {
+      bold: true,
+      size: 11,
+      color: { argb: 'FFFFFFFF' },
+    };
+    monthlyHeaderRow.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FF0077C8' },
+    };
+    monthlyHeaderRow.border = {
+      top: { style: 'medium', color: { argb: 'FF005A9A' } },
+      bottom: { style: 'medium', color: { argb: 'FF005A9A' } },
+      left: { style: 'thin', color: { argb: 'FF005A9A' } },
+      right: { style: 'thin', color: { argb: 'FF005A9A' } },
+    };
+    monthlyHeaderRow.height = 22;
+    monthlyHeaderRow.alignment = { horizontal: 'center', vertical: 'middle' };
 
     const monthlyMap = new Map<string, { spend: number; vat: number }>();
     data.forEach((row: any) => {
@@ -1297,7 +1340,7 @@ export class ReportGeneratorService {
 
     sortedMonths.forEach(([month, value], index) => {
       const row = monthlySheet.addRow([month, value.spend, value.vat]);
-      
+
       // Alternate row colors
       if (index % 2 === 0) {
         row.fill = {
@@ -1306,7 +1349,7 @@ export class ReportGeneratorService {
           fgColor: { argb: 'FFF8F9FA' },
         };
       }
-      
+
       // Add borders to all cells
       [1, 2, 3].forEach((colNum) => {
         const cell = row.getCell(colNum);
@@ -1318,19 +1361,25 @@ export class ReportGeneratorService {
         };
         cell.font = { size: 10, color: { argb: 'FF1F2937' } };
       });
-      
+
       row.height = 20;
     });
 
     // Format currency columns with proper alignment
     ['B', 'C'].forEach((col) => {
       monthlySheet.getColumn(col).numFmt = `"${currency}" #,##0.00`;
-      monthlySheet.getColumn(col).alignment = { horizontal: 'right', vertical: 'middle' };
+      monthlySheet.getColumn(col).alignment = {
+        horizontal: 'right',
+        vertical: 'middle',
+      };
     });
-    
+
     // Format month column
-    monthlySheet.getColumn('A').alignment = { horizontal: 'left', vertical: 'middle' };
-    
+    monthlySheet.getColumn('A').alignment = {
+      horizontal: 'left',
+      vertical: 'middle',
+    };
+
     // Auto-fit columns
     monthlySheet.columns.forEach((column) => {
       if (column.header) {
@@ -1384,11 +1433,11 @@ export class ReportGeneratorService {
       ? this.formatDate(reportData.metadata.generatedAt)
       : new Date().toLocaleDateString('en-GB');
     lines.push(`Generated: ${generatedDate}`);
-    
+
     if (reportData.metadata?.generatedByName) {
       lines.push(`Generated by: ${reportData.metadata.generatedByName}`);
     }
-    
+
     lines.push(`Currency: ${reportData.metadata?.currency || 'AED'}`);
     lines.push('');
     lines.push('-'.repeat(80));
@@ -1400,27 +1449,39 @@ export class ReportGeneratorService {
       lines.push('-'.repeat(80));
       const summary = reportData.metadata.summary;
       const currency = reportData.metadata?.currency || 'AED';
-      
+
       if (summary.totalExpenses !== undefined) {
         lines.push(`Total Number of Expenses,${summary.totalExpenses}`);
       }
       if (summary.totalAmountBeforeVat !== undefined) {
-        lines.push(`Total Amount (Before VAT),${this.formatCurrency(summary.totalAmountBeforeVat, currency)}`);
+        lines.push(
+          `Total Amount (Before VAT),${this.formatCurrency(summary.totalAmountBeforeVat, currency)}`,
+        );
       }
       if (summary.totalVatAmount !== undefined) {
-        lines.push(`Total VAT Amount,${this.formatCurrency(summary.totalVatAmount, currency)}`);
+        lines.push(
+          `Total VAT Amount,${this.formatCurrency(summary.totalVatAmount, currency)}`,
+        );
       }
       if (summary.totalAmountAfterVat !== undefined) {
-        lines.push(`Total Amount (After VAT),${this.formatCurrency(summary.totalAmountAfterVat, currency)}`);
+        lines.push(
+          `Total Amount (After VAT),${this.formatCurrency(summary.totalAmountAfterVat, currency)}`,
+        );
       }
       if (summary.averageExpenseAmount !== undefined) {
-        lines.push(`Average Expense Amount,${this.formatCurrency(summary.averageExpenseAmount, currency)}`);
+        lines.push(
+          `Average Expense Amount,${this.formatCurrency(summary.averageExpenseAmount, currency)}`,
+        );
       }
       if (summary.highestCategorySpend) {
-        lines.push(`Highest Category Spend,${summary.highestCategorySpend.category},${this.formatCurrency(summary.highestCategorySpend.amount, currency)}`);
+        lines.push(
+          `Highest Category Spend,${summary.highestCategorySpend.category},${this.formatCurrency(summary.highestCategorySpend.amount, currency)}`,
+        );
       }
       if (summary.topVendor) {
-        lines.push(`Top Vendor,${summary.topVendor.vendor},${this.formatCurrency(summary.topVendor.amount, currency)}`);
+        lines.push(
+          `Top Vendor,${summary.topVendor.vendor},${this.formatCurrency(summary.topVendor.amount, currency)}`,
+        );
       }
       lines.push('');
       lines.push('-'.repeat(80));
@@ -1464,13 +1525,13 @@ export class ReportGeneratorService {
       // Table header with enhanced professional styling
       const headerY = doc.y;
       const headerHeight = 32; // Increased height for better visual presence
-      
+
       // Header background with brand color accent and shadow effect
       doc
         .rect(margin, headerY, availableWidth, headerHeight)
         .fillColor('#0077c8') // Brand color
         .fill();
-      
+
       // Header border with enhanced styling
       doc
         .rect(margin, headerY, availableWidth, headerHeight)
@@ -1586,7 +1647,7 @@ export class ReportGeneratorService {
       if (this.shouldShowTotal(reportData.type) && data.length > 0) {
         const totalRow = this.calculateTotalRow(data, headers, currency);
         rowY += 6; // Add spacing before total row
-        
+
         // Draw separator line above total
         doc
           .moveTo(margin, rowY)
@@ -1594,10 +1655,10 @@ export class ReportGeneratorService {
           .strokeColor('#0077c8')
           .lineWidth(2)
           .stroke();
-        
+
         rowY += 4;
         const totalRowHeight = 30; // Increased height for emphasis
-        
+
         // Total row with professional styling and shadow effect
         doc
           .rect(margin, rowY, availableWidth, totalRowHeight)
@@ -1909,7 +1970,7 @@ export class ReportGeneratorService {
     // Handle Trial Balance
     else if (reportData.type === 'trial_balance') {
       const margin = 50;
-      
+
       // Summary section with spacing from header
       doc.moveDown(0.5);
       doc.fontSize(12).font('Helvetica-Bold').fillColor('#1a1a1a');
@@ -1918,35 +1979,75 @@ export class ReportGeneratorService {
       doc.fontSize(10).font('Helvetica');
       if (data.summary) {
         doc.text('Opening Balances:', margin);
-        doc.text(`  Opening Debit: ${this.formatCurrency(data.summary.openingDebit || 0, currency)}`, margin + 10);
-        doc.text(`  Opening Credit: ${this.formatCurrency(data.summary.openingCredit || 0, currency)}`, margin + 10);
+        doc.text(
+          `  Opening Debit: ${this.formatCurrency(data.summary.openingDebit || 0, currency)}`,
+          margin + 10,
+        );
+        doc.text(
+          `  Opening Credit: ${this.formatCurrency(data.summary.openingCredit || 0, currency)}`,
+          margin + 10,
+        );
         doc.font('Helvetica-Bold');
-        doc.text(`  Opening Balance: ${this.formatCurrency(data.summary.openingBalance || 0, currency)}`, margin + 10);
+        doc.text(
+          `  Opening Balance: ${this.formatCurrency(data.summary.openingBalance || 0, currency)}`,
+          margin + 10,
+        );
         doc.font('Helvetica');
         doc.moveDown(0.2);
         doc.text('Period Transactions:', margin);
-        doc.text(`  Period Debit: ${this.formatCurrency(data.summary.periodDebit || 0, currency)}`, margin + 10);
-        doc.text(`  Period Credit: ${this.formatCurrency(data.summary.periodCredit || 0, currency)}`, margin + 10);
-        doc.text(`  Period Balance: ${this.formatCurrency(data.summary.periodBalance || 0, currency)}`, margin + 10);
+        doc.text(
+          `  Period Debit: ${this.formatCurrency(data.summary.periodDebit || 0, currency)}`,
+          margin + 10,
+        );
+        doc.text(
+          `  Period Credit: ${this.formatCurrency(data.summary.periodCredit || 0, currency)}`,
+          margin + 10,
+        );
+        doc.text(
+          `  Period Balance: ${this.formatCurrency(data.summary.periodBalance || 0, currency)}`,
+          margin + 10,
+        );
         doc.moveDown(0.2);
         doc.text('Closing Balances:', margin);
-        doc.text(`  Closing Debit: ${this.formatCurrency(data.summary.closingDebit || 0, currency)}`, margin + 10);
-        doc.text(`  Closing Credit: ${this.formatCurrency(data.summary.closingCredit || 0, currency)}`, margin + 10);
+        doc.text(
+          `  Closing Debit: ${this.formatCurrency(data.summary.closingDebit || 0, currency)}`,
+          margin + 10,
+        );
+        doc.text(
+          `  Closing Credit: ${this.formatCurrency(data.summary.closingCredit || 0, currency)}`,
+          margin + 10,
+        );
         doc.font('Helvetica-Bold');
-        doc.text(`  Closing Balance: ${this.formatCurrency(data.summary.closingBalance || 0, currency)}`, margin + 10);
+        doc.text(
+          `  Closing Balance: ${this.formatCurrency(data.summary.closingBalance || 0, currency)}`,
+          margin + 10,
+        );
         doc.font('Helvetica');
         doc.moveDown(0.2);
         doc.text('Total Summary:', margin);
         doc.font('Helvetica-Bold');
-        doc.text(`  Total Debit: ${this.formatCurrency(data.summary.closingDebit || data.summary.totalDebit || 0, currency)}`, margin + 10);
-        doc.text(`  Total Credit: ${this.formatCurrency(data.summary.closingCredit || data.summary.totalCredit || 0, currency)}`, margin + 10);
-        doc.text(`  Total Balance: ${this.formatCurrency(data.summary.closingBalance || data.summary.totalBalance || 0, currency)}`, margin + 10);
+        doc.text(
+          `  Total Debit: ${this.formatCurrency(data.summary.closingDebit || data.summary.totalDebit || 0, currency)}`,
+          margin + 10,
+        );
+        doc.text(
+          `  Total Credit: ${this.formatCurrency(data.summary.closingCredit || data.summary.totalCredit || 0, currency)}`,
+          margin + 10,
+        );
+        doc.text(
+          `  Total Balance: ${this.formatCurrency(data.summary.closingBalance || data.summary.totalBalance || 0, currency)}`,
+          margin + 10,
+        );
         doc.font('Helvetica');
       }
-      
+
       // Accounts table with spacing
       doc.moveDown(0.5);
-      if (data.accounts && Array.isArray(data.accounts) && data.accounts.length > 0) {
+      if (
+        data.accounts &&
+        Array.isArray(data.accounts) &&
+        data.accounts.length > 0
+      ) {
         doc.fontSize(12).font('Helvetica-Bold');
         doc.text('Accounts', margin, doc.y, { underline: true });
         doc.moveDown(0.3);
@@ -1967,11 +2068,26 @@ export class ReportGeneratorService {
         this.addPDFTable(
           doc,
           accountsWithBalances,
-          ['accountName', 'accountType', 'openingDebit', 'openingCredit', 'openingBalance', 'periodDebit', 'periodCredit', 'periodBalance', 'closingDebit', 'closingCredit', 'closingBalance'],
+          [
+            'accountName',
+            'accountType',
+            'openingDebit',
+            'openingCredit',
+            'openingBalance',
+            'periodDebit',
+            'periodCredit',
+            'periodBalance',
+            'closingDebit',
+            'closingCredit',
+            'closingBalance',
+          ],
           currency,
         );
       } else {
-        doc.fontSize(10).font('Helvetica').text('No accounts data available.', margin);
+        doc
+          .fontSize(10)
+          .font('Helvetica')
+          .text('No accounts data available.', margin);
       }
     }
     // Handle Profit and Loss
@@ -2021,7 +2137,7 @@ export class ReportGeneratorService {
     const margin = 50;
     const pageWidth = doc.page.width;
     const contentWidth = pageWidth - 2 * margin;
-    
+
     // Brand colors
     const primaryColor = '#0077C8';
     const accentColor = '#00A3E0';
@@ -2030,149 +2146,230 @@ export class ReportGeneratorService {
     const borderColor = '#e1e8ed';
     const textDark = '#1a1a1a';
     const textMuted = '#6b7280';
-    
+
     // Starting position
     doc.y = 175;
-    
+
     // ============ SUMMARY CARDS SECTION ============
     const cardWidth = (contentWidth - 30) / 4; // 4 cards with gaps
     const cardHeight = 60;
     const cardY = doc.y;
-    
+
     const summaryItems = [
-      { label: 'Opening Assets', value: data.summary?.openingAssets || 0, color: primaryColor },
-      { label: 'Opening Liabilities', value: data.summary?.openingLiabilities || 0, color: '#dc2626' },
-      { label: 'Opening Equity', value: data.summary?.openingEquity || 0, color: '#059669' },
-      { label: 'Opening Balance', value: data.summary?.openingBalance || 0, color: accentColor },
+      {
+        label: 'Opening Assets',
+        value: data.summary?.openingAssets || 0,
+        color: primaryColor,
+      },
+      {
+        label: 'Opening Liabilities',
+        value: data.summary?.openingLiabilities || 0,
+        color: '#dc2626',
+      },
+      {
+        label: 'Opening Equity',
+        value: data.summary?.openingEquity || 0,
+        color: '#059669',
+      },
+      {
+        label: 'Opening Balance',
+        value: data.summary?.openingBalance || 0,
+        color: accentColor,
+      },
     ];
-    
+
     const periodItems = [
-      { label: 'Period Assets', value: data.summary?.periodAssets || data.summary?.totalAssets || 0, color: primaryColor },
-      { label: 'Period Liabilities', value: data.summary?.periodLiabilities || data.summary?.totalLiabilities || 0, color: '#dc2626' },
-      { label: 'Period Equity', value: data.summary?.periodEquity || data.summary?.totalEquity || 0, color: '#059669' },
-      { label: 'Period Balance', value: data.summary?.balance || 0, color: accentColor },
+      {
+        label: 'Period Assets',
+        value: data.summary?.periodAssets || data.summary?.totalAssets || 0,
+        color: primaryColor,
+      },
+      {
+        label: 'Period Liabilities',
+        value:
+          data.summary?.periodLiabilities ||
+          data.summary?.totalLiabilities ||
+          0,
+        color: '#dc2626',
+      },
+      {
+        label: 'Period Equity',
+        value: data.summary?.periodEquity || data.summary?.totalEquity || 0,
+        color: '#059669',
+      },
+      {
+        label: 'Period Balance',
+        value: data.summary?.balance || 0,
+        color: accentColor,
+      },
     ];
-    
+
     const closingItems = [
-      { label: 'Closing Assets', value: data.summary?.closingAssets || 0, color: primaryColor },
-      { label: 'Closing Liabilities', value: data.summary?.closingLiabilities || 0, color: '#dc2626' },
-      { label: 'Closing Equity', value: data.summary?.closingEquity || 0, color: '#059669' },
-      { label: 'Closing Balance', value: data.summary?.closingBalance || 0, color: accentColor },
+      {
+        label: 'Closing Assets',
+        value: data.summary?.closingAssets || 0,
+        color: primaryColor,
+      },
+      {
+        label: 'Closing Liabilities',
+        value: data.summary?.closingLiabilities || 0,
+        color: '#dc2626',
+      },
+      {
+        label: 'Closing Equity',
+        value: data.summary?.closingEquity || 0,
+        color: '#059669',
+      },
+      {
+        label: 'Closing Balance',
+        value: data.summary?.closingBalance || 0,
+        color: accentColor,
+      },
     ];
-    
+
     // Opening Balances
-    doc.fontSize(10).font('Helvetica-Bold').fillColor(textDark).text('Opening Balances', margin, doc.y);
+    doc
+      .fontSize(10)
+      .font('Helvetica-Bold')
+      .fillColor(textDark)
+      .text('Opening Balances', margin, doc.y);
     doc.y += 15;
     summaryItems.forEach((item, index) => {
       const cardX = margin + index * (cardWidth + 10);
-      
+
       // Card background with rounded corners effect
-      doc.rect(cardX, doc.y, cardWidth, cardHeight)
+      doc
+        .rect(cardX, doc.y, cardWidth, cardHeight)
         .fillColor('#ffffff')
         .fill()
         .strokeColor(borderColor)
         .lineWidth(1)
         .stroke();
-      
+
       // Top accent line
-      doc.rect(cardX, doc.y, cardWidth, 3)
-        .fillColor(item.color)
-        .fill();
-      
+      doc.rect(cardX, doc.y, cardWidth, 3).fillColor(item.color).fill();
+
       // Label
-      doc.fontSize(8)
+      doc
+        .fontSize(8)
         .font('Helvetica')
         .fillColor(textMuted)
         .text(item.label.toUpperCase(), cardX + 8, doc.y + 12, {
           width: cardWidth - 16,
           align: 'left',
         });
-      
+
       // Value
-      doc.fontSize(14)
+      doc
+        .fontSize(14)
         .font('Helvetica-Bold')
         .fillColor(textDark)
-        .text(this.formatCurrency(item.value, currency), cardX + 8, doc.y + 28, {
-          width: cardWidth - 16,
-          align: 'left',
-        });
+        .text(
+          this.formatCurrency(item.value, currency),
+          cardX + 8,
+          doc.y + 28,
+          {
+            width: cardWidth - 16,
+            align: 'left',
+          },
+        );
     });
-    
+
     doc.y += cardHeight + 20;
-    
+
     // Period Transactions
-    doc.fontSize(10).font('Helvetica-Bold').fillColor(textDark).text('Period Transactions', margin, doc.y);
+    doc
+      .fontSize(10)
+      .font('Helvetica-Bold')
+      .fillColor(textDark)
+      .text('Period Transactions', margin, doc.y);
     doc.y += 15;
     periodItems.forEach((item, index) => {
       const cardX = margin + index * (cardWidth + 10);
-      
-      doc.rect(cardX, doc.y, cardWidth, cardHeight)
+
+      doc
+        .rect(cardX, doc.y, cardWidth, cardHeight)
         .fillColor('#ffffff')
         .fill()
         .strokeColor(borderColor)
         .lineWidth(1)
         .stroke();
-      
-      doc.rect(cardX, doc.y, cardWidth, 3)
-        .fillColor(item.color)
-        .fill();
-      
-      doc.fontSize(8)
+
+      doc.rect(cardX, doc.y, cardWidth, 3).fillColor(item.color).fill();
+
+      doc
+        .fontSize(8)
         .font('Helvetica')
         .fillColor(textMuted)
         .text(item.label.toUpperCase(), cardX + 8, doc.y + 12, {
           width: cardWidth - 16,
           align: 'left',
         });
-      
-      doc.fontSize(14)
+
+      doc
+        .fontSize(14)
         .font('Helvetica-Bold')
         .fillColor(textDark)
-        .text(this.formatCurrency(item.value, currency), cardX + 8, doc.y + 28, {
-          width: cardWidth - 16,
-          align: 'left',
-        });
+        .text(
+          this.formatCurrency(item.value, currency),
+          cardX + 8,
+          doc.y + 28,
+          {
+            width: cardWidth - 16,
+            align: 'left',
+          },
+        );
     });
-    
+
     doc.y += cardHeight + 20;
-    
+
     // Closing Balances
-    doc.fontSize(10).font('Helvetica-Bold').fillColor(textDark).text('Closing Balances', margin, doc.y);
+    doc
+      .fontSize(10)
+      .font('Helvetica-Bold')
+      .fillColor(textDark)
+      .text('Closing Balances', margin, doc.y);
     doc.y += 15;
     closingItems.forEach((item, index) => {
       const cardX = margin + index * (cardWidth + 10);
-      
-      doc.rect(cardX, doc.y, cardWidth, cardHeight)
+
+      doc
+        .rect(cardX, doc.y, cardWidth, cardHeight)
         .fillColor('#ffffff')
         .fill()
         .strokeColor(borderColor)
         .lineWidth(2)
         .strokeColor(primaryColor)
         .stroke();
-      
-      doc.rect(cardX, doc.y, cardWidth, 3)
-        .fillColor(item.color)
-        .fill();
-      
-      doc.fontSize(8)
+
+      doc.rect(cardX, doc.y, cardWidth, 3).fillColor(item.color).fill();
+
+      doc
+        .fontSize(8)
         .font('Helvetica')
         .fillColor(textMuted)
         .text(item.label.toUpperCase(), cardX + 8, doc.y + 12, {
           width: cardWidth - 16,
           align: 'left',
         });
-      
-      doc.fontSize(14)
+
+      doc
+        .fontSize(14)
         .font('Helvetica-Bold')
         .fillColor(textDark)
-        .text(this.formatCurrency(item.value, currency), cardX + 8, doc.y + 28, {
-          width: cardWidth - 16,
-          align: 'left',
-        });
+        .text(
+          this.formatCurrency(item.value, currency),
+          cardX + 8,
+          doc.y + 28,
+          {
+            width: cardWidth - 16,
+            align: 'left',
+          },
+        );
     });
-    
+
     doc.y += cardHeight + 25;
-    
+
     // ============ ASSETS SECTION ============
     this.addBalanceSheetSection(
       doc,
@@ -2187,15 +2384,15 @@ export class ReportGeneratorService {
       margin,
       contentWidth,
     );
-    
+
     doc.y += 20;
-    
+
     // Check if we need a new page
     if (doc.y > doc.page.height - 250) {
       doc.addPage();
       doc.y = 50;
     }
-    
+
     // ============ LIABILITIES SECTION ============
     this.addBalanceSheetSection(
       doc,
@@ -2210,17 +2407,24 @@ export class ReportGeneratorService {
       margin,
       contentWidth,
     );
-    
+
     doc.y += 20;
-    
+
     // Check if we need a new page
     if (doc.y > doc.page.height - 180) {
       doc.addPage();
       doc.y = 50;
     }
-    
+
     // ============ EQUITY SECTION ============
-    this.addBalanceSheetEquitySection(doc, data.equity, currency, '#059669', margin, contentWidth);
+    this.addBalanceSheetEquitySection(
+      doc,
+      data.equity,
+      currency,
+      '#059669',
+      margin,
+      contentWidth,
+    );
   }
 
   /**
@@ -2242,45 +2446,52 @@ export class ReportGeneratorService {
     const borderColor = '#e1e8ed';
     const textDark = '#1a1a1a';
     const altRowBg = '#f8fafc';
-    
+
     // Section header with accent bar
     const headerHeight = 35;
     const sectionHeaderY = doc.y;
-    doc.rect(margin, sectionHeaderY, contentWidth, headerHeight)
+    doc
+      .rect(margin, sectionHeaderY, contentWidth, headerHeight)
       .fillColor('#f8fafc')
       .fill();
-    doc.rect(margin, sectionHeaderY, 4, headerHeight)
+    doc
+      .rect(margin, sectionHeaderY, 4, headerHeight)
       .fillColor(accentColor)
       .fill();
-    
+
     doc.fontSize(14).font('Helvetica-Bold').fillColor(textDark);
     const titleWidth = doc.widthOfString(title);
     doc.text(title, margin + 15, sectionHeaderY + 10, { lineBreak: false });
-    
-    doc.fontSize(9)
+
+    doc
+      .fontSize(9)
       .font('Helvetica')
       .fillColor('#6b7280')
-      .text(subtitle, margin + 15 + titleWidth + 10, sectionHeaderY + 13, { lineBreak: false });
-    
+      .text(subtitle, margin + 15 + titleWidth + 10, sectionHeaderY + 13, {
+        lineBreak: false,
+      });
+
     doc.y = sectionHeaderY + headerHeight + 10;
-    
+
     if (items.length === 0) {
-      doc.fontSize(10)
+      doc
+        .fontSize(10)
         .font('Helvetica-Oblique')
         .fillColor('#9ca3af')
         .text('No data available', margin + 15, doc.y);
       doc.y += 25;
       return;
     }
-    
+
     // Table header
     const colWidths = this.calculateColumnWidths(columns, contentWidth - 10);
     const tableHeaderHeight = 28;
     const headerY = doc.y;
-    doc.rect(margin + 5, headerY, contentWidth - 10, tableHeaderHeight)
+    doc
+      .rect(margin + 5, headerY, contentWidth - 10, tableHeaderHeight)
       .fillColor(accentColor)
       .fill();
-    
+
     let x = margin + 15;
     doc.fontSize(9).font('Helvetica-Bold').fillColor('#ffffff');
     headers.forEach((header, i) => {
@@ -2292,9 +2503,9 @@ export class ReportGeneratorService {
       });
       x += colWidths[i];
     });
-    
+
     doc.y = headerY + tableHeaderHeight;
-    
+
     // Table rows
     const rowHeight = 28;
     items.forEach((item: any, index: number) => {
@@ -2303,28 +2514,30 @@ export class ReportGeneratorService {
         doc.addPage();
         doc.y = 50;
       }
-      
+
       const rowY = doc.y; // Save row Y position
-      
+
       // Alternating row background
       if (index % 2 === 0) {
-        doc.rect(margin + 5, rowY, contentWidth - 10, rowHeight)
+        doc
+          .rect(margin + 5, rowY, contentWidth - 10, rowHeight)
           .fillColor(altRowBg)
           .fill();
       }
-      
+
       // Row border
       doc.strokeColor(borderColor).lineWidth(0.5);
-      doc.moveTo(margin + 5, rowY + rowHeight)
+      doc
+        .moveTo(margin + 5, rowY + rowHeight)
         .lineTo(margin + contentWidth - 5, rowY + rowHeight)
         .stroke();
-      
+
       x = margin + 15;
       doc.fontSize(9).font('Helvetica').fillColor(textDark);
       columns.forEach((col, i) => {
         const isNumeric = col === 'amount';
         let value = item[col];
-        
+
         if (isNumeric) {
           value = this.formatCurrency(Number(value) || 0, currency);
         } else if (col === 'status') {
@@ -2332,7 +2545,7 @@ export class ReportGeneratorService {
         } else {
           value = String(value || 'N/A');
         }
-        
+
         doc.text(value, x, rowY + 9, {
           width: colWidths[i] - 20,
           align: isNumeric ? 'right' : 'left',
@@ -2341,21 +2554,23 @@ export class ReportGeneratorService {
         });
         x += colWidths[i];
       });
-      
+
       doc.y = rowY + rowHeight;
     });
-    
+
     // Total row
     const totalRowHeight = 30;
     const totalY = doc.y;
-    doc.rect(margin + 5, totalY, contentWidth - 10, totalRowHeight)
+    doc
+      .rect(margin + 5, totalY, contentWidth - 10, totalRowHeight)
       .fillColor('#f0f7fc')
       .fill();
     doc.strokeColor(accentColor).lineWidth(1);
-    doc.moveTo(margin + 5, totalY)
+    doc
+      .moveTo(margin + 5, totalY)
       .lineTo(margin + contentWidth - 5, totalY)
       .stroke();
-    
+
     doc.fontSize(10).font('Helvetica-Bold').fillColor(textDark);
     doc.text('Total', margin + 15, totalY + 10, { lineBreak: false });
     doc.text(this.formatCurrency(total, currency), margin + 15, totalY + 10, {
@@ -2363,7 +2578,7 @@ export class ReportGeneratorService {
       align: 'right',
       lineBreak: false,
     });
-    
+
     doc.y = totalY + totalRowHeight;
   }
 
@@ -2380,89 +2595,112 @@ export class ReportGeneratorService {
   ): void {
     const borderColor = '#e1e8ed';
     const textDark = '#1a1a1a';
-    
+
     // Section header
     const headerHeight = 35;
     const sectionHeaderY = doc.y;
-    doc.rect(margin, sectionHeaderY, contentWidth, headerHeight)
+    doc
+      .rect(margin, sectionHeaderY, contentWidth, headerHeight)
       .fillColor('#f8fafc')
       .fill();
-    doc.rect(margin, sectionHeaderY, 4, headerHeight)
+    doc
+      .rect(margin, sectionHeaderY, 4, headerHeight)
       .fillColor(accentColor)
       .fill();
-    
+
     doc.fontSize(14).font('Helvetica-Bold').fillColor(textDark);
     const titleWidth = doc.widthOfString('Equity');
     doc.text('Equity', margin + 15, sectionHeaderY + 10, { lineBreak: false });
-    
-    doc.fontSize(9)
+
+    doc
+      .fontSize(9)
       .font('Helvetica')
       .fillColor('#6b7280')
-      .text('Revenue minus Expenses', margin + 15 + titleWidth + 10, sectionHeaderY + 13, { lineBreak: false });
-    
+      .text(
+        'Revenue minus Expenses',
+        margin + 15 + titleWidth + 10,
+        sectionHeaderY + 13,
+        { lineBreak: false },
+      );
+
     doc.y = sectionHeaderY + headerHeight + 10;
-    
+
     if (!equity) {
-      doc.fontSize(10)
+      doc
+        .fontSize(10)
         .font('Helvetica-Oblique')
         .fillColor('#9ca3af')
         .text('No equity data available', margin + 15, doc.y);
       return;
     }
-    
+
     // Equity breakdown card
     const cardWidth = (contentWidth - 20) / 3;
     const cardHeight = 55;
     const equityY = doc.y;
-    
+
     const equityItems = [
       { label: 'Revenue', value: equity.revenue || 0, color: '#059669' },
       { label: 'Expenses', value: equity.expenses || 0, color: '#dc2626' },
-      { label: 'Net Equity', value: equity.net || 0, color: accentColor, bold: true },
+      {
+        label: 'Net Equity',
+        value: equity.net || 0,
+        color: accentColor,
+        bold: true,
+      },
     ];
-    
+
     equityItems.forEach((item, index) => {
       const cardX = margin + 5 + index * (cardWidth + 5);
-      
+
       // Card background
-      doc.rect(cardX, equityY, cardWidth, cardHeight)
+      doc
+        .rect(cardX, equityY, cardWidth, cardHeight)
         .fillColor('#ffffff')
         .fill()
         .strokeColor(borderColor)
         .lineWidth(1)
         .stroke();
-      
+
       // Left accent
-      doc.rect(cardX, equityY, 3, cardHeight)
-        .fillColor(item.color)
-        .fill();
-      
+      doc.rect(cardX, equityY, 3, cardHeight).fillColor(item.color).fill();
+
       // Label
-      doc.fontSize(9)
+      doc
+        .fontSize(9)
         .font('Helvetica')
         .fillColor('#6b7280')
         .text(item.label, cardX + 12, equityY + 12, {
           width: cardWidth - 24,
         });
-      
+
       // Value
       const fontStyle = item.bold ? 'Helvetica-Bold' : 'Helvetica';
       const fontSize = item.bold ? 16 : 14;
-      doc.fontSize(fontSize)
+      doc
+        .fontSize(fontSize)
         .font(fontStyle)
         .fillColor(item.value < 0 ? '#dc2626' : textDark)
-        .text(this.formatCurrency(item.value, currency), cardX + 12, equityY + 30, {
-          width: cardWidth - 24,
-        });
+        .text(
+          this.formatCurrency(item.value, currency),
+          cardX + 12,
+          equityY + 30,
+          {
+            width: cardWidth - 24,
+          },
+        );
     });
-    
+
     doc.y = equityY + cardHeight + 10;
   }
 
   /**
    * Calculate column widths based on content type
    */
-  private calculateColumnWidths(columns: string[], totalWidth: number): number[] {
+  private calculateColumnWidths(
+    columns: string[],
+    totalWidth: number,
+  ): number[] {
     // Define relative widths for different column types
     const weights: { [key: string]: number } = {
       category: 3,
@@ -2470,9 +2708,14 @@ export class ReportGeneratorService {
       amount: 2,
       status: 1.5,
     };
-    
-    const totalWeight = columns.reduce((sum, col) => sum + (weights[col] || 1), 0);
-    return columns.map(col => (weights[col] || 1) / totalWeight * totalWidth);
+
+    const totalWeight = columns.reduce(
+      (sum, col) => sum + (weights[col] || 1),
+      0,
+    );
+    return columns.map(
+      (col) => ((weights[col] || 1) / totalWeight) * totalWidth,
+    );
   }
 
   /**
@@ -2498,77 +2741,167 @@ export class ReportGeneratorService {
     const primaryColor = '#0077C8';
     const textDark = '#1a1a1a';
     const textMuted = '#6b7280';
-    
+
     doc.y = 175;
-    
+
     // Summary Cards
     const cardWidth = (contentWidth - 30) / 4;
     const cardHeight = 60;
     const cardY = doc.y;
-    
+
     // Opening Retained Earnings
-    doc.fontSize(10).font('Helvetica-Bold').fillColor(textDark).text('Opening Retained Earnings', margin, doc.y);
+    doc
+      .fontSize(10)
+      .font('Helvetica-Bold')
+      .fillColor(textDark)
+      .text('Opening Retained Earnings', margin, doc.y);
     doc.moveDown(0.2);
-    doc.fontSize(12).font('Helvetica-Bold').fillColor(primaryColor)
-      .text(this.formatCurrency(data.summary?.openingRetainedEarnings || 0, currency), margin);
+    doc
+      .fontSize(12)
+      .font('Helvetica-Bold')
+      .fillColor(primaryColor)
+      .text(
+        this.formatCurrency(
+          data.summary?.openingRetainedEarnings || 0,
+          currency,
+        ),
+        margin,
+      );
     doc.moveDown(0.5);
-    
+
     const summaryItems = [
-      { label: 'Gross Revenue', value: data.summary?.grossProfit || data.revenue?.amount || 0, color: '#059669' },
-      { label: 'Total Expenses', value: data.summary?.totalExpenses || data.expenses?.total || 0, color: '#dc2626' },
-      { label: 'Net Profit', value: data.summary?.netProfit || 0, color: primaryColor },
-      { label: 'Profit Margin', value: `${(data.summary?.netProfitMargin || 0).toFixed(1)}%`, isPercent: true, color: '#7c3aed' },
+      {
+        label: 'Gross Revenue',
+        value: data.summary?.grossProfit || data.revenue?.amount || 0,
+        color: '#059669',
+      },
+      {
+        label: 'Total Expenses',
+        value: data.summary?.totalExpenses || data.expenses?.total || 0,
+        color: '#dc2626',
+      },
+      {
+        label: 'Net Profit',
+        value: data.summary?.netProfit || 0,
+        color: primaryColor,
+      },
+      {
+        label: 'Profit Margin',
+        value: `${(data.summary?.netProfitMargin || 0).toFixed(1)}%`,
+        isPercent: true,
+        color: '#7c3aed',
+      },
     ];
-    
-    doc.fontSize(10).font('Helvetica-Bold').fillColor(textDark).text('Period Transactions', margin, doc.y);
+
+    doc
+      .fontSize(10)
+      .font('Helvetica-Bold')
+      .fillColor(textDark)
+      .text('Period Transactions', margin, doc.y);
     doc.moveDown(0.2);
     summaryItems.forEach((item, index) => {
       const cardX = margin + index * (cardWidth + 10);
-      
-      doc.rect(cardX, doc.y, cardWidth, cardHeight)
-        .fillColor('#ffffff').fill()
-        .strokeColor('#e1e8ed').lineWidth(1).stroke();
-      
+
+      doc
+        .rect(cardX, doc.y, cardWidth, cardHeight)
+        .fillColor('#ffffff')
+        .fill()
+        .strokeColor('#e1e8ed')
+        .lineWidth(1)
+        .stroke();
+
       doc.rect(cardX, doc.y, cardWidth, 3).fillColor(item.color).fill();
-      
-      doc.fontSize(8).font('Helvetica').fillColor(textMuted)
-        .text(item.label.toUpperCase(), cardX + 8, doc.y + 12, { width: cardWidth - 16 });
-      
-      const displayValue = item.isPercent ? item.value : this.formatCurrency(item.value as number, currency);
-      doc.fontSize(14).font('Helvetica-Bold').fillColor(textDark)
+
+      doc
+        .fontSize(8)
+        .font('Helvetica')
+        .fillColor(textMuted)
+        .text(item.label.toUpperCase(), cardX + 8, doc.y + 12, {
+          width: cardWidth - 16,
+        });
+
+      const displayValue = item.isPercent
+        ? item.value
+        : this.formatCurrency(item.value as number, currency);
+      doc
+        .fontSize(14)
+        .font('Helvetica-Bold')
+        .fillColor(textDark)
         .text(displayValue, cardX + 8, doc.y + 28, { width: cardWidth - 16 });
     });
-    
+
     doc.y += cardHeight + 20;
-    
+
     // Closing Retained Earnings
-    doc.fontSize(10).font('Helvetica-Bold').fillColor(textDark).text('Closing Retained Earnings', margin, doc.y);
+    doc
+      .fontSize(10)
+      .font('Helvetica-Bold')
+      .fillColor(textDark)
+      .text('Closing Retained Earnings', margin, doc.y);
     doc.moveDown(0.2);
-    doc.fontSize(12).font('Helvetica-Bold').fillColor(primaryColor)
-      .text(this.formatCurrency(data.summary?.closingRetainedEarnings || 0, currency), margin);
+    doc
+      .fontSize(12)
+      .font('Helvetica-Bold')
+      .fillColor(primaryColor)
+      .text(
+        this.formatCurrency(
+          data.summary?.closingRetainedEarnings || 0,
+          currency,
+        ),
+        margin,
+      );
     doc.moveDown(0.5);
-    
+
     // Revenue Section
-    doc.fontSize(14).font('Helvetica-Bold').fillColor(primaryColor).text('Revenue', margin);
+    doc
+      .fontSize(14)
+      .font('Helvetica-Bold')
+      .fillColor(primaryColor)
+      .text('Revenue', margin);
     doc.moveDown(0.3);
     doc.fontSize(10).font('Helvetica').fillColor(textDark);
-    doc.text(`Amount: ${this.formatCurrency(data.revenue?.amount || 0, currency)}`, margin);
-    doc.text(`VAT: ${this.formatCurrency(data.revenue?.vat || 0, currency)}`, margin);
-    doc.text(`Total: ${this.formatCurrency(data.revenue?.total || 0, currency)}`, margin);
+    doc.text(
+      `Amount: ${this.formatCurrency(data.revenue?.amount || 0, currency)}`,
+      margin,
+    );
+    doc.text(
+      `VAT: ${this.formatCurrency(data.revenue?.vat || 0, currency)}`,
+      margin,
+    );
+    doc.text(
+      `Total: ${this.formatCurrency(data.revenue?.total || 0, currency)}`,
+      margin,
+    );
     doc.text(`Invoice Count: ${data.revenue?.count || 0}`, margin);
     doc.moveDown(0.5);
-    
+
     // Expenses Section
-    doc.fontSize(14).font('Helvetica-Bold').fillColor('#dc2626').text('Expenses', margin);
+    doc
+      .fontSize(14)
+      .font('Helvetica-Bold')
+      .fillColor('#dc2626')
+      .text('Expenses', margin);
     doc.moveDown(0.3);
-    
-    if (data.expenses?.items && Array.isArray(data.expenses.items) && data.expenses.items.length > 0) {
-      this.addPDFTable(doc, data.expenses.items, ['category', 'amount', 'vat', 'total'], currency);
+
+    if (
+      data.expenses?.items &&
+      Array.isArray(data.expenses.items) &&
+      data.expenses.items.length > 0
+    ) {
+      this.addPDFTable(
+        doc,
+        data.expenses.items,
+        ['category', 'amount', 'vat', 'total'],
+        currency,
+      );
     }
-    
+
     doc.moveDown(0.3);
     doc.fontSize(10).font('Helvetica-Bold').fillColor(textDark);
-    doc.text(`Total Expenses: ${this.formatCurrency(data.expenses?.grandTotal || data.expenses?.total || 0, currency)}`, margin);
+    doc.text(
+      `Total Expenses: ${this.formatCurrency(data.expenses?.grandTotal || data.expenses?.total || 0, currency)}`,
+      margin,
+    );
   }
 
   /**
@@ -2584,58 +2917,122 @@ export class ReportGeneratorService {
     const primaryColor = '#0077C8';
     const textDark = '#1a1a1a';
     const textMuted = '#6b7280';
-    
+
     doc.y = 175;
-    
+
     // Summary Cards
     const cardWidth = (contentWidth - 20) / 3;
     const cardHeight = 60;
     const cardY = doc.y;
-    
+
     // Opening/Closing Balances
-    doc.fontSize(10).font('Helvetica-Bold').fillColor(textDark).text('Opening Balance', margin, doc.y);
+    doc
+      .fontSize(10)
+      .font('Helvetica-Bold')
+      .fillColor(textDark)
+      .text('Opening Balance', margin, doc.y);
     doc.moveDown(0.2);
-    doc.fontSize(12).font('Helvetica-Bold').fillColor(primaryColor)
-      .text(this.formatCurrency(data.summary?.openingBalance || 0, currency), margin);
+    doc
+      .fontSize(12)
+      .font('Helvetica-Bold')
+      .fillColor(primaryColor)
+      .text(
+        this.formatCurrency(data.summary?.openingBalance || 0, currency),
+        margin,
+      );
     doc.moveDown(0.3);
-    doc.fontSize(10).font('Helvetica-Bold').fillColor(textDark).text('Period Outstanding', margin, doc.y);
+    doc
+      .fontSize(10)
+      .font('Helvetica-Bold')
+      .fillColor(textDark)
+      .text('Period Outstanding', margin, doc.y);
     doc.moveDown(0.2);
-    doc.fontSize(12).font('Helvetica-Bold').fillColor(primaryColor)
-      .text(this.formatCurrency(data.summary?.periodAmount || data.summary?.periodOutstanding || 0, currency), margin);
+    doc
+      .fontSize(12)
+      .font('Helvetica-Bold')
+      .fillColor(primaryColor)
+      .text(
+        this.formatCurrency(
+          data.summary?.periodAmount || data.summary?.periodOutstanding || 0,
+          currency,
+        ),
+        margin,
+      );
     doc.moveDown(0.3);
-    doc.fontSize(10).font('Helvetica-Bold').fillColor(textDark).text('Closing Balance', margin, doc.y);
+    doc
+      .fontSize(10)
+      .font('Helvetica-Bold')
+      .fillColor(textDark)
+      .text('Closing Balance', margin, doc.y);
     doc.moveDown(0.2);
-    doc.fontSize(12).font('Helvetica-Bold').fillColor(primaryColor)
-      .text(this.formatCurrency(data.summary?.closingBalance || 0, currency), margin);
+    doc
+      .fontSize(12)
+      .font('Helvetica-Bold')
+      .fillColor(primaryColor)
+      .text(
+        this.formatCurrency(data.summary?.closingBalance || 0, currency),
+        margin,
+      );
     doc.moveDown(0.5);
-    
+
     const summaryItems = [
-      { label: 'Total Outstanding', value: data.summary?.totalOutstanding || 0, color: primaryColor },
-      { label: 'Overdue Amount', value: data.summary?.overdueAmount || 0, color: '#dc2626' },
-      { label: 'Total Invoices', value: data.summary?.totalInvoices || 0, isCount: true, color: '#059669' },
+      {
+        label: 'Total Outstanding',
+        value: data.summary?.totalOutstanding || 0,
+        color: primaryColor,
+      },
+      {
+        label: 'Overdue Amount',
+        value: data.summary?.overdueAmount || 0,
+        color: '#dc2626',
+      },
+      {
+        label: 'Total Invoices',
+        value: data.summary?.totalInvoices || 0,
+        isCount: true,
+        color: '#059669',
+      },
     ];
-    
+
     summaryItems.forEach((item, index) => {
       const cardX = margin + index * (cardWidth + 10);
-      
-      doc.rect(cardX, doc.y, cardWidth, cardHeight)
-        .fillColor('#ffffff').fill()
-        .strokeColor('#e1e8ed').lineWidth(1).stroke();
-      
+
+      doc
+        .rect(cardX, doc.y, cardWidth, cardHeight)
+        .fillColor('#ffffff')
+        .fill()
+        .strokeColor('#e1e8ed')
+        .lineWidth(1)
+        .stroke();
+
       doc.rect(cardX, doc.y, cardWidth, 3).fillColor(item.color).fill();
-      
-      doc.fontSize(8).font('Helvetica').fillColor(textMuted)
-        .text(item.label.toUpperCase(), cardX + 8, doc.y + 12, { width: cardWidth - 16 });
-      
-      const displayValue = item.isCount ? String(item.value) : this.formatCurrency(item.value as number, currency);
-      doc.fontSize(14).font('Helvetica-Bold').fillColor(textDark)
+
+      doc
+        .fontSize(8)
+        .font('Helvetica')
+        .fillColor(textMuted)
+        .text(item.label.toUpperCase(), cardX + 8, doc.y + 12, {
+          width: cardWidth - 16,
+        });
+
+      const displayValue = item.isCount
+        ? String(item.value)
+        : this.formatCurrency(item.value as number, currency);
+      doc
+        .fontSize(14)
+        .font('Helvetica-Bold')
+        .fillColor(textDark)
         .text(displayValue, cardX + 8, doc.y + 28, { width: cardWidth - 16 });
     });
-    
+
     doc.y += cardHeight + 25;
-    
+
     // Summary Stats
-    doc.fontSize(12).font('Helvetica-Bold').fillColor(primaryColor).text('Invoice Status Summary', margin);
+    doc
+      .fontSize(12)
+      .font('Helvetica-Bold')
+      .fillColor(primaryColor)
+      .text('Invoice Status Summary', margin);
     doc.moveDown(0.3);
     doc.fontSize(10).font('Helvetica').fillColor(textDark);
     doc.text(`Paid Invoices: ${data.summary?.paidInvoices || 0}`, margin);
@@ -2643,12 +3040,28 @@ export class ReportGeneratorService {
     doc.text(`Partial Invoices: ${data.summary?.partialInvoices || 0}`, margin);
     doc.text(`Overdue Invoices: ${data.summary?.overdueInvoices || 0}`, margin);
     doc.moveDown(0.5);
-    
+
     // Items Table
     if (data.items && Array.isArray(data.items) && data.items.length > 0) {
-      doc.fontSize(12).font('Helvetica-Bold').fillColor(primaryColor).text('Outstanding Invoices', margin);
+      doc
+        .fontSize(12)
+        .font('Helvetica-Bold')
+        .fillColor(primaryColor)
+        .text('Outstanding Invoices', margin);
       doc.moveDown(0.3);
-      this.addPDFTable(doc, data.items, ['invoiceNumber', 'customer', 'total', 'outstanding', 'dueDate', 'paymentStatus'], currency);
+      this.addPDFTable(
+        doc,
+        data.items,
+        [
+          'invoiceNumber',
+          'customer',
+          'total',
+          'outstanding',
+          'dueDate',
+          'paymentStatus',
+        ],
+        currency,
+      );
     }
   }
 
@@ -2665,70 +3078,140 @@ export class ReportGeneratorService {
     const primaryColor = '#0077C8';
     const textDark = '#1a1a1a';
     const textMuted = '#6b7280';
-    
+
     doc.y = 175;
-    
+
     // Summary Cards
     const cardWidth = (contentWidth - 20) / 3;
     const cardHeight = 60;
     const cardY = doc.y;
-    
+
     // Opening/Closing Balances
-    doc.fontSize(10).font('Helvetica-Bold').fillColor(textDark).text('Opening Balance', margin, doc.y);
+    doc
+      .fontSize(10)
+      .font('Helvetica-Bold')
+      .fillColor(textDark)
+      .text('Opening Balance', margin, doc.y);
     doc.moveDown(0.2);
-    doc.fontSize(12).font('Helvetica-Bold').fillColor(primaryColor)
-      .text(this.formatCurrency(data.summary?.openingBalance || 0, currency), margin);
+    doc
+      .fontSize(12)
+      .font('Helvetica-Bold')
+      .fillColor(primaryColor)
+      .text(
+        this.formatCurrency(data.summary?.openingBalance || 0, currency),
+        margin,
+      );
     doc.moveDown(0.3);
-    doc.fontSize(10).font('Helvetica-Bold').fillColor(textDark).text('Period Amount', margin, doc.y);
+    doc
+      .fontSize(10)
+      .font('Helvetica-Bold')
+      .fillColor(textDark)
+      .text('Period Amount', margin, doc.y);
     doc.moveDown(0.2);
-    doc.fontSize(12).font('Helvetica-Bold').fillColor(primaryColor)
-      .text(this.formatCurrency(data.summary?.periodAmount || 0, currency), margin);
+    doc
+      .fontSize(12)
+      .font('Helvetica-Bold')
+      .fillColor(primaryColor)
+      .text(
+        this.formatCurrency(data.summary?.periodAmount || 0, currency),
+        margin,
+      );
     doc.moveDown(0.3);
-    doc.fontSize(10).font('Helvetica-Bold').fillColor(textDark).text('Closing Balance', margin, doc.y);
+    doc
+      .fontSize(10)
+      .font('Helvetica-Bold')
+      .fillColor(textDark)
+      .text('Closing Balance', margin, doc.y);
     doc.moveDown(0.2);
-    doc.fontSize(12).font('Helvetica-Bold').fillColor(primaryColor)
-      .text(this.formatCurrency(data.summary?.closingBalance || 0, currency), margin);
+    doc
+      .fontSize(12)
+      .font('Helvetica-Bold')
+      .fillColor(primaryColor)
+      .text(
+        this.formatCurrency(data.summary?.closingBalance || 0, currency),
+        margin,
+      );
     doc.moveDown(0.5);
-    
+
     const summaryItems = [
-      { label: 'Total Payables', value: data.summary?.totalAmount || 0, color: primaryColor },
-      { label: 'Overdue Amount', value: data.summary?.overdueAmount || 0, color: '#dc2626' },
-      { label: 'Total Items', value: data.summary?.totalItems || data.items?.length || 0, isCount: true, color: '#059669' },
+      {
+        label: 'Total Payables',
+        value: data.summary?.totalAmount || 0,
+        color: primaryColor,
+      },
+      {
+        label: 'Overdue Amount',
+        value: data.summary?.overdueAmount || 0,
+        color: '#dc2626',
+      },
+      {
+        label: 'Total Items',
+        value: data.summary?.totalItems || data.items?.length || 0,
+        isCount: true,
+        color: '#059669',
+      },
     ];
-    
+
     summaryItems.forEach((item, index) => {
       const cardX = margin + index * (cardWidth + 10);
-      
-      doc.rect(cardX, doc.y, cardWidth, cardHeight)
-        .fillColor('#ffffff').fill()
-        .strokeColor('#e1e8ed').lineWidth(1).stroke();
-      
+
+      doc
+        .rect(cardX, doc.y, cardWidth, cardHeight)
+        .fillColor('#ffffff')
+        .fill()
+        .strokeColor('#e1e8ed')
+        .lineWidth(1)
+        .stroke();
+
       doc.rect(cardX, doc.y, cardWidth, 3).fillColor(item.color).fill();
-      
-      doc.fontSize(8).font('Helvetica').fillColor(textMuted)
-        .text(item.label.toUpperCase(), cardX + 8, doc.y + 12, { width: cardWidth - 16 });
-      
-      const displayValue = item.isCount ? String(item.value) : this.formatCurrency(item.value as number, currency);
-      doc.fontSize(14).font('Helvetica-Bold').fillColor(textDark)
+
+      doc
+        .fontSize(8)
+        .font('Helvetica')
+        .fillColor(textMuted)
+        .text(item.label.toUpperCase(), cardX + 8, doc.y + 12, {
+          width: cardWidth - 16,
+        });
+
+      const displayValue = item.isCount
+        ? String(item.value)
+        : this.formatCurrency(item.value as number, currency);
+      doc
+        .fontSize(14)
+        .font('Helvetica-Bold')
+        .fillColor(textDark)
         .text(displayValue, cardX + 8, doc.y + 28, { width: cardWidth - 16 });
     });
-    
+
     doc.y += cardHeight + 25;
-    
+
     // Summary Stats
-    doc.fontSize(12).font('Helvetica-Bold').fillColor(primaryColor).text('Payables Summary', margin);
+    doc
+      .fontSize(12)
+      .font('Helvetica-Bold')
+      .fillColor(primaryColor)
+      .text('Payables Summary', margin);
     doc.moveDown(0.3);
     doc.fontSize(10).font('Helvetica').fillColor(textDark);
     doc.text(`As of Date: ${data.asOfDate || 'N/A'}`, margin);
     doc.text(`Pending Items: ${data.summary?.pendingItems || 0}`, margin);
     doc.text(`Overdue Items: ${data.summary?.overdueItems || 0}`, margin);
     doc.moveDown(0.5);
-    
+
     // Items Table
     if (data.items && Array.isArray(data.items) && data.items.length > 0) {
-      doc.fontSize(12).font('Helvetica-Bold').fillColor(primaryColor).text('Pending Payables', margin);
+      doc
+        .fontSize(12)
+        .font('Helvetica-Bold')
+        .fillColor(primaryColor)
+        .text('Pending Payables', margin);
       doc.moveDown(0.3);
-      this.addPDFTable(doc, data.items, ['vendor', 'amount', 'expectedDate', 'status', 'category'], currency);
+      this.addPDFTable(
+        doc,
+        data.items,
+        ['vendor', 'amount', 'expectedDate', 'status', 'category'],
+        currency,
+      );
     }
   }
 
@@ -2743,7 +3226,7 @@ export class ReportGeneratorService {
     const margin = 50;
     const pageWidth = doc.page.width;
     const contentWidth = pageWidth - 2 * margin;
-    
+
     // Brand colors
     const primaryColor = '#0077C8';
     const accentColor = '#00A3E0';
@@ -2754,88 +3237,90 @@ export class ReportGeneratorService {
     const textMuted = '#6b7280';
     const headerBg = '#f0f7fc';
     const altRowBg = '#f8fafc';
-    
+
     // Starting position
     doc.y = 175;
-    
+
     // ============ SUMMARY CARDS SECTION ============
     const cardWidth = (contentWidth - 30) / 4; // 4 cards with gaps
     const cardHeight = 70;
     const cardY = doc.y;
-    
+
     const summary = data.summary || {};
     const netVat = summary.netVat || 0;
     const netVatColor = netVat >= 0 ? outputColor : inputColor;
-    
+
     const summaryItems = [
-      { 
-        label: 'VAT Input', 
-        value: summary.vatInput || 0, 
+      {
+        label: 'VAT Input',
+        value: summary.vatInput || 0,
         color: inputColor,
-        description: 'From Expenses/Purchases'
+        description: 'From Expenses/Purchases',
       },
-      { 
-        label: 'VAT Output', 
-        value: summary.vatOutput || 0, 
+      {
+        label: 'VAT Output',
+        value: summary.vatOutput || 0,
         color: outputColor,
-        description: 'From Sales/Invoices'
+        description: 'From Sales/Invoices',
       },
-      { 
-        label: 'Net VAT', 
-        value: netVat, 
+      {
+        label: 'Net VAT',
+        value: netVat,
         color: netVatColor,
         description: netVat >= 0 ? 'Payable to FTA' : 'Refundable from FTA',
-        bold: true
+        bold: true,
       },
-      { 
-        label: 'Total Transactions', 
-        value: summary.totalTransactions || 0, 
+      {
+        label: 'Total Transactions',
+        value: summary.totalTransactions || 0,
         color: primaryColor,
         description: `${summary.inputTransactions || 0} Input / ${summary.outputTransactions || 0} Output`,
-        isCount: true
+        isCount: true,
       },
     ];
-    
+
     summaryItems.forEach((item, index) => {
       const cardX = margin + index * (cardWidth + 10);
-      
+
       // Card background with rounded corners effect
-      doc.rect(cardX, cardY, cardWidth, cardHeight)
+      doc
+        .rect(cardX, cardY, cardWidth, cardHeight)
         .fillColor('#ffffff')
         .fill()
         .strokeColor(borderColor)
         .lineWidth(1)
         .stroke();
-      
+
       // Top accent line
-      doc.rect(cardX, cardY, cardWidth, 3)
-        .fillColor(item.color)
-        .fill();
-      
+      doc.rect(cardX, cardY, cardWidth, 3).fillColor(item.color).fill();
+
       // Label
-      doc.fontSize(8)
+      doc
+        .fontSize(8)
         .font('Helvetica')
         .fillColor(textMuted)
         .text(item.label.toUpperCase(), cardX + 8, cardY + 12, {
           width: cardWidth - 16,
           align: 'left',
         });
-      
+
       // Value
-      const displayValue = item.isCount 
-        ? String(item.value) 
+      const displayValue = item.isCount
+        ? String(item.value)
         : this.formatCurrency(item.value as number, currency);
-      doc.fontSize(item.bold ? 16 : 14)
+      doc
+        .fontSize(item.bold ? 16 : 14)
         .font(item.bold ? 'Helvetica-Bold' : 'Helvetica-Bold')
         .fillColor(textDark)
         .text(displayValue, cardX + 8, cardY + 28, {
           width: cardWidth - 16,
           align: 'left',
         });
-      
+
       // Description
       if (item.description) {
-        doc.fontSize(7)
+        doc
+          .fontSize(7)
           .font('Helvetica')
           .fillColor(textMuted)
           .text(item.description, cardX + 8, cardY + 50, {
@@ -2844,51 +3329,64 @@ export class ReportGeneratorService {
           });
       }
     });
-    
+
     doc.y = cardY + cardHeight + 30;
-    
+
     // ============ PERIOD INFORMATION ============
     if (data.startDate || data.endDate) {
-      doc.fontSize(10)
+      doc
+        .fontSize(10)
         .font('Helvetica')
         .fillColor(textMuted)
         .text(
           `Report Period: ${data.startDate || 'N/A'} to ${data.endDate || 'N/A'}`,
           margin,
-          doc.y
+          doc.y,
         );
       doc.moveDown(0.5);
     }
-    
+
     // ============ VAT INPUT SECTION ============
-    if (data.vatInputItems && Array.isArray(data.vatInputItems) && data.vatInputItems.length > 0) {
+    if (
+      data.vatInputItems &&
+      Array.isArray(data.vatInputItems) &&
+      data.vatInputItems.length > 0
+    ) {
       // Section header
       const sectionHeaderY = doc.y;
       const headerHeight = 35;
-      
-      doc.rect(margin, sectionHeaderY, contentWidth, headerHeight)
+
+      doc
+        .rect(margin, sectionHeaderY, contentWidth, headerHeight)
         .fillColor(headerBg)
         .fill();
-      doc.rect(margin, sectionHeaderY, 4, headerHeight)
+      doc
+        .rect(margin, sectionHeaderY, 4, headerHeight)
         .fillColor(inputColor)
         .fill();
-      
-      doc.fontSize(14)
+
+      doc
+        .fontSize(14)
         .font('Helvetica-Bold')
         .fillColor(textDark)
-        .text('VAT Input (Purchases/Expenses)', margin + 15, sectionHeaderY + 10);
-      
-      doc.fontSize(9)
+        .text(
+          'VAT Input (Purchases/Expenses)',
+          margin + 15,
+          sectionHeaderY + 10,
+        );
+
+      doc
+        .fontSize(9)
         .font('Helvetica')
         .fillColor(textMuted)
         .text(
           `Total: ${this.formatCurrency(summary.vatInput || 0, currency)} | ${data.vatInputItems.length} transactions`,
           margin + 15,
-          sectionHeaderY + 25
+          sectionHeaderY + 25,
         );
-      
+
       doc.y = sectionHeaderY + headerHeight + 10;
-      
+
       // Table for VAT Input items
       this.addVATItemsTable(
         doc,
@@ -2901,47 +3399,55 @@ export class ReportGeneratorService {
         altRowBg,
         borderColor,
         textDark,
-        textMuted
+        textMuted,
       );
-      
+
       doc.moveDown(0.5);
     }
-    
+
     // Check if we need a new page
     if (doc.y > doc.page.height - 200) {
       doc.addPage();
       doc.y = 50;
     }
-    
+
     // ============ VAT OUTPUT SECTION ============
-    if (data.vatOutputItems && Array.isArray(data.vatOutputItems) && data.vatOutputItems.length > 0) {
+    if (
+      data.vatOutputItems &&
+      Array.isArray(data.vatOutputItems) &&
+      data.vatOutputItems.length > 0
+    ) {
       // Section header
       const sectionHeaderY = doc.y;
       const headerHeight = 35;
-      
-      doc.rect(margin, sectionHeaderY, contentWidth, headerHeight)
+
+      doc
+        .rect(margin, sectionHeaderY, contentWidth, headerHeight)
         .fillColor(headerBg)
         .fill();
-      doc.rect(margin, sectionHeaderY, 4, headerHeight)
+      doc
+        .rect(margin, sectionHeaderY, 4, headerHeight)
         .fillColor(outputColor)
         .fill();
-      
-      doc.fontSize(14)
+
+      doc
+        .fontSize(14)
         .font('Helvetica-Bold')
         .fillColor(textDark)
         .text('VAT Output (Sales/Invoices)', margin + 15, sectionHeaderY + 10);
-      
-      doc.fontSize(9)
+
+      doc
+        .fontSize(9)
         .font('Helvetica')
         .fillColor(textMuted)
         .text(
           `Total: ${this.formatCurrency(summary.vatOutput || 0, currency)} | ${data.vatOutputItems.length} transactions`,
           margin + 15,
-          sectionHeaderY + 25
+          sectionHeaderY + 25,
         );
-      
+
       doc.y = sectionHeaderY + headerHeight + 10;
-      
+
       // Table for VAT Output items
       this.addVATItemsTable(
         doc,
@@ -2954,11 +3460,12 @@ export class ReportGeneratorService {
         altRowBg,
         borderColor,
         textDark,
-        textMuted
+        textMuted,
       );
     } else if (!data.vatInputItems || data.vatInputItems.length === 0) {
       // No data message
-      doc.fontSize(10)
+      doc
+        .fontSize(10)
         .font('Helvetica-Oblique')
         .fillColor(textMuted)
         .text('No VAT transactions found for the selected period.', margin);
@@ -2982,30 +3489,36 @@ export class ReportGeneratorService {
     textMuted: string,
   ): void {
     if (!items || items.length === 0) return;
-    
+
     // Column widths
     const colWidths = [
       contentWidth * 0.12, // Date
       contentWidth * 0.28, // Description
       contentWidth * 0.15, // Amount
-      contentWidth * 0.10, // VAT Rate
+      contentWidth * 0.1, // VAT Rate
       contentWidth * 0.15, // VAT Amount
-      contentWidth * 0.20, // TRN
+      contentWidth * 0.2, // TRN
     ];
-    
+
     // Table header
     const headerY = doc.y;
     const headerHeight = 28;
-    
-    doc.rect(margin, headerY, contentWidth, headerHeight)
+
+    doc
+      .rect(margin, headerY, contentWidth, headerHeight)
       .fillColor(accentColor)
       .fill();
-    
-    doc.fontSize(9.5)
-      .font('Helvetica-Bold')
-      .fillColor('#ffffff');
-    
-    const headers = ['Date', 'Description', 'Amount', 'VAT Rate', 'VAT Amount', 'TRN'];
+
+    doc.fontSize(9.5).font('Helvetica-Bold').fillColor('#ffffff');
+
+    const headers = [
+      'Date',
+      'Description',
+      'Amount',
+      'VAT Rate',
+      'VAT Amount',
+      'TRN',
+    ];
     let x = margin + 8;
     headers.forEach((header, i) => {
       doc.text(header, x, headerY + 8, {
@@ -3014,26 +3527,25 @@ export class ReportGeneratorService {
       });
       x += colWidths[i];
     });
-    
+
     doc.fillColor(textDark);
-    
+
     // Data rows
     let rowY = headerY + headerHeight;
     const rowHeight = 22;
-    
+
     items.forEach((item, index) => {
       // Check if we need a new page
       if (rowY > doc.page.height - 100) {
         doc.addPage();
         rowY = 50;
-        
+
         // Re-draw header on new page
-        doc.rect(margin, rowY, contentWidth, headerHeight)
+        doc
+          .rect(margin, rowY, contentWidth, headerHeight)
           .fillColor(accentColor)
           .fill();
-        doc.fontSize(9.5)
-          .font('Helvetica-Bold')
-          .fillColor('#ffffff');
+        doc.fontSize(9.5).font('Helvetica-Bold').fillColor('#ffffff');
         x = margin + 8;
         headers.forEach((header, i) => {
           doc.text(header, x, rowY + 8, {
@@ -3045,57 +3557,78 @@ export class ReportGeneratorService {
         doc.fillColor(textDark);
         rowY += headerHeight;
       }
-      
+
       // Alternate row background
       if (index % 2 === 1) {
-        doc.rect(margin, rowY, contentWidth, rowHeight)
+        doc
+          .rect(margin, rowY, contentWidth, rowHeight)
           .fillColor(altRowBg)
           .fill();
       }
-      
+
       // Row border
-      doc.strokeColor(borderColor)
+      doc
+        .strokeColor(borderColor)
         .lineWidth(0.5)
         .moveTo(margin, rowY)
         .lineTo(margin + contentWidth, rowY)
         .stroke();
-      
+
       doc.fontSize(9).font('Helvetica');
       x = margin + 8;
-      
+
       // Date
-      const dateStr = item.date ? new Date(item.date).toLocaleDateString('en-GB') : 'N/A';
-      doc.text(dateStr, x, rowY + 7, { width: colWidths[0] - 16, align: 'left' });
+      const dateStr = item.date
+        ? new Date(item.date).toLocaleDateString('en-GB')
+        : 'N/A';
+      doc.text(dateStr, x, rowY + 7, {
+        width: colWidths[0] - 16,
+        align: 'left',
+      });
       x += colWidths[0];
-      
+
       // Description
-      const desc = item.description || item.vendorName || item.customerName || item.invoiceNumber || 'N/A';
-      doc.text(desc.substring(0, 40), x, rowY + 7, { width: colWidths[1] - 16, align: 'left', ellipsis: true });
+      const desc =
+        item.description ||
+        item.vendorName ||
+        item.customerName ||
+        item.invoiceNumber ||
+        'N/A';
+      doc.text(desc.substring(0, 40), x, rowY + 7, {
+        width: colWidths[1] - 16,
+        align: 'left',
+        ellipsis: true,
+      });
       x += colWidths[1];
-      
+
       // Amount
       doc.text(this.formatCurrency(item.amount || 0, currency), x, rowY + 7, {
         width: colWidths[2] - 16,
         align: 'right',
       });
       x += colWidths[2];
-      
+
       // VAT Rate
       doc.text(`${item.vatRate || 0}%`, x, rowY + 7, {
         width: colWidths[3] - 16,
         align: 'right',
       });
       x += colWidths[3];
-      
+
       // VAT Amount
       doc.font('Helvetica-Bold');
-      doc.text(this.formatCurrency(item.vatAmount || 0, currency), x, rowY + 7, {
-        width: colWidths[4] - 16,
-        align: 'right',
-      });
+      doc.text(
+        this.formatCurrency(item.vatAmount || 0, currency),
+        x,
+        rowY + 7,
+        {
+          width: colWidths[4] - 16,
+          align: 'right',
+        },
+      );
       doc.font('Helvetica');
       x += colWidths[4];
-      
+
       // TRN
       doc.fillColor(textMuted);
       doc.text(item.trn || 'N/A', x, rowY + 7, {
@@ -3103,48 +3636,57 @@ export class ReportGeneratorService {
         align: 'left',
       });
       doc.fillColor(textDark);
-      
+
       rowY += rowHeight;
     });
-    
+
     // Total row
     const totalRowHeight = 28;
     const totalY = rowY;
-    doc.rect(margin, totalY, contentWidth, totalRowHeight)
+    doc
+      .rect(margin, totalY, contentWidth, totalRowHeight)
       .fillColor('#f0f7fc')
       .fill();
-    
-    doc.strokeColor(accentColor)
+
+    doc
+      .strokeColor(accentColor)
       .lineWidth(1.5)
       .moveTo(margin, totalY)
       .lineTo(margin + contentWidth, totalY)
       .stroke();
-    
-    const totalVat = items.reduce((sum, item) => sum + (item.vatAmount || 0), 0);
-    const totalAmount = items.reduce((sum, item) => sum + (item.amount || 0), 0);
-    
-    doc.fontSize(10)
-      .font('Helvetica-Bold')
-      .fillColor(textDark);
-    
+
+    const totalVat = items.reduce(
+      (sum, item) => sum + (item.vatAmount || 0),
+      0,
+    );
+    const totalAmount = items.reduce(
+      (sum, item) => sum + (item.amount || 0),
+      0,
+    );
+
+    doc.fontSize(10).font('Helvetica-Bold').fillColor(textDark);
+
     x = margin + 8;
-    doc.text('Total', x, totalY + 9, { width: colWidths[0] + colWidths[1] - 16, align: 'left' });
+    doc.text('Total', x, totalY + 9, {
+      width: colWidths[0] + colWidths[1] - 16,
+      align: 'left',
+    });
     x += colWidths[0] + colWidths[1];
-    
+
     doc.text(this.formatCurrency(totalAmount, currency), x, totalY + 9, {
       width: colWidths[2] - 16,
       align: 'right',
     });
     x += colWidths[2];
-    
+
     doc.text('', x, totalY + 9, { width: colWidths[3] - 16 }); // Skip VAT Rate column
     x += colWidths[3];
-    
+
     doc.text(this.formatCurrency(totalVat, currency), x, totalY + 9, {
       width: colWidths[4] - 16,
       align: 'right',
     });
-    
+
     doc.y = totalY + totalRowHeight + 10;
   }
 
@@ -3247,10 +3789,10 @@ export class ReportGeneratorService {
     ]);
     worksheet.mergeCells(`A1:D1`);
     const headerCell = worksheet.getCell('A1');
-    headerCell.font = { 
-      size: 18, 
-      bold: true, 
-      color: { argb: 'FFFFFFFF' } // White text
+    headerCell.font = {
+      size: 18,
+      bold: true,
+      color: { argb: 'FFFFFFFF' }, // White text
     };
     headerCell.fill = {
       type: 'pattern',
@@ -3270,10 +3812,10 @@ export class ReportGeneratorService {
     worksheet.addRow([this.getReportTitle(reportData.type)]);
     worksheet.mergeCells(`A2:D2`);
     const titleCell = worksheet.getCell('A2');
-    titleCell.font = { 
-      size: 16, 
+    titleCell.font = {
+      size: 16,
       bold: true,
-      color: { argb: 'FF0077C8' } // Brand color
+      color: { argb: 'FF0077C8' }, // Brand color
     };
     titleCell.alignment = { horizontal: 'left', vertical: 'middle' };
     worksheet.getRow(2).height = 24;
@@ -3329,10 +3871,10 @@ export class ReportGeneratorService {
       const formattedHeaders = headers.map((h) => this.formatHeaderLabel(h));
       worksheet.addRow(formattedHeaders);
       const headerRow = worksheet.getRow(worksheet.rowCount);
-      headerRow.font = { 
-        bold: true, 
+      headerRow.font = {
+        bold: true,
         size: 11,
-        color: { argb: 'FFFFFFFF' } // White text
+        color: { argb: 'FFFFFFFF' }, // White text
       };
       headerRow.fill = {
         type: 'pattern',
@@ -3405,12 +3947,24 @@ export class ReportGeneratorService {
             currencyFields.some((field) => header.toLowerCase().includes(field))
           ) {
             cell.numFmt = `"${currency}" #,##0.00`;
-            cell.alignment = { horizontal: 'right', vertical: 'middle', wrapText: false };
+            cell.alignment = {
+              horizontal: 'right',
+              vertical: 'middle',
+              wrapText: false,
+            };
           } else if (header.toLowerCase().includes('date')) {
             cell.numFmt = 'dd-mmm-yyyy';
-            cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: false };
+            cell.alignment = {
+              horizontal: 'center',
+              vertical: 'middle',
+              wrapText: false,
+            };
           } else {
-            cell.alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
+            cell.alignment = {
+              horizontal: 'left',
+              vertical: 'middle',
+              wrapText: true,
+            };
           }
           // Enhanced borders with consistent styling
           cell.border = {
@@ -3443,10 +3997,10 @@ export class ReportGeneratorService {
           return totalRow[h] || '';
         });
         const totalDataRow = worksheet.addRow(totalValues);
-        totalDataRow.font = { 
-          bold: true, 
+        totalDataRow.font = {
+          bold: true,
           size: 11,
-          color: { argb: 'FF0077C8' } // Brand color
+          color: { argb: 'FF0077C8' }, // Brand color
         };
         totalDataRow.fill = {
           type: 'pattern',
@@ -3461,7 +4015,7 @@ export class ReportGeneratorService {
           right: { style: 'thin', color: { argb: 'FF0077C8' } },
         };
         totalDataRow.height = 26; // Increased height for emphasis
-        
+
         // Apply borders to all cells in total row
         headers.forEach((header, colIndex) => {
           const cell = totalDataRow.getCell(colIndex + 1);
@@ -3471,7 +4025,10 @@ export class ReportGeneratorService {
             left: { style: 'thin', color: { argb: 'FF0077C8' } },
             right: { style: 'thin', color: { argb: 'FF0077C8' } },
           };
-          cell.alignment = { horizontal: cell.alignment?.horizontal || 'left', vertical: 'middle' };
+          cell.alignment = {
+            horizontal: cell.alignment?.horizontal || 'left',
+            vertical: 'middle',
+          };
         });
 
         headers.forEach((header, colIndex) => {
@@ -3505,7 +4062,10 @@ export class ReportGeneratorService {
             }
           });
           // Set width with padding, but cap at reasonable maximum
-          column.width = Math.min(Math.max(maxContentLength + 4, headerLength + 2), 50);
+          column.width = Math.min(
+            Math.max(maxContentLength + 4, headerLength + 2),
+            50,
+          );
         }
       });
     } else if (typeof data === 'object') {
@@ -3566,10 +4126,10 @@ export class ReportGeneratorService {
         'Total Amount',
       ]);
       const headerRow = categorySheet.getRow(1);
-      headerRow.font = { 
-        bold: true, 
+      headerRow.font = {
+        bold: true,
         size: 11,
-        color: { argb: 'FFFFFFFF' } 
+        color: { argb: 'FFFFFFFF' },
       };
       headerRow.fill = {
         type: 'pattern',
@@ -3644,10 +4204,10 @@ export class ReportGeneratorService {
         'Linked Expense ID',
       ]);
       const headerRow = transactionsSheet.getRow(1);
-      headerRow.font = { 
-        bold: true, 
+      headerRow.font = {
+        bold: true,
         size: 11,
-        color: { argb: 'FFFFFFFF' } 
+        color: { argb: 'FFFFFFFF' },
       };
       headerRow.fill = {
         type: 'pattern',
@@ -3702,7 +4262,10 @@ export class ReportGeneratorService {
       summarySheet.addRow(['Opening Balances']);
       summarySheet.addRow(['Opening Debit', data.summary.openingDebit || 0]);
       summarySheet.addRow(['Opening Credit', data.summary.openingCredit || 0]);
-      summarySheet.addRow(['Opening Balance', data.summary.openingBalance || 0]);
+      summarySheet.addRow([
+        'Opening Balance',
+        data.summary.openingBalance || 0,
+      ]);
       summarySheet.addRow([]);
       summarySheet.addRow(['Period Transactions']);
       summarySheet.addRow(['Period Debit', data.summary.periodDebit || 0]);
@@ -3712,12 +4275,24 @@ export class ReportGeneratorService {
       summarySheet.addRow(['Closing Balances']);
       summarySheet.addRow(['Closing Debit', data.summary.closingDebit || 0]);
       summarySheet.addRow(['Closing Credit', data.summary.closingCredit || 0]);
-      summarySheet.addRow(['Closing Balance', data.summary.closingBalance || 0]);
+      summarySheet.addRow([
+        'Closing Balance',
+        data.summary.closingBalance || 0,
+      ]);
       summarySheet.addRow([]);
       summarySheet.addRow(['Total Summary']);
-      summarySheet.addRow(['Total Debit', data.summary.closingDebit || data.summary.totalDebit || 0]);
-      summarySheet.addRow(['Total Credit', data.summary.closingCredit || data.summary.totalCredit || 0]);
-      summarySheet.addRow(['Total Balance', data.summary.closingBalance || data.summary.totalBalance || 0]);
+      summarySheet.addRow([
+        'Total Debit',
+        data.summary.closingDebit || data.summary.totalDebit || 0,
+      ]);
+      summarySheet.addRow([
+        'Total Credit',
+        data.summary.closingCredit || data.summary.totalCredit || 0,
+      ]);
+      summarySheet.addRow([
+        'Total Balance',
+        data.summary.closingBalance || data.summary.totalBalance || 0,
+      ]);
 
       [3, 4, 5, 7, 8, 9, 11, 12, 13, 15, 16, 17].forEach((rowNum) => {
         const cell = summarySheet.getCell(`B${rowNum}`);
@@ -3746,10 +4321,10 @@ export class ReportGeneratorService {
         'Closing Balance',
       ]);
       const headerRow = accountsSheet.getRow(1);
-      headerRow.font = { 
-        bold: true, 
+      headerRow.font = {
+        bold: true,
         size: 11,
-        color: { argb: 'FFFFFFFF' } 
+        color: { argb: 'FFFFFFFF' },
       };
       headerRow.fill = {
         type: 'pattern',
@@ -3811,25 +4386,55 @@ export class ReportGeneratorService {
       summarySheet.addRow([]);
       summarySheet.addRow(['Opening Balances']);
       summarySheet.addRow(['Opening Assets', data.summary.openingAssets || 0]);
-      summarySheet.addRow(['Opening Liabilities', data.summary.openingLiabilities || 0]);
+      summarySheet.addRow([
+        'Opening Liabilities',
+        data.summary.openingLiabilities || 0,
+      ]);
       summarySheet.addRow(['Opening Equity', data.summary.openingEquity || 0]);
-      summarySheet.addRow(['Opening Balance', data.summary.openingBalance || 0]);
+      summarySheet.addRow([
+        'Opening Balance',
+        data.summary.openingBalance || 0,
+      ]);
       summarySheet.addRow([]);
       summarySheet.addRow(['Period Transactions']);
-      summarySheet.addRow(['Period Assets', data.summary.periodAssets || data.summary.totalAssets || 0]);
-      summarySheet.addRow(['Period Liabilities', data.summary.periodLiabilities || data.summary.totalLiabilities || 0]);
-      summarySheet.addRow(['Period Equity', data.summary.periodEquity || data.summary.totalEquity || 0]);
+      summarySheet.addRow([
+        'Period Assets',
+        data.summary.periodAssets || data.summary.totalAssets || 0,
+      ]);
+      summarySheet.addRow([
+        'Period Liabilities',
+        data.summary.periodLiabilities || data.summary.totalLiabilities || 0,
+      ]);
+      summarySheet.addRow([
+        'Period Equity',
+        data.summary.periodEquity || data.summary.totalEquity || 0,
+      ]);
       summarySheet.addRow([]);
       summarySheet.addRow(['Closing Balances']);
       summarySheet.addRow(['Closing Assets', data.summary.closingAssets || 0]);
-      summarySheet.addRow(['Closing Liabilities', data.summary.closingLiabilities || 0]);
+      summarySheet.addRow([
+        'Closing Liabilities',
+        data.summary.closingLiabilities || 0,
+      ]);
       summarySheet.addRow(['Closing Equity', data.summary.closingEquity || 0]);
-      summarySheet.addRow(['Closing Balance', data.summary.closingBalance || 0]);
+      summarySheet.addRow([
+        'Closing Balance',
+        data.summary.closingBalance || 0,
+      ]);
       summarySheet.addRow([]);
       summarySheet.addRow(['Total Summary']);
-      summarySheet.addRow(['Total Assets', data.summary.closingAssets || data.summary.totalAssets || 0]);
-      summarySheet.addRow(['Total Liabilities', data.summary.closingLiabilities || data.summary.totalLiabilities || 0]);
-      summarySheet.addRow(['Total Equity', data.summary.closingEquity || data.summary.totalEquity || 0]);
+      summarySheet.addRow([
+        'Total Assets',
+        data.summary.closingAssets || data.summary.totalAssets || 0,
+      ]);
+      summarySheet.addRow([
+        'Total Liabilities',
+        data.summary.closingLiabilities || data.summary.totalLiabilities || 0,
+      ]);
+      summarySheet.addRow([
+        'Total Equity',
+        data.summary.closingEquity || data.summary.totalEquity || 0,
+      ]);
 
       [3, 4, 5, 6, 8, 9, 10, 12, 13, 14, 15].forEach((rowNum) => {
         const cell = summarySheet.getCell(`B${rowNum}`);
@@ -3847,10 +4452,10 @@ export class ReportGeneratorService {
       const assetsSheet = workbook.addWorksheet('Assets');
       assetsSheet.addRow(['Category', 'Amount']);
       const headerRow = assetsSheet.getRow(1);
-      headerRow.font = { 
-        bold: true, 
+      headerRow.font = {
+        bold: true,
         size: 11,
-        color: { argb: 'FFFFFFFF' } 
+        color: { argb: 'FFFFFFFF' },
       };
       headerRow.fill = {
         type: 'pattern',
@@ -3896,10 +4501,10 @@ export class ReportGeneratorService {
       const liabilitiesSheet = workbook.addWorksheet('Liabilities');
       liabilitiesSheet.addRow(['Vendor', 'Amount', 'Status']);
       const headerRow = liabilitiesSheet.getRow(1);
-      headerRow.font = { 
-        bold: true, 
+      headerRow.font = {
+        bold: true,
         size: 11,
-        color: { argb: 'FFFFFFFF' } 
+        color: { argb: 'FFFFFFFF' },
       };
       headerRow.fill = {
         type: 'pattern',
@@ -3924,7 +4529,11 @@ export class ReportGeneratorService {
       });
 
       // Add total row
-      liabilitiesSheet.addRow(['Total Liabilities', data.liabilities.total || 0, '']);
+      liabilitiesSheet.addRow([
+        'Total Liabilities',
+        data.liabilities.total || 0,
+        '',
+      ]);
       const totalRow = liabilitiesSheet.getRow(liabilitiesSheet.rowCount);
       totalRow.font = { bold: true };
       totalRow.fill = {
@@ -3956,17 +4565,26 @@ export class ReportGeneratorService {
     if (data.summary) {
       summarySheet.addRow(['Profit and Loss Summary']);
       summarySheet.addRow([]);
-      summarySheet.addRow(['Opening Retained Earnings', data.summary.openingRetainedEarnings || 0]);
+      summarySheet.addRow([
+        'Opening Retained Earnings',
+        data.summary.openingRetainedEarnings || 0,
+      ]);
       summarySheet.addRow([]);
       summarySheet.addRow(['Period Transactions']);
       summarySheet.addRow(['Gross Profit', data.summary.grossProfit || 0]);
       summarySheet.addRow(['Total Expenses', data.summary.totalExpenses || 0]);
       summarySheet.addRow(['Net Profit', data.summary.netProfit || 0]);
       if (data.summary.netProfitMargin) {
-        summarySheet.addRow(['Profit Margin (%)', data.summary.netProfitMargin]);
+        summarySheet.addRow([
+          'Profit Margin (%)',
+          data.summary.netProfitMargin,
+        ]);
       }
       summarySheet.addRow([]);
-      summarySheet.addRow(['Closing Retained Earnings', data.summary.closingRetainedEarnings || 0]);
+      summarySheet.addRow([
+        'Closing Retained Earnings',
+        data.summary.closingRetainedEarnings || 0,
+      ]);
 
       [3, 6, 7, 8, 11].forEach((rowNum) => {
         const cell = summarySheet.getCell(`B${rowNum}`);
@@ -3983,10 +4601,10 @@ export class ReportGeneratorService {
       const revenueSheet = workbook.addWorksheet('Revenue');
       revenueSheet.addRow(['Description', 'Amount', 'VAT', 'Total']);
       const headerRow = revenueSheet.getRow(1);
-      headerRow.font = { 
-        bold: true, 
+      headerRow.font = {
+        bold: true,
         size: 11,
-        color: { argb: 'FFFFFFFF' } 
+        color: { argb: 'FFFFFFFF' },
       };
       headerRow.fill = {
         type: 'pattern',
@@ -4029,10 +4647,10 @@ export class ReportGeneratorService {
       const expensesSheet = workbook.addWorksheet('Expenses');
       expensesSheet.addRow(['Category', 'Amount', 'VAT', 'Total']);
       const headerRow = expensesSheet.getRow(1);
-      headerRow.font = { 
-        bold: true, 
+      headerRow.font = {
+        bold: true,
         size: 11,
-        color: { argb: 'FFFFFFFF' } 
+        color: { argb: 'FFFFFFFF' },
       };
       headerRow.fill = {
         type: 'pattern',
@@ -4098,9 +4716,15 @@ export class ReportGeneratorService {
     if (data.summary) {
       summarySheet.addRow(['Payables Summary']);
       summarySheet.addRow([]);
-      summarySheet.addRow(['Opening Balance', data.summary?.openingBalance || 0]);
+      summarySheet.addRow([
+        'Opening Balance',
+        data.summary?.openingBalance || 0,
+      ]);
       summarySheet.addRow(['Period Amount', data.summary?.periodAmount || 0]);
-      summarySheet.addRow(['Closing Balance', data.summary?.closingBalance || 0]);
+      summarySheet.addRow([
+        'Closing Balance',
+        data.summary?.closingBalance || 0,
+      ]);
       summarySheet.addRow([]);
       summarySheet.addRow(['Total Outstanding', data.summary.totalAmount || 0]);
       summarySheet.addRow(['Total Items', data.summary.totalItems || 0]);
@@ -4125,10 +4749,10 @@ export class ReportGeneratorService {
         'Due Date',
       ]);
       const headerRow = itemsSheet.getRow(1);
-      headerRow.font = { 
-        bold: true, 
+      headerRow.font = {
+        bold: true,
         size: 11,
-        color: { argb: 'FFFFFFFF' } 
+        color: { argb: 'FFFFFFFF' },
       };
       headerRow.fill = {
         type: 'pattern',
@@ -4204,13 +4828,25 @@ export class ReportGeneratorService {
       summarySheet.addRow(['VAT Input', data.summary.vatInput || 0]);
       summarySheet.addRow(['VAT Output', data.summary.vatOutput || 0]);
       summarySheet.addRow(['Net VAT', data.summary.netVat || 0]);
-      summarySheet.addRow(['Total Transactions', data.summary.totalTransactions || 0]);
-      summarySheet.addRow(['Input Transactions', data.summary.inputTransactions || 0]);
-      summarySheet.addRow(['Output Transactions', data.summary.outputTransactions || 0]);
-      
+      summarySheet.addRow([
+        'Total Transactions',
+        data.summary.totalTransactions || 0,
+      ]);
+      summarySheet.addRow([
+        'Input Transactions',
+        data.summary.inputTransactions || 0,
+      ]);
+      summarySheet.addRow([
+        'Output Transactions',
+        data.summary.outputTransactions || 0,
+      ]);
+
       if (data.startDate || data.endDate) {
         summarySheet.addRow(['']);
-        summarySheet.addRow(['Report Period', `${data.startDate || 'N/A'} to ${data.endDate || 'N/A'}`]);
+        summarySheet.addRow([
+          'Report Period',
+          `${data.startDate || 'N/A'} to ${data.endDate || 'N/A'}`,
+        ]);
       }
 
       // Format currency cells
@@ -4219,7 +4855,7 @@ export class ReportGeneratorService {
         cell.numFmt = `"${currency}" #,##0.00`;
         cell.font = { bold: true };
       });
-      
+
       // Net VAT cell with conditional formatting
       const netVatCell = summarySheet.getCell('B4');
       netVatCell.font = { bold: true, size: 12 };
@@ -4231,7 +4867,11 @@ export class ReportGeneratorService {
     }
 
     // VAT Input sheet
-    if (data.vatInputItems && Array.isArray(data.vatInputItems) && data.vatInputItems.length > 0) {
+    if (
+      data.vatInputItems &&
+      Array.isArray(data.vatInputItems) &&
+      data.vatInputItems.length > 0
+    ) {
       const inputSheet = workbook.addWorksheet('VAT Input');
       inputSheet.addRow([
         'Date',
@@ -4242,12 +4882,12 @@ export class ReportGeneratorService {
         'VAT Amount',
         'TRN',
       ]);
-      
+
       const headerRow = inputSheet.getRow(1);
-      headerRow.font = { 
-        bold: true, 
+      headerRow.font = {
+        bold: true,
         size: 11,
-        color: { argb: 'FFFFFFFF' } 
+        color: { argb: 'FFFFFFFF' },
       };
       headerRow.fill = {
         type: 'pattern',
@@ -4276,8 +4916,14 @@ export class ReportGeneratorService {
       });
 
       // Add total row
-      const totalInput = data.vatInputItems.reduce((sum: number, item: any) => sum + (item.vatAmount || 0), 0);
-      const totalInputAmount = data.vatInputItems.reduce((sum: number, item: any) => sum + (item.amount || 0), 0);
+      const totalInput = data.vatInputItems.reduce(
+        (sum: number, item: any) => sum + (item.vatAmount || 0),
+        0,
+      );
+      const totalInputAmount = data.vatInputItems.reduce(
+        (sum: number, item: any) => sum + (item.amount || 0),
+        0,
+      );
       inputSheet.addRow([
         'Total',
         '',
@@ -4313,7 +4959,11 @@ export class ReportGeneratorService {
     }
 
     // VAT Output sheet
-    if (data.vatOutputItems && Array.isArray(data.vatOutputItems) && data.vatOutputItems.length > 0) {
+    if (
+      data.vatOutputItems &&
+      Array.isArray(data.vatOutputItems) &&
+      data.vatOutputItems.length > 0
+    ) {
       const outputSheet = workbook.addWorksheet('VAT Output');
       outputSheet.addRow([
         'Date',
@@ -4325,12 +4975,12 @@ export class ReportGeneratorService {
         'VAT Amount',
         'TRN',
       ]);
-      
+
       const headerRow = outputSheet.getRow(1);
-      headerRow.font = { 
-        bold: true, 
+      headerRow.font = {
+        bold: true,
         size: 11,
-        color: { argb: 'FFFFFFFF' } 
+        color: { argb: 'FFFFFFFF' },
       };
       headerRow.fill = {
         type: 'pattern',
@@ -4360,8 +5010,14 @@ export class ReportGeneratorService {
       });
 
       // Add total row
-      const totalOutput = data.vatOutputItems.reduce((sum: number, item: any) => sum + (item.vatAmount || 0), 0);
-      const totalOutputAmount = data.vatOutputItems.reduce((sum: number, item: any) => sum + (item.amount || 0), 0);
+      const totalOutput = data.vatOutputItems.reduce(
+        (sum: number, item: any) => sum + (item.vatAmount || 0),
+        0,
+      );
+      const totalOutputAmount = data.vatOutputItems.reduce(
+        (sum: number, item: any) => sum + (item.amount || 0),
+        0,
+      );
       outputSheet.addRow([
         'Total',
         '',
@@ -4414,11 +5070,23 @@ export class ReportGeneratorService {
     if (data.summary) {
       summarySheet.addRow(['Receivables Summary']);
       summarySheet.addRow([]);
-      summarySheet.addRow(['Opening Balance', data.summary?.openingBalance || 0]);
-      summarySheet.addRow(['Period Outstanding', data.summary?.periodAmount || data.summary?.periodOutstanding || 0]);
-      summarySheet.addRow(['Closing Balance', data.summary?.closingBalance || 0]);
+      summarySheet.addRow([
+        'Opening Balance',
+        data.summary?.openingBalance || 0,
+      ]);
+      summarySheet.addRow([
+        'Period Outstanding',
+        data.summary?.periodAmount || data.summary?.periodOutstanding || 0,
+      ]);
+      summarySheet.addRow([
+        'Closing Balance',
+        data.summary?.closingBalance || 0,
+      ]);
       summarySheet.addRow([]);
-      summarySheet.addRow(['Total Outstanding', data.summary.totalOutstanding || 0]);
+      summarySheet.addRow([
+        'Total Outstanding',
+        data.summary.totalOutstanding || 0,
+      ]);
       summarySheet.addRow(['Total Items', data.summary.totalItems || 0]);
       summarySheet.addRow(['Overdue Items', data.summary.overdueInvoices || 0]);
       summarySheet.addRow(['Overdue Amount', data.summary.overdueAmount || 0]);
@@ -4442,10 +5110,10 @@ export class ReportGeneratorService {
         'Due Date',
       ]);
       const headerRow = itemsSheet.getRow(1);
-      headerRow.font = { 
-        bold: true, 
+      headerRow.font = {
+        bold: true,
         size: 11,
-        color: { argb: 'FFFFFFFF' } 
+        color: { argb: 'FFFFFFFF' },
       };
       headerRow.fill = {
         type: 'pattern',
@@ -4613,75 +5281,128 @@ export class ReportGeneratorService {
         // VAT Control Account CSV format
         const data = reportData.data;
         const currency = reportData.metadata?.currency || 'AED';
-        
+
         lines.push('VAT Control Account Report');
         lines.push('');
         if (data.startDate || data.endDate) {
-          lines.push(`Report Period,${data.startDate || 'N/A'} to ${data.endDate || 'N/A'}`);
+          lines.push(
+            `Report Period,${data.startDate || 'N/A'} to ${data.endDate || 'N/A'}`,
+          );
         }
         lines.push('');
         lines.push('Summary');
         lines.push('-'.repeat(80));
         if (data.summary) {
-          lines.push(`VAT Input,${this.formatCurrency(data.summary.vatInput || 0, currency)}`);
-          lines.push(`VAT Output,${this.formatCurrency(data.summary.vatOutput || 0, currency)}`);
-          lines.push(`Net VAT,${this.formatCurrency(data.summary.netVat || 0, currency)}`);
-          lines.push(`Total Transactions,${data.summary.totalTransactions || 0}`);
-          lines.push(`Input Transactions,${data.summary.inputTransactions || 0}`);
-          lines.push(`Output Transactions,${data.summary.outputTransactions || 0}`);
+          lines.push(
+            `VAT Input,${this.formatCurrency(data.summary.vatInput || 0, currency)}`,
+          );
+          lines.push(
+            `VAT Output,${this.formatCurrency(data.summary.vatOutput || 0, currency)}`,
+          );
+          lines.push(
+            `Net VAT,${this.formatCurrency(data.summary.netVat || 0, currency)}`,
+          );
+          lines.push(
+            `Total Transactions,${data.summary.totalTransactions || 0}`,
+          );
+          lines.push(
+            `Input Transactions,${data.summary.inputTransactions || 0}`,
+          );
+          lines.push(
+            `Output Transactions,${data.summary.outputTransactions || 0}`,
+          );
         }
         lines.push('');
         lines.push('-'.repeat(80));
         lines.push('');
-        
+
         // VAT Input Items
-        if (data.vatInputItems && Array.isArray(data.vatInputItems) && data.vatInputItems.length > 0) {
+        if (
+          data.vatInputItems &&
+          Array.isArray(data.vatInputItems) &&
+          data.vatInputItems.length > 0
+        ) {
           lines.push('VAT Input (Purchases/Expenses)');
           lines.push('-'.repeat(80));
-          lines.push('Date,Description,Vendor,Amount,VAT Rate (%),VAT Amount,TRN');
+          lines.push(
+            'Date,Description,Vendor,Amount,VAT Rate (%),VAT Amount,TRN',
+          );
           data.vatInputItems.forEach((item: any) => {
-            const date = item.date ? new Date(item.date).toLocaleDateString('en-GB') : 'N/A';
-            lines.push([
-              date,
-              item.description || item.vendorName || 'N/A',
-              item.vendorName || 'N/A',
-              this.formatCurrency(item.amount || 0, currency),
-              `${item.vatRate || 0}%`,
-              this.formatCurrency(item.vatAmount || 0, currency),
-              item.trn || 'N/A',
-            ].join(','));
+            const date = item.date
+              ? new Date(item.date).toLocaleDateString('en-GB')
+              : 'N/A';
+            lines.push(
+              [
+                date,
+                item.description || item.vendorName || 'N/A',
+                item.vendorName || 'N/A',
+                this.formatCurrency(item.amount || 0, currency),
+                `${item.vatRate || 0}%`,
+                this.formatCurrency(item.vatAmount || 0, currency),
+                item.trn || 'N/A',
+              ].join(','),
+            );
           });
-          const totalInput = data.vatInputItems.reduce((sum: number, item: any) => sum + (item.vatAmount || 0), 0);
-          const totalInputAmount = data.vatInputItems.reduce((sum: number, item: any) => sum + (item.amount || 0), 0);
+          const totalInput = data.vatInputItems.reduce(
+            (sum: number, item: any) => sum + (item.vatAmount || 0),
+            0,
+          );
+          const totalInputAmount = data.vatInputItems.reduce(
+            (sum: number, item: any) => sum + (item.amount || 0),
+            0,
+          );
           lines.push('');
-          lines.push(`Total,,,${this.formatCurrency(totalInputAmount, currency)},,${this.formatCurrency(totalInput, currency)},`);
+          lines.push(
+            `Total,,,${this.formatCurrency(totalInputAmount, currency)},,${this.formatCurrency(totalInput, currency)},`,
+          );
           lines.push('');
           lines.push('-'.repeat(80));
           lines.push('');
         }
-        
+
         // VAT Output Items
-        if (data.vatOutputItems && Array.isArray(data.vatOutputItems) && data.vatOutputItems.length > 0) {
+        if (
+          data.vatOutputItems &&
+          Array.isArray(data.vatOutputItems) &&
+          data.vatOutputItems.length > 0
+        ) {
           lines.push('VAT Output (Sales/Invoices)');
           lines.push('-'.repeat(80));
-          lines.push('Date,Description,Invoice Number,Customer,Amount,VAT Rate (%),VAT Amount,TRN');
+          lines.push(
+            'Date,Description,Invoice Number,Customer,Amount,VAT Rate (%),VAT Amount,TRN',
+          );
           data.vatOutputItems.forEach((item: any) => {
-            const date = item.date ? new Date(item.date).toLocaleDateString('en-GB') : 'N/A';
-            lines.push([
-              date,
-              item.description || item.invoiceNumber || item.customerName || 'N/A',
-              item.invoiceNumber || 'N/A',
-              item.customerName || 'N/A',
-              this.formatCurrency(item.amount || 0, currency),
-              `${item.vatRate || 0}%`,
-              this.formatCurrency(item.vatAmount || 0, currency),
-              item.trn || 'N/A',
-            ].join(','));
+            const date = item.date
+              ? new Date(item.date).toLocaleDateString('en-GB')
+              : 'N/A';
+            lines.push(
+              [
+                date,
+                item.description ||
+                  item.invoiceNumber ||
+                  item.customerName ||
+                  'N/A',
+                item.invoiceNumber || 'N/A',
+                item.customerName || 'N/A',
+                this.formatCurrency(item.amount || 0, currency),
+                `${item.vatRate || 0}%`,
+                this.formatCurrency(item.vatAmount || 0, currency),
+                item.trn || 'N/A',
+              ].join(','),
+            );
           });
-          const totalOutput = data.vatOutputItems.reduce((sum: number, item: any) => sum + (item.vatAmount || 0), 0);
-          const totalOutputAmount = data.vatOutputItems.reduce((sum: number, item: any) => sum + (item.amount || 0), 0);
+          const totalOutput = data.vatOutputItems.reduce(
+            (sum: number, item: any) => sum + (item.vatAmount || 0),
+            0,
+          );
+          const totalOutputAmount = data.vatOutputItems.reduce(
+            (sum: number, item: any) => sum + (item.amount || 0),
+            0,
+          );
           lines.push('');
-          lines.push(`Total,,,,${this.formatCurrency(totalOutputAmount, currency)},,${this.formatCurrency(totalOutput, currency)},`);
+          lines.push(
+            `Total,,,,${this.formatCurrency(totalOutputAmount, currency)},,${this.formatCurrency(totalOutput, currency)},`,
+          );
         }
       } else if (reportData.type === 'vat_report') {
         lines.push('VAT Summary');
@@ -4733,143 +5454,244 @@ export class ReportGeneratorService {
         lines.push('Trial Balance Report');
         lines.push('');
         if (data.startDate || data.endDate) {
-          lines.push(`Report Period,${data.startDate || 'N/A'} to ${data.endDate || 'N/A'}`);
+          lines.push(
+            `Report Period,${data.startDate || 'N/A'} to ${data.endDate || 'N/A'}`,
+          );
         }
         lines.push('');
         lines.push('Summary');
         lines.push('-'.repeat(80));
         if (data.summary) {
           if (data.summary.openingDebit !== undefined) {
-            lines.push(`Opening Debit,${this.formatCurrency(data.summary.openingDebit || 0, currency)}`);
-            lines.push(`Opening Credit,${this.formatCurrency(data.summary.openingCredit || 0, currency)}`);
-            lines.push(`Opening Balance,${this.formatCurrency(data.summary.openingBalance || 0, currency)}`);
+            lines.push(
+              `Opening Debit,${this.formatCurrency(data.summary.openingDebit || 0, currency)}`,
+            );
+            lines.push(
+              `Opening Credit,${this.formatCurrency(data.summary.openingCredit || 0, currency)}`,
+            );
+            lines.push(
+              `Opening Balance,${this.formatCurrency(data.summary.openingBalance || 0, currency)}`,
+            );
             lines.push('');
-            lines.push(`Period Debit,${this.formatCurrency(data.summary.periodDebit || 0, currency)}`);
-            lines.push(`Period Credit,${this.formatCurrency(data.summary.periodCredit || 0, currency)}`);
-            lines.push(`Period Balance,${this.formatCurrency(data.summary.periodBalance || 0, currency)}`);
+            lines.push(
+              `Period Debit,${this.formatCurrency(data.summary.periodDebit || 0, currency)}`,
+            );
+            lines.push(
+              `Period Credit,${this.formatCurrency(data.summary.periodCredit || 0, currency)}`,
+            );
+            lines.push(
+              `Period Balance,${this.formatCurrency(data.summary.periodBalance || 0, currency)}`,
+            );
             lines.push('');
-            lines.push(`Closing Debit,${this.formatCurrency(data.summary.closingDebit || 0, currency)}`);
-            lines.push(`Closing Credit,${this.formatCurrency(data.summary.closingCredit || 0, currency)}`);
-            lines.push(`Closing Balance,${this.formatCurrency(data.summary.closingBalance || 0, currency)}`);
+            lines.push(
+              `Closing Debit,${this.formatCurrency(data.summary.closingDebit || 0, currency)}`,
+            );
+            lines.push(
+              `Closing Credit,${this.formatCurrency(data.summary.closingCredit || 0, currency)}`,
+            );
+            lines.push(
+              `Closing Balance,${this.formatCurrency(data.summary.closingBalance || 0, currency)}`,
+            );
             lines.push('');
           }
           lines.push('');
           lines.push('Total Summary');
           lines.push('-'.repeat(80));
-          lines.push(`Total Debit,${this.formatCurrency(data.summary.closingDebit || data.summary.totalDebit || 0, currency)}`);
-          lines.push(`Total Credit,${this.formatCurrency(data.summary.closingCredit || data.summary.totalCredit || 0, currency)}`);
-          lines.push(`Total Balance,${this.formatCurrency(data.summary.closingBalance || data.summary.totalBalance || 0, currency)}`);
+          lines.push(
+            `Total Debit,${this.formatCurrency(data.summary.closingDebit || data.summary.totalDebit || 0, currency)}`,
+          );
+          lines.push(
+            `Total Credit,${this.formatCurrency(data.summary.closingCredit || data.summary.totalCredit || 0, currency)}`,
+          );
+          lines.push(
+            `Total Balance,${this.formatCurrency(data.summary.closingBalance || data.summary.totalBalance || 0, currency)}`,
+          );
         }
         lines.push('');
         lines.push('-'.repeat(80));
         lines.push('');
-        if (data.accounts && Array.isArray(data.accounts) && data.accounts.length > 0) {
+        if (
+          data.accounts &&
+          Array.isArray(data.accounts) &&
+          data.accounts.length > 0
+        ) {
           lines.push('Accounts');
-          lines.push('Account Name,Account Type,Opening Debit,Opening Credit,Opening Balance,Period Debit,Period Credit,Period Balance,Closing Debit,Closing Credit,Closing Balance');
+          lines.push(
+            'Account Name,Account Type,Opening Debit,Opening Credit,Opening Balance,Period Debit,Period Credit,Period Balance,Closing Debit,Closing Credit,Closing Balance',
+          );
           data.accounts.forEach((item: any) => {
-            lines.push([
-              item.accountName || 'N/A',
-              item.accountType || 'N/A',
-              this.formatCurrency(item.openingDebit || 0, currency),
-              this.formatCurrency(item.openingCredit || 0, currency),
-              this.formatCurrency(item.openingBalance || 0, currency),
-              this.formatCurrency(item.debit || 0, currency),
-              this.formatCurrency(item.credit || 0, currency),
-              this.formatCurrency(item.balance || 0, currency),
-              this.formatCurrency(item.closingDebit || 0, currency),
-              this.formatCurrency(item.closingCredit || 0, currency),
-              this.formatCurrency(item.closingBalance || 0, currency),
-            ].join(','));
+            lines.push(
+              [
+                item.accountName || 'N/A',
+                item.accountType || 'N/A',
+                this.formatCurrency(item.openingDebit || 0, currency),
+                this.formatCurrency(item.openingCredit || 0, currency),
+                this.formatCurrency(item.openingBalance || 0, currency),
+                this.formatCurrency(item.debit || 0, currency),
+                this.formatCurrency(item.credit || 0, currency),
+                this.formatCurrency(item.balance || 0, currency),
+                this.formatCurrency(item.closingDebit || 0, currency),
+                this.formatCurrency(item.closingCredit || 0, currency),
+                this.formatCurrency(item.closingBalance || 0, currency),
+              ].join(','),
+            );
           });
         }
       } else if (reportData.type === 'balance_sheet') {
         lines.push('Balance Sheet Report');
         lines.push('');
         if (data.startDate || data.endDate) {
-          lines.push(`Report Period,${data.startDate || 'N/A'} to ${data.endDate || 'N/A'}`);
+          lines.push(
+            `Report Period,${data.startDate || 'N/A'} to ${data.endDate || 'N/A'}`,
+          );
         }
         lines.push('');
         lines.push('Summary');
         lines.push('-'.repeat(80));
         if (data.summary) {
           if (data.summary.openingAssets !== undefined) {
-            lines.push(`Opening Assets,${this.formatCurrency(data.summary.openingAssets || 0, currency)}`);
-            lines.push(`Opening Liabilities,${this.formatCurrency(data.summary.openingLiabilities || 0, currency)}`);
-            lines.push(`Opening Equity,${this.formatCurrency(data.summary.openingEquity || 0, currency)}`);
+            lines.push(
+              `Opening Assets,${this.formatCurrency(data.summary.openingAssets || 0, currency)}`,
+            );
+            lines.push(
+              `Opening Liabilities,${this.formatCurrency(data.summary.openingLiabilities || 0, currency)}`,
+            );
+            lines.push(
+              `Opening Equity,${this.formatCurrency(data.summary.openingEquity || 0, currency)}`,
+            );
             lines.push('');
-            lines.push(`Period Assets,${this.formatCurrency(data.summary.periodAssets || 0, currency)}`);
-            lines.push(`Period Liabilities,${this.formatCurrency(data.summary.periodLiabilities || 0, currency)}`);
-            lines.push(`Period Equity,${this.formatCurrency(data.summary.periodEquity || 0, currency)}`);
+            lines.push(
+              `Period Assets,${this.formatCurrency(data.summary.periodAssets || 0, currency)}`,
+            );
+            lines.push(
+              `Period Liabilities,${this.formatCurrency(data.summary.periodLiabilities || 0, currency)}`,
+            );
+            lines.push(
+              `Period Equity,${this.formatCurrency(data.summary.periodEquity || 0, currency)}`,
+            );
             lines.push('');
-            lines.push(`Closing Assets,${this.formatCurrency(data.summary.closingAssets || 0, currency)}`);
-            lines.push(`Closing Liabilities,${this.formatCurrency(data.summary.closingLiabilities || 0, currency)}`);
-            lines.push(`Closing Equity,${this.formatCurrency(data.summary.closingEquity || 0, currency)}`);
+            lines.push(
+              `Closing Assets,${this.formatCurrency(data.summary.closingAssets || 0, currency)}`,
+            );
+            lines.push(
+              `Closing Liabilities,${this.formatCurrency(data.summary.closingLiabilities || 0, currency)}`,
+            );
+            lines.push(
+              `Closing Equity,${this.formatCurrency(data.summary.closingEquity || 0, currency)}`,
+            );
             lines.push('');
           }
           lines.push('');
           lines.push('Total Summary');
           lines.push('-'.repeat(80));
-          lines.push(`Total Assets,${this.formatCurrency(data.summary.closingAssets || data.summary.totalAssets || 0, currency)}`);
-          lines.push(`Total Liabilities,${this.formatCurrency(data.summary.closingLiabilities || data.summary.totalLiabilities || 0, currency)}`);
-          lines.push(`Total Equity,${this.formatCurrency(data.summary.closingEquity || data.summary.totalEquity || 0, currency)}`);
+          lines.push(
+            `Total Assets,${this.formatCurrency(data.summary.closingAssets || data.summary.totalAssets || 0, currency)}`,
+          );
+          lines.push(
+            `Total Liabilities,${this.formatCurrency(data.summary.closingLiabilities || data.summary.totalLiabilities || 0, currency)}`,
+          );
+          lines.push(
+            `Total Equity,${this.formatCurrency(data.summary.closingEquity || data.summary.totalEquity || 0, currency)}`,
+          );
         }
         lines.push('');
         lines.push('-'.repeat(80));
         lines.push('');
-        if (data.assets && data.assets.items && Array.isArray(data.assets.items) && data.assets.items.length > 0) {
+        if (
+          data.assets &&
+          data.assets.items &&
+          Array.isArray(data.assets.items) &&
+          data.assets.items.length > 0
+        ) {
           lines.push('Assets');
           lines.push('Category,Amount');
           data.assets.items.forEach((item: any) => {
-            lines.push([
-              item.category || 'N/A',
-              this.formatCurrency(item.amount || 0, currency),
-            ].join(','));
+            lines.push(
+              [
+                item.category || 'N/A',
+                this.formatCurrency(item.amount || 0, currency),
+              ].join(','),
+            );
           });
-          lines.push(`Total Assets,${this.formatCurrency(data.assets.total || 0, currency)}`);
+          lines.push(
+            `Total Assets,${this.formatCurrency(data.assets.total || 0, currency)}`,
+          );
           lines.push('');
         }
-        if (data.liabilities && data.liabilities.items && Array.isArray(data.liabilities.items) && data.liabilities.items.length > 0) {
+        if (
+          data.liabilities &&
+          data.liabilities.items &&
+          Array.isArray(data.liabilities.items) &&
+          data.liabilities.items.length > 0
+        ) {
           lines.push('Liabilities');
           lines.push('Vendor,Amount');
           data.liabilities.items.forEach((item: any) => {
-            lines.push([
-              item.vendor || 'N/A',
-              this.formatCurrency(item.amount || 0, currency),
-            ].join(','));
+            lines.push(
+              [
+                item.vendor || 'N/A',
+                this.formatCurrency(item.amount || 0, currency),
+              ].join(','),
+            );
           });
-          lines.push(`Total Liabilities,${this.formatCurrency(data.liabilities.total || 0, currency)}`);
+          lines.push(
+            `Total Liabilities,${this.formatCurrency(data.liabilities.total || 0, currency)}`,
+          );
           lines.push('');
         }
-        if (data.equity && data.equity.items && Array.isArray(data.equity.items) && data.equity.items.length > 0) {
+        if (
+          data.equity &&
+          data.equity.items &&
+          Array.isArray(data.equity.items) &&
+          data.equity.items.length > 0
+        ) {
           lines.push('Equity');
           lines.push('Category,Amount');
           data.equity.items.forEach((item: any) => {
-            lines.push([
-              item.category || 'N/A',
-              this.formatCurrency(item.amount || 0, currency),
-            ].join(','));
+            lines.push(
+              [
+                item.category || 'N/A',
+                this.formatCurrency(item.amount || 0, currency),
+              ].join(','),
+            );
           });
-          lines.push(`Total Equity,${this.formatCurrency(data.equity.total || 0, currency)}`);
+          lines.push(
+            `Total Equity,${this.formatCurrency(data.equity.total || 0, currency)}`,
+          );
         }
       } else if (reportData.type === 'profit_and_loss') {
         lines.push('Profit and Loss Statement');
         lines.push('');
         if (data.startDate || data.endDate) {
-          lines.push(`Report Period,${data.startDate || 'N/A'} to ${data.endDate || 'N/A'}`);
+          lines.push(
+            `Report Period,${data.startDate || 'N/A'} to ${data.endDate || 'N/A'}`,
+          );
         }
         lines.push('');
         lines.push('Summary');
         lines.push('-'.repeat(80));
         if (data.summary) {
           if (data.summary.openingRetainedEarnings !== undefined) {
-            lines.push(`Opening Retained Earnings,${this.formatCurrency(data.summary.openingRetainedEarnings || 0, currency)}`);
-            lines.push(`Period Net Profit,${this.formatCurrency(data.summary.netProfit || 0, currency)}`);
-            lines.push(`Closing Retained Earnings,${this.formatCurrency(data.summary.closingRetainedEarnings || 0, currency)}`);
+            lines.push(
+              `Opening Retained Earnings,${this.formatCurrency(data.summary.openingRetainedEarnings || 0, currency)}`,
+            );
+            lines.push(
+              `Period Net Profit,${this.formatCurrency(data.summary.netProfit || 0, currency)}`,
+            );
+            lines.push(
+              `Closing Retained Earnings,${this.formatCurrency(data.summary.closingRetainedEarnings || 0, currency)}`,
+            );
             lines.push('');
           }
-          lines.push(`Gross Profit,${this.formatCurrency(data.summary.grossProfit || 0, currency)}`);
-          lines.push(`Total Expenses,${this.formatCurrency(data.summary.totalExpenses || 0, currency)}`);
-          lines.push(`Net Profit,${this.formatCurrency(data.summary.netProfit || 0, currency)}`);
+          lines.push(
+            `Gross Profit,${this.formatCurrency(data.summary.grossProfit || 0, currency)}`,
+          );
+          lines.push(
+            `Total Expenses,${this.formatCurrency(data.summary.totalExpenses || 0, currency)}`,
+          );
+          lines.push(
+            `Net Profit,${this.formatCurrency(data.summary.netProfit || 0, currency)}`,
+          );
           if (data.summary.netProfitMargin) {
             lines.push(`Profit Margin,${data.summary.netProfitMargin}%`);
           }
@@ -4879,44 +5701,71 @@ export class ReportGeneratorService {
         lines.push('');
         if (data.revenue) {
           lines.push('Revenue');
-          lines.push(`Amount,${this.formatCurrency(data.revenue.amount || 0, currency)}`);
-          lines.push(`VAT,${this.formatCurrency(data.revenue.vat || 0, currency)}`);
-          lines.push(`Total,${this.formatCurrency(data.revenue.total || 0, currency)}`);
+          lines.push(
+            `Amount,${this.formatCurrency(data.revenue.amount || 0, currency)}`,
+          );
+          lines.push(
+            `VAT,${this.formatCurrency(data.revenue.vat || 0, currency)}`,
+          );
+          lines.push(
+            `Total,${this.formatCurrency(data.revenue.total || 0, currency)}`,
+          );
           lines.push('');
         }
-        if (data.expenses && data.expenses.items && Array.isArray(data.expenses.items) && data.expenses.items.length > 0) {
+        if (
+          data.expenses &&
+          data.expenses.items &&
+          Array.isArray(data.expenses.items) &&
+          data.expenses.items.length > 0
+        ) {
           lines.push('Expenses');
           lines.push('Category,Amount,VAT,Total');
           data.expenses.items.forEach((item: any) => {
-            lines.push([
-              item.category || 'N/A',
-              this.formatCurrency(item.amount || 0, currency),
-              this.formatCurrency(item.vat || 0, currency),
-              this.formatCurrency(item.total || 0, currency),
-            ].join(','));
+            lines.push(
+              [
+                item.category || 'N/A',
+                this.formatCurrency(item.amount || 0, currency),
+                this.formatCurrency(item.vat || 0, currency),
+                this.formatCurrency(item.total || 0, currency),
+              ].join(','),
+            );
           });
-          lines.push(`Total Expenses,${this.formatCurrency(data.expenses.grandTotal || 0, currency)},,`);
+          lines.push(
+            `Total Expenses,${this.formatCurrency(data.expenses.grandTotal || 0, currency)},,`,
+          );
         }
       } else if (reportData.type === 'payables') {
         lines.push('Payables (Accruals) Report');
         lines.push('');
         if (data.startDate || data.endDate) {
-          lines.push(`Report Period,${data.startDate || 'N/A'} to ${data.endDate || 'N/A'}`);
+          lines.push(
+            `Report Period,${data.startDate || 'N/A'} to ${data.endDate || 'N/A'}`,
+          );
         }
         lines.push('');
         lines.push('Summary');
         lines.push('-'.repeat(80));
         if (data.summary) {
           if (data.summary.openingBalance !== undefined) {
-            lines.push(`Opening Balance,${this.formatCurrency(data.summary.openingBalance || 0, currency)}`);
-            lines.push(`Period Amount,${this.formatCurrency(data.summary.periodAmount || 0, currency)}`);
-            lines.push(`Closing Balance,${this.formatCurrency(data.summary.closingBalance || 0, currency)}`);
+            lines.push(
+              `Opening Balance,${this.formatCurrency(data.summary.openingBalance || 0, currency)}`,
+            );
+            lines.push(
+              `Period Amount,${this.formatCurrency(data.summary.periodAmount || 0, currency)}`,
+            );
+            lines.push(
+              `Closing Balance,${this.formatCurrency(data.summary.closingBalance || 0, currency)}`,
+            );
             lines.push('');
           }
           lines.push(`Total Items,${data.summary.totalItems || 0}`);
-          lines.push(`Total Amount,${this.formatCurrency(data.summary.totalAmount || 0, currency)}`);
+          lines.push(
+            `Total Amount,${this.formatCurrency(data.summary.totalAmount || 0, currency)}`,
+          );
           lines.push(`Overdue Items,${data.summary.overdueItems || 0}`);
-          lines.push(`Overdue Amount,${this.formatCurrency(data.summary.overdueAmount || 0, currency)}`);
+          lines.push(
+            `Overdue Amount,${this.formatCurrency(data.summary.overdueAmount || 0, currency)}`,
+          );
         }
         lines.push('');
         lines.push('-'.repeat(80));
@@ -4925,52 +5774,74 @@ export class ReportGeneratorService {
           lines.push('Payables');
           lines.push('Vendor,Amount,Expected Date,Status');
           data.items.forEach((item: any) => {
-            const date = item.expectedDate ? new Date(item.expectedDate).toLocaleDateString('en-GB') : 'N/A';
-            lines.push([
-              item.vendor || 'N/A',
-              this.formatCurrency(item.amount || 0, currency),
-              date,
-              item.status || 'N/A',
-            ].join(','));
+            const date = item.expectedDate
+              ? new Date(item.expectedDate).toLocaleDateString('en-GB')
+              : 'N/A';
+            lines.push(
+              [
+                item.vendor || 'N/A',
+                this.formatCurrency(item.amount || 0, currency),
+                date,
+                item.status || 'N/A',
+              ].join(','),
+            );
           });
         }
       } else if (reportData.type === 'receivables') {
         lines.push('Receivables Report');
         lines.push('');
         if (data.startDate || data.endDate) {
-          lines.push(`Report Period,${data.startDate || 'N/A'} to ${data.endDate || 'N/A'}`);
+          lines.push(
+            `Report Period,${data.startDate || 'N/A'} to ${data.endDate || 'N/A'}`,
+          );
         }
         lines.push('');
         lines.push('Summary');
         lines.push('-'.repeat(80));
         if (data.summary) {
           if (data.summary.openingBalance !== undefined) {
-            lines.push(`Opening Balance,${this.formatCurrency(data.summary.openingBalance || 0, currency)}`);
-            lines.push(`Period Amount,${this.formatCurrency(data.summary.periodAmount || data.summary.periodOutstanding || 0, currency)}`);
-            lines.push(`Closing Balance,${this.formatCurrency(data.summary.closingBalance || 0, currency)}`);
+            lines.push(
+              `Opening Balance,${this.formatCurrency(data.summary.openingBalance || 0, currency)}`,
+            );
+            lines.push(
+              `Period Amount,${this.formatCurrency(data.summary.periodAmount || data.summary.periodOutstanding || 0, currency)}`,
+            );
+            lines.push(
+              `Closing Balance,${this.formatCurrency(data.summary.closingBalance || 0, currency)}`,
+            );
             lines.push('');
           }
           lines.push(`Total Invoices,${data.summary.totalInvoices || 0}`);
-          lines.push(`Total Outstanding,${this.formatCurrency(data.summary.totalOutstanding || 0, currency)}`);
+          lines.push(
+            `Total Outstanding,${this.formatCurrency(data.summary.totalOutstanding || 0, currency)}`,
+          );
           lines.push(`Overdue Invoices,${data.summary.overdueInvoices || 0}`);
-          lines.push(`Overdue Amount,${this.formatCurrency(data.summary.overdueAmount || 0, currency)}`);
+          lines.push(
+            `Overdue Amount,${this.formatCurrency(data.summary.overdueAmount || 0, currency)}`,
+          );
         }
         lines.push('');
         lines.push('-'.repeat(80));
         lines.push('');
         if (data.items && Array.isArray(data.items) && data.items.length > 0) {
           lines.push('Receivables');
-          lines.push('Invoice Number,Customer,Total,Outstanding,Due Date,Payment Status');
+          lines.push(
+            'Invoice Number,Customer,Total,Outstanding,Due Date,Payment Status',
+          );
           data.items.forEach((item: any) => {
-            const dueDate = item.dueDate ? new Date(item.dueDate).toLocaleDateString('en-GB') : 'N/A';
-            lines.push([
-              item.invoiceNumber || 'N/A',
-              item.customer || 'N/A',
-              this.formatCurrency(item.total || 0, currency),
-              this.formatCurrency(item.outstanding || 0, currency),
-              dueDate,
-              item.paymentStatus || 'N/A',
-            ].join(','));
+            const dueDate = item.dueDate
+              ? new Date(item.dueDate).toLocaleDateString('en-GB')
+              : 'N/A';
+            lines.push(
+              [
+                item.invoiceNumber || 'N/A',
+                item.customer || 'N/A',
+                this.formatCurrency(item.total || 0, currency),
+                this.formatCurrency(item.outstanding || 0, currency),
+                dueDate,
+                item.paymentStatus || 'N/A',
+              ].join(','),
+            );
           });
         }
       } else {
@@ -4996,11 +5867,15 @@ export class ReportGeneratorService {
     const metadata = reportData.metadata || {};
     const invoiceTemplate = (metadata as any).invoiceTemplate || {};
     const logoUrl = invoiceTemplate.logoUrl || metadata.logoUrl;
-    
+
     // Use logo buffer from metadata (pre-fetched from private storage) or fetch from remote URL
     let logoBuffer: Buffer | null = (metadata as any).logoBuffer || null;
 
-    if (!logoBuffer && logoUrl && (logoUrl.startsWith('http://') || logoUrl.startsWith('https://'))) {
+    if (
+      !logoBuffer &&
+      logoUrl &&
+      (logoUrl.startsWith('http://') || logoUrl.startsWith('https://'))
+    ) {
       logoBuffer = await this.fetchImageAsBuffer(logoUrl);
     }
 
@@ -5044,7 +5919,8 @@ export class ReportGeneratorService {
           showPaymentTerms: invoiceTemplate.showPaymentTerms ?? true,
           showPaymentMethods: invoiceTemplate.showPaymentMethods ?? true,
           showBankDetails: invoiceTemplate.showBankDetails ?? false,
-          showTermsAndConditions: invoiceTemplate.showTermsAndConditions ?? true,
+          showTermsAndConditions:
+            invoiceTemplate.showTermsAndConditions ?? true,
           paymentTerms: invoiceTemplate.paymentTerms,
           defaultNotes: invoiceTemplate.defaultNotes,
           termsAndConditions: invoiceTemplate.termsAndConditions,
@@ -5060,11 +5936,11 @@ export class ReportGeneratorService {
         const getColorScheme = () => {
           const scheme = templateSettings.colorScheme || 'blue';
           const customColor = templateSettings.customColor;
-          
+
           if (scheme === 'custom' && customColor) {
             return customColor;
           }
-          
+
           const colorMap: Record<string, string> = {
             blue: '#1976d2',
             green: '#2e7d32',
@@ -5072,12 +5948,12 @@ export class ReportGeneratorService {
             orange: '#f57c00',
             red: '#d32f2f',
           };
-          
+
           return colorMap[scheme] || colorMap.blue;
         };
 
         const primaryColor = getColorScheme();
-        
+
         const colors = {
           primary: primaryColor,
           text: '#1a1a1a',
@@ -5091,7 +5967,8 @@ export class ReportGeneratorService {
 
         // Currency formatting helper
         const formatAmount = (value: number | string): string => {
-          const numValue = typeof value === 'string' ? parseFloat(value) : value;
+          const numValue =
+            typeof value === 'string' ? parseFloat(value) : value;
           if (isNaN(numValue)) return '0.00';
           return numValue.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
         };
@@ -5105,14 +5982,14 @@ export class ReportGeneratorService {
         // HEADER: Logo on left, Title centered
         // ============================================================================
         let currentY = 30;
-        
+
         // Add logo on the left if available
         if (templateSettings.logoBuffer) {
           try {
             const logoSize = 50;
             const logoX = margin;
             const logoY = currentY;
-            
+
             doc.image(templateSettings.logoBuffer, logoX, logoY, {
               width: logoSize,
               height: logoSize,
@@ -5122,12 +5999,17 @@ export class ReportGeneratorService {
             console.warn('Failed to load invoice logo:', error);
             // No placeholder - just skip logo if it fails
           }
-        } else if (templateSettings.logoUrl && !templateSettings.logoUrl.startsWith('http://') && !templateSettings.logoUrl.startsWith('https://') && fs.existsSync(templateSettings.logoUrl)) {
+        } else if (
+          templateSettings.logoUrl &&
+          !templateSettings.logoUrl.startsWith('http://') &&
+          !templateSettings.logoUrl.startsWith('https://') &&
+          fs.existsSync(templateSettings.logoUrl)
+        ) {
           try {
             const logoSize = 50;
             const logoX = margin;
             const logoY = currentY;
-            
+
             doc.image(templateSettings.logoUrl, logoX, logoY, {
               width: logoSize,
               height: logoSize,
@@ -5139,15 +6021,12 @@ export class ReportGeneratorService {
           }
         }
         // No placeholder text - if no logo is configured, just skip it
-        
+
         // Invoice Title - Centered
-        doc
-          .fontSize(24)
-          .font('Helvetica-Bold')
-          .fillColor(colors.primary);
-        doc.text(templateSettings.invoiceTitle, margin, currentY + 10, { 
-          width: contentWidth, 
-          align: 'center' 
+        doc.fontSize(24).font('Helvetica-Bold').fillColor(colors.primary);
+        doc.text(templateSettings.invoiceTitle, margin, currentY + 10, {
+          width: contentWidth,
+          align: 'center',
         });
 
         currentY = 90;
@@ -5156,7 +6035,10 @@ export class ReportGeneratorService {
         // SEPARATOR LINE
         // ============================================================================
         doc.strokeColor(colors.border).lineWidth(0.5);
-        doc.moveTo(margin, currentY).lineTo(pageWidth - margin, currentY).stroke();
+        doc
+          .moveTo(margin, currentY)
+          .lineTo(pageWidth - margin, currentY)
+          .stroke();
         currentY += 20;
 
         // ============================================================================
@@ -5169,7 +6051,7 @@ export class ReportGeneratorService {
           currentY += 20;
 
           doc.fontSize(10).font('Helvetica').fillColor(colors.textLight);
-          
+
           const orgEmail = organization?.contactEmail || metadata.email || '';
           if (orgEmail) {
             doc.text(`Email: ${orgEmail}`, margin, currentY);
@@ -5184,14 +6066,17 @@ export class ReportGeneratorService {
             }
           }
         }
-        
+
         currentY += 10;
 
         // ============================================================================
         // SEPARATOR LINE
         // ============================================================================
         doc.strokeColor(colors.border).lineWidth(0.5);
-        doc.moveTo(margin, currentY).lineTo(pageWidth - margin, currentY).stroke();
+        doc
+          .moveTo(margin, currentY)
+          .lineTo(pageWidth - margin, currentY)
+          .stroke();
         currentY += 15;
 
         // ============================================================================
@@ -5199,10 +6084,17 @@ export class ReportGeneratorService {
         // ============================================================================
         const boxHeight = 80;
         const boxY = currentY;
-        
+
         // Draw gray background box
-        doc.fillColor(colors.backgroundLight).rect(margin, boxY, contentWidth, boxHeight).fill();
-        doc.strokeColor(colors.border).lineWidth(0.5).rect(margin, boxY, contentWidth, boxHeight).stroke();
+        doc
+          .fillColor(colors.backgroundLight)
+          .rect(margin, boxY, contentWidth, boxHeight)
+          .fill();
+        doc
+          .strokeColor(colors.border)
+          .lineWidth(0.5)
+          .rect(margin, boxY, contentWidth, boxHeight)
+          .stroke();
 
         // Left side - Invoice details
         const leftColX = margin + 15;
@@ -5212,19 +6104,30 @@ export class ReportGeneratorService {
         doc.fontSize(10).font('Helvetica').fillColor(colors.textLight);
         doc.text('Invoice Number:', leftColX, detailY);
         doc.font('Helvetica-Bold').fillColor(colors.text);
-        doc.text(invoice.invoiceNumber || '', leftColX + leftLabelWidth, detailY);
+        doc.text(
+          invoice.invoiceNumber || '',
+          leftColX + leftLabelWidth,
+          detailY,
+        );
         detailY += 18;
 
         doc.font('Helvetica').fillColor(colors.textLight);
         doc.text('Invoice Date:', leftColX, detailY);
         doc.font('Helvetica-Bold').fillColor(colors.text);
-        doc.text(this.formatDateForInvoice(invoice.invoiceDate || ''), leftColX + leftLabelWidth, detailY);
+        doc.text(
+          this.formatDateForInvoice(invoice.invoiceDate || ''),
+          leftColX + leftLabelWidth,
+          detailY,
+        );
         detailY += 18;
 
         // Payment Terms
         if (templateSettings.showPaymentTerms) {
-          const paymentTerms = templateSettings.paymentTerms || 
-            (customer?.paymentTerms ? `Net ${customer.paymentTerms}` : 'Net 30');
+          const paymentTerms =
+            templateSettings.paymentTerms ||
+            (customer?.paymentTerms
+              ? `Net ${customer.paymentTerms}`
+              : 'Net 30');
           doc.font('Helvetica').fillColor(colors.textLight);
           doc.text('Payment Terms:', leftColX, detailY);
           doc.font('Helvetica-Bold').fillColor(colors.text);
@@ -5234,7 +6137,7 @@ export class ReportGeneratorService {
         // Right side - Bill To section
         const rightColX = margin + contentWidth / 2 + 30;
         let billToY = boxY + 15;
-        
+
         doc.fontSize(10).font('Helvetica').fillColor(colors.primary);
         doc.text('Bill To:', rightColX, billToY);
         billToY += 18;
@@ -5258,7 +6161,7 @@ export class ReportGeneratorService {
         const lineItems = invoice.lineItems || [];
         const tableTop = currentY;
         const tableStartX = margin;
-        
+
         // Column widths for cleaner table: Item, Description, Qty, Unit Price, Total
         const colWidths = {
           item: 80,
@@ -5273,9 +6176,9 @@ export class ReportGeneratorService {
         // Table Header row
         let tableX = tableStartX;
         const headerY = tableTop;
-        
+
         doc.fontSize(10).font('Helvetica-Bold').fillColor(colors.text);
-        
+
         // Draw header text
         doc.text('Item', tableX + 10, headerY + 10);
         tableX += colWidths.item;
@@ -5286,20 +6189,23 @@ export class ReportGeneratorService {
         doc.text('Unit Price', tableX + 10, headerY + 10);
         tableX += colWidths.unitPrice;
         doc.text('Total', tableX + 10, headerY + 10);
-        
+
         // Header bottom border
         doc.strokeColor(colors.border).lineWidth(1);
-        doc.moveTo(tableStartX, headerY + rowHeight - 5).lineTo(tableStartX + tableWidth, headerY + rowHeight - 5).stroke();
-        
+        doc
+          .moveTo(tableStartX, headerY + rowHeight - 5)
+          .lineTo(tableStartX + tableWidth, headerY + rowHeight - 5)
+          .stroke();
+
         let rowY = headerY + rowHeight;
-        
+
         // Table Rows - Clean design matching preview
         lineItems.forEach((item: any, index: number) => {
           // Check if we need a new page
           if (rowY + rowHeight > doc.page.height - 150) {
             doc.addPage();
             rowY = margin + 40;
-            
+
             // Redraw table header on new page
             tableX = tableStartX;
             doc.fontSize(10).font('Helvetica-Bold').fillColor(colors.text);
@@ -5312,44 +6218,66 @@ export class ReportGeneratorService {
             doc.text('Unit Price', tableX + 10, rowY + 10);
             tableX += colWidths.unitPrice;
             doc.text('Total', tableX + 10, rowY + 10);
-            
+
             doc.strokeColor(colors.border).lineWidth(1);
-            doc.moveTo(tableStartX, rowY + rowHeight - 5).lineTo(tableStartX + tableWidth, rowY + rowHeight - 5).stroke();
+            doc
+              .moveTo(tableStartX, rowY + rowHeight - 5)
+              .lineTo(tableStartX + tableWidth, rowY + rowHeight - 5)
+              .stroke();
             rowY += rowHeight;
           }
 
           // Draw row content
           tableX = tableStartX;
-          
+
           // Item name
           doc.text(item.itemName || '', tableX + 10, rowY + 12);
           tableX += colWidths.item;
-          
+
           // Description
-          doc.text(item.description || '', tableX + 10, rowY + 12, { width: colWidths.description - 20 });
+          doc.text(item.description || '', tableX + 10, rowY + 12, {
+            width: colWidths.description - 20,
+          });
           tableX += colWidths.description;
-          
+
           // Quantity with unit
           const qty = parseFloat(item.quantity || '0');
           const unit = item.unitOfMeasure || 'unit';
-          doc.text(`${formatAmount(qty).replace(/,/g, '')} ${unit}`, tableX + 10, rowY + 12);
+          doc.text(
+            `${formatAmount(qty).replace(/,/g, '')} ${unit}`,
+            tableX + 10,
+            rowY + 12,
+          );
           tableX += colWidths.quantity;
-          
+
           // Unit Price
           const unitPrice = parseFloat(item.unitPrice || '0');
-          doc.text(`${formatAmount(unitPrice)} ${currency}`, tableX + 10, rowY + 12);
+          doc.text(
+            `${formatAmount(unitPrice)} ${currency}`,
+            tableX + 10,
+            rowY + 12,
+          );
           tableX += colWidths.unitPrice;
-          
+
           // Total (including VAT)
-          const lineTotal = parseFloat(item.totalAmount || item.amount || '0') + parseFloat(item.vatAmount || '0');
-          doc.text(`${formatAmount(lineTotal)} ${currency}`, tableX + 10, rowY + 12);
-          
+          const lineTotal =
+            parseFloat(item.totalAmount || item.amount || '0') +
+            parseFloat(item.vatAmount || '0');
+          doc.text(
+            `${formatAmount(lineTotal)} ${currency}`,
+            tableX + 10,
+            rowY + 12,
+          );
+
           rowY += rowHeight;
         });
 
         // Table bottom border
         doc.strokeColor(colors.border).lineWidth(0.5);
-        doc.moveTo(tableStartX, rowY).lineTo(tableStartX + tableWidth, rowY).stroke();
+        doc
+          .moveTo(tableStartX, rowY)
+          .lineTo(tableStartX + tableWidth, rowY)
+          .stroke();
 
         currentY = rowY + 25;
 
@@ -5364,29 +6292,46 @@ export class ReportGeneratorService {
         // Subtotal row
         doc.fontSize(11).font('Helvetica').fillColor(colors.text);
         doc.text('Subtotal:', margin, currentY);
-        doc.text(`${formatAmount(subtotal)} ${currency}`, totalsX, currentY, { width: 200, align: 'right' });
+        doc.text(`${formatAmount(subtotal)} ${currency}`, totalsX, currentY, {
+          width: 200,
+          align: 'right',
+        });
         currentY += 22;
-        
+
         // VAT row
         doc.text('VAT:', margin, currentY);
-        doc.text(`${formatAmount(totalVat)} ${currency}`, totalsX, currentY, { width: 200, align: 'right' });
+        doc.text(`${formatAmount(totalVat)} ${currency}`, totalsX, currentY, {
+          width: 200,
+          align: 'right',
+        });
         currentY += 25;
-        
+
         // Separator line before total
         doc.strokeColor(colors.border).lineWidth(0.5);
-        doc.moveTo(margin, currentY).lineTo(pageWidth - margin, currentY).stroke();
+        doc
+          .moveTo(margin, currentY)
+          .lineTo(pageWidth - margin, currentY)
+          .stroke();
         currentY += 15;
-        
+
         // Total Amount row (larger, blue)
         doc.fontSize(14).font('Helvetica-Bold').fillColor(colors.text);
         doc.text('Total Amount:', margin, currentY);
         doc.fillColor(colors.primary);
-        doc.text(`${formatAmount(totalAmount)} ${currency}`, totalsX, currentY, { width: 200, align: 'right' });
+        doc.text(
+          `${formatAmount(totalAmount)} ${currency}`,
+          totalsX,
+          currentY,
+          { width: 200, align: 'right' },
+        );
         currentY += 35;
-        
+
         // Separator line after total
         doc.strokeColor(colors.border).lineWidth(0.5);
-        doc.moveTo(margin, currentY).lineTo(pageWidth - margin, currentY).stroke();
+        doc
+          .moveTo(margin, currentY)
+          .lineTo(pageWidth - margin, currentY)
+          .stroke();
 
         // ============================================================================
         // FOOTER - Clean centered text

@@ -9,6 +9,7 @@ import { Repository } from 'typeorm';
 import { randomBytes } from 'crypto';
 import { LicenseKey } from '../../entities/license-key.entity';
 import { Attachment } from '../../entities/attachment.entity';
+import { Organization } from '../../entities/organization.entity';
 import { CreateLicenseKeyDto } from './dto/create-license-key.dto';
 import { RenewLicenseKeyDto } from './dto/renew-license-key.dto';
 import { LicenseKeyStatus } from '../../common/enums/license-key-status.enum';
@@ -22,6 +23,8 @@ export class LicenseKeysService {
     private readonly licenseKeysRepository: Repository<LicenseKey>,
     @InjectRepository(Attachment)
     private readonly attachmentsRepository: Repository<Attachment>,
+    @InjectRepository(Organization)
+    private readonly organizationsRepository: Repository<Organization>,
     private readonly emailService: EmailService,
   ) {}
 
@@ -136,7 +139,7 @@ export class LicenseKeysService {
     return savedLicense;
   }
 
-  async findAll(): Promise<LicenseKey[]> {
+  async findAll(): Promise<(LicenseKey & { organizationName?: string | null })[]> {
     const licenses = await this.licenseKeysRepository.find({
       order: { createdAt: 'DESC' },
     });
@@ -154,7 +157,28 @@ export class LicenseKeysService {
     if (toUpdate.length > 0) {
       await this.licenseKeysRepository.save(toUpdate);
     }
-    return licenses;
+
+    // Fetch organization names for consumed licenses
+    const licensesWithOrgNames = await Promise.all(
+      licenses.map(async (license) => {
+        if (license.consumedByOrganizationId) {
+          const organization = await this.organizationsRepository.findOne({
+            where: { id: license.consumedByOrganizationId },
+            select: ['name'],
+          });
+          return {
+            ...license,
+            organizationName: organization?.name ?? null,
+          };
+        }
+        return {
+          ...license,
+          organizationName: null,
+        };
+      }),
+    );
+
+    return licensesWithOrgNames;
   }
 
   async renew(id: string, dto: RenewLicenseKeyDto): Promise<LicenseKey> {

@@ -9,6 +9,7 @@ import { Accrual } from '../../entities/accrual.entity';
 import { AuditLog } from '../../entities/audit-log.entity';
 import { AccrualStatus } from '../../common/enums/accrual-status.enum';
 import { OrganizationStatus } from '../../common/enums/organization-status.enum';
+import { LicenseKeysService } from '../license-keys/license-keys.service';
 
 // Cache TTL: 5 minutes (300000 ms)
 const CACHE_TTL_MS = 5 * 60 * 1000;
@@ -47,6 +48,7 @@ export interface OrganizationUsageItem {
   storageUsedMb: number;
   rankingScore: number; // Combined score for sorting
   createdAt: Date;
+  licenseExpiresAt?: Date | null;
 }
 
 @Injectable()
@@ -68,6 +70,7 @@ export class SuperAdminService {
     private readonly accrualsRepository: Repository<Accrual>,
     @InjectRepository(AuditLog)
     private readonly auditLogsRepository: Repository<AuditLog>,
+    private readonly licenseKeysService: LicenseKeysService,
   ) {}
 
   private isCacheValid<T>(cache: CacheItem<T> | null): boolean {
@@ -159,7 +162,7 @@ export class SuperAdminService {
 
     const usage = await Promise.all(
       organizations.map(async (organization) => {
-        const [userCount, expenseCount, accrualCount, storageMb] =
+        const [userCount, expenseCount, accrualCount, storageMb, license] =
           await Promise.all([
             this.usersRepository.count({
               where: {
@@ -180,6 +183,7 @@ export class SuperAdminService {
               },
             }),
             this.getTotalAttachmentSize(organization.id),
+            this.licenseKeysService.findByOrganizationId(organization.id),
           ]);
 
         // Calculate ranking score: weighted combination of metrics
@@ -198,6 +202,7 @@ export class SuperAdminService {
           storageUsedMb: storageMb,
           rankingScore,
           createdAt: organization.createdAt,
+          licenseExpiresAt: license?.expiresAt ?? null,
         };
       }),
     );

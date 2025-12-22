@@ -4,11 +4,12 @@ import { LicenseKeysService } from './license-keys.service';
 import { LicenseKeysController } from './license-keys.controller';
 import { LicenseKey } from '../../entities/license-key.entity';
 import { Attachment } from '../../entities/attachment.entity';
+import { Organization } from '../../entities/organization.entity';
 import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([LicenseKey, Attachment]),
+    TypeOrmModule.forFeature([LicenseKey, Attachment, Organization]),
     NotificationsModule,
   ],
   providers: [LicenseKeysService],
