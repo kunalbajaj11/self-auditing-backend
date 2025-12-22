@@ -8,7 +8,9 @@ import { Repository, DataSource } from 'typeorm';
 import { ExpensePayment } from '../../entities/expense-payment.entity';
 import { Expense } from '../../entities/expense.entity';
 import { Organization } from '../../entities/organization.entity';
+import { Accrual } from '../../entities/accrual.entity';
 import { PaymentMethod } from '../../common/enums/payment-method.enum';
+import { AccrualStatus } from '../../common/enums/accrual-status.enum';
 import { CreateExpensePaymentDto } from './dto/create-expense-payment.dto';
 
 @Injectable()
@@ -20,6 +22,8 @@ export class ExpensePaymentsService {
     private readonly expensesRepository: Repository<Expense>,
     @InjectRepository(Organization)
     private readonly organizationsRepository: Repository<Organization>,
+    @InjectRepository(Accrual)
+    private readonly accrualsRepository: Repository<Accrual>,
     private readonly dataSource: DataSource,
   ) {}
 
@@ -114,7 +118,51 @@ export class ExpensePaymentsService {
         notes: dto.notes,
       });
 
-      return await manager.save(payment);
+      const savedPayment = await manager.save(payment);
+
+      // Check if expense is linked to an accrual and update accrual status if fully paid
+      // Load expense with linkedAccrual relation to check if it's settling an accrual
+      const expenseWithAccrual = await manager.findOne(Expense, {
+        where: { id: dto.expenseId, organization: { id: organizationId } },
+        relations: ['linkedAccrual'],
+      });
+
+      if (expenseWithAccrual?.linkedAccrual) {
+        // This expense is settling an accrual - find the accrual record
+        const accrual = await manager.findOne(Accrual, {
+          where: {
+            expense: { id: expenseWithAccrual.linkedAccrual.id },
+            organization: { id: organizationId },
+          },
+        });
+
+        if (accrual && accrual.status === AccrualStatus.PENDING_SETTLEMENT) {
+          // Calculate total paid amount including the new payment
+          const allPayments = await manager.find(ExpensePayment, {
+            where: {
+              expense: { id: dto.expenseId },
+              organization: { id: organizationId },
+            },
+          });
+
+          const totalPaid = allPayments.reduce(
+            (sum, p) => sum + parseFloat(p.amount),
+            0,
+          );
+
+          const expenseTotal = parseFloat(expenseWithAccrual.totalAmount || '0');
+
+          // If fully paid (within small tolerance for rounding), mark accrual as settled
+          if (totalPaid >= expenseTotal - 0.01) {
+            accrual.status = AccrualStatus.SETTLED;
+            accrual.settlementDate = dto.paymentDate;
+            accrual.settlementExpense = expenseWithAccrual;
+            await manager.save(accrual);
+          }
+        }
+      }
+
+      return savedPayment;
     });
   }
 
@@ -122,15 +170,62 @@ export class ExpensePaymentsService {
     organizationId: string,
     id: string,
   ): Promise<void> {
-    const payment = await this.expensePaymentsRepository.findOne({
-      where: { id, organization: { id: organizationId } },
+    return await this.dataSource.transaction(async (manager) => {
+      const payment = await manager.findOne(ExpensePayment, {
+        where: { id, organization: { id: organizationId } },
+        relations: ['expense'],
+      });
+
+      if (!payment) {
+        throw new NotFoundException('Payment not found');
+      }
+
+      const expenseId = payment.expense.id;
+
+      // Delete the payment
+      await manager.remove(payment);
+
+      // Check if expense is linked to an accrual and update accrual status if no longer fully paid
+      const expense = await manager.findOne(Expense, {
+        where: { id: expenseId, organization: { id: organizationId } },
+        relations: ['linkedAccrual'],
+      });
+
+      if (expense?.linkedAccrual) {
+        // This expense is settling an accrual - find the accrual record
+        const accrual = await manager.findOne(Accrual, {
+          where: {
+            expense: { id: expense.linkedAccrual.id },
+            organization: { id: organizationId },
+          },
+        });
+
+        if (accrual && accrual.status === AccrualStatus.SETTLED) {
+          // Recalculate total paid amount after payment deletion
+          const remainingPayments = await manager.find(ExpensePayment, {
+            where: {
+              expense: { id: expenseId },
+              organization: { id: organizationId },
+            },
+          });
+
+          const totalPaid = remainingPayments.reduce(
+            (sum, p) => sum + parseFloat(p.amount),
+            0,
+          );
+
+          const expenseTotal = parseFloat(expense.totalAmount || '0');
+
+          // If no longer fully paid, revert accrual status to pending
+          if (totalPaid < expenseTotal - 0.01) {
+            accrual.status = AccrualStatus.PENDING_SETTLEMENT;
+            accrual.settlementDate = null;
+            accrual.settlementExpense = null;
+            await manager.save(accrual);
+          }
+        }
+      }
     });
-
-    if (!payment) {
-      throw new NotFoundException('Payment not found');
-    }
-
-    await this.expensePaymentsRepository.remove(payment);
   }
 }
 

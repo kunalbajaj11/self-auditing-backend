@@ -11,6 +11,7 @@ import { InvoicePayment } from '../../entities/invoice-payment.entity';
 import { JournalEntry } from '../../entities/journal-entry.entity';
 import { CreditNote } from '../../entities/credit-note.entity';
 import { DebitNote } from '../../entities/debit-note.entity';
+import { CreditNoteApplication } from '../../entities/credit-note-application.entity';
 import { GenerateReportDto } from './dto/generate-report.dto';
 import { ReportHistoryFilterDto } from './dto/report-history-filter.dto';
 import { ReportType } from '../../common/enums/report-type.enum';
@@ -43,6 +44,8 @@ export class ReportsService {
     private readonly creditNotesRepository: Repository<CreditNote>,
     @InjectRepository(DebitNote)
     private readonly debitNotesRepository: Repository<DebitNote>,
+    @InjectRepository(CreditNoteApplication)
+    private readonly creditNoteApplicationsRepository: Repository<CreditNoteApplication>,
     private readonly settingsService: SettingsService,
   ) {}
 
@@ -157,32 +160,41 @@ export class ReportsService {
   ) {
     let startDate = filters?.['startDate'];
     let endDate = filters?.['endDate'];
-    
+
     // If dates not provided, use fiscal year based on tax year end
     if (!startDate || !endDate) {
-      const taxSettings = await this.settingsService.getTaxSettings(organizationId);
+      const taxSettings =
+        await this.settingsService.getTaxSettings(organizationId);
       const taxYearEnd = taxSettings.taxYearEnd; // Format: "MM-DD" (e.g., "12-31")
-      
+
       if (taxYearEnd) {
         const [month, day] = taxYearEnd.split('-').map(Number);
         const now = new Date();
         const currentYear = now.getFullYear();
         const fiscalYearEnd = new Date(currentYear, month - 1, day);
-        
+
         // If fiscal year end has passed this year, use current fiscal year
         // Otherwise, use previous fiscal year
         if (now > fiscalYearEnd) {
           // Current fiscal year: from last year's fiscal year end + 1 day to this year's fiscal year end
-          startDate = new Date(currentYear - 1, month - 1, day + 1).toISOString().split('T')[0];
+          startDate = new Date(currentYear - 1, month - 1, day + 1)
+            .toISOString()
+            .split('T')[0];
           endDate = fiscalYearEnd.toISOString().split('T')[0];
         } else {
           // Previous fiscal year: from year before last's fiscal year end + 1 day to last year's fiscal year end
-          startDate = new Date(currentYear - 2, month - 1, day + 1).toISOString().split('T')[0];
-          endDate = new Date(currentYear - 1, month - 1, day).toISOString().split('T')[0];
+          startDate = new Date(currentYear - 2, month - 1, day + 1)
+            .toISOString()
+            .split('T')[0];
+          endDate = new Date(currentYear - 1, month - 1, day)
+            .toISOString()
+            .split('T')[0];
         }
       } else {
         // Fallback to calendar year
-        startDate = new Date(new Date().getFullYear(), 0, 1).toISOString().split('T')[0];
+        startDate = new Date(new Date().getFullYear(), 0, 1)
+          .toISOString()
+          .split('T')[0];
         endDate = new Date().toISOString().split('T')[0];
       }
     }
@@ -215,9 +227,7 @@ export class ReportsService {
 
     // Apply type filter if provided
     if (filters?.['type']) {
-      const types = Array.isArray(filters.type)
-        ? filters.type
-        : [filters.type];
+      const types = Array.isArray(filters.type) ? filters.type : [filters.type];
       expenseQuery.andWhere('expense.type IN (:...types)', { types });
     }
 
@@ -318,7 +328,9 @@ export class ReportsService {
       ])
       .where('accrual.organization_id = :organizationId', { organizationId })
       .andWhere('accrual.is_deleted = false')
-      .andWhere('accrual.status = :status', { status: AccrualStatus.PENDING_SETTLEMENT })
+      .andWhere('accrual.status = :status', {
+        status: AccrualStatus.PENDING_SETTLEMENT,
+      })
       .andWhere('accrual.created_at::date <= :endDate', { endDate });
 
     const accrualsRow = await accrualsQuery.getRawOne();
@@ -336,54 +348,50 @@ export class ReportsService {
 
     // 4. Get Accounts Receivable (unpaid invoices as of end date) - Debits (assets)
     // Show all unpaid/partial invoices that exist as of the end date
-    // Credit Notes reduce receivables, Debit Notes increase receivables
+    // Credit Note Applications reduce receivables, Debit Notes increase receivables
+    // Use subquery to calculate applied credit note amounts per invoice
+    const creditNoteApplicationsSubquery = this.creditNoteApplicationsRepository
+      .createQueryBuilder('cna')
+      .select('COALESCE(SUM(cna.applied_amount), 0)')
+      .where('cna.invoice_id = invoice.id')
+      .andWhere('cna.organization_id = :organizationId', { organizationId })
+      .getQuery();
+
     const receivablesQuery = this.salesInvoicesRepository
       .createQueryBuilder('invoice')
       .select([
-        'SUM(COALESCE(invoice.total_amount, 0) - COALESCE(invoice.paid_amount, 0)) AS invoiceAmount',
+        `SUM(COALESCE(invoice.total_amount, 0) - COALESCE(invoice.paid_amount, 0) - (${creditNoteApplicationsSubquery})) AS invoiceAmount`,
       ])
       .where('invoice.organization_id = :organizationId', { organizationId })
       .andWhere('invoice.invoice_date <= :endDate', { endDate })
       .andWhere('invoice.payment_status IN (:...statuses)', {
         statuses: [PaymentStatus.UNPAID, PaymentStatus.PARTIAL],
-      });
+      })
+      .setParameter('organizationId', organizationId);
 
     const receivablesRow = await receivablesQuery.getRawOne();
     const receivablesDebit = Number(receivablesRow?.invoiceAmount || 0);
 
-    // Get Credit Notes that reduce receivables (as of end date)
-    const receivablesCreditNotesQuery = this.creditNotesRepository
-      .createQueryBuilder('creditNote')
-      .select([
-        'SUM(COALESCE(creditNote.total_amount, 0)) AS credit',
-      ])
-      .where('creditNote.organization_id = :organizationId', { organizationId })
-      .andWhere('creditNote.credit_note_date <= :endDate', { endDate })
-      .andWhere('creditNote.status IN (:...statuses)', {
-        statuses: [CreditNoteStatus.ISSUED, CreditNoteStatus.APPLIED],
-      });
-
-    const receivablesCreditNotesRow = await receivablesCreditNotesQuery.getRawOne();
-    const receivablesCreditNotesCredit = Number(receivablesCreditNotesRow?.credit || 0);
-
     // Get Debit Notes that increase receivables (as of end date)
     const receivablesDebitNotesQuery = this.debitNotesRepository
       .createQueryBuilder('debitNote')
-      .select([
-        'SUM(COALESCE(debitNote.total_amount, 0)) AS debit',
-      ])
+      .select(['SUM(COALESCE(debitNote.total_amount, 0)) AS debit'])
       .where('debitNote.organization_id = :organizationId', { organizationId })
       .andWhere('debitNote.debit_note_date <= :endDate', { endDate })
       .andWhere('debitNote.status IN (:...statuses)', {
         statuses: [DebitNoteStatus.ISSUED, DebitNoteStatus.APPLIED],
       });
 
-    const receivablesDebitNotesRow = await receivablesDebitNotesQuery.getRawOne();
-    const receivablesDebitNotesDebit = Number(receivablesDebitNotesRow?.debit || 0);
+    const receivablesDebitNotesRow =
+      await receivablesDebitNotesQuery.getRawOne();
+    const receivablesDebitNotesDebit = Number(
+      receivablesDebitNotesRow?.debit || 0,
+    );
 
-    // Net Accounts Receivable = Invoices - Credit Notes + Debit Notes
+    // Net Accounts Receivable = Invoices (after credit note applications) + Debit Notes
+    // Credit note applications are already subtracted in the query above
     const netReceivablesDebit = receivablesDebit + receivablesDebitNotesDebit;
-    const netReceivablesCredit = receivablesCreditNotesCredit;
+    const netReceivablesCredit = 0; // Credit note applications are already subtracted from invoices
     const netReceivablesBalance = netReceivablesDebit - netReceivablesCredit;
 
     // Always add Accounts Receivable account (even if 0) so it appears in the report
@@ -414,9 +422,7 @@ export class ReportsService {
       .andWhere("(expense.type IS NULL OR expense.type != 'credit')");
 
     if (filters?.['type']) {
-      const types = Array.isArray(filters.type)
-        ? filters.type
-        : [filters.type];
+      const types = Array.isArray(filters.type) ? filters.type : [filters.type];
       vatReceivableQuery.andWhere('expense.type IN (:...types)', { types });
     }
 
@@ -451,7 +457,9 @@ export class ReportsService {
       const statuses = Array.isArray(filters.status)
         ? filters.status
         : [filters.status];
-      vatPayableQuery.andWhere('invoice.status IN (:...statuses)', { statuses });
+      vatPayableQuery.andWhere('invoice.status IN (:...statuses)', {
+        statuses,
+      });
     }
 
     const vatPayableRow = await vatPayableQuery.getRawOne();
@@ -460,9 +468,7 @@ export class ReportsService {
     // 6a. Get VAT from Credit Notes (reduce VAT Payable) - Debits
     const vatCreditNotesQuery = this.creditNotesRepository
       .createQueryBuilder('creditNote')
-      .select([
-        'SUM(COALESCE(creditNote.vat_amount, 0)) AS debit',
-      ])
+      .select(['SUM(COALESCE(creditNote.vat_amount, 0)) AS debit'])
       .where('creditNote.organization_id = :organizationId', { organizationId })
       .andWhere('creditNote.credit_note_date >= :startDate', { startDate })
       .andWhere('creditNote.credit_note_date <= :endDate', { endDate })
@@ -477,9 +483,7 @@ export class ReportsService {
     // 6b. Get VAT from Debit Notes (increase VAT Payable) - Credits
     const vatDebitNotesQuery = this.debitNotesRepository
       .createQueryBuilder('debitNote')
-      .select([
-        'SUM(COALESCE(debitNote.vat_amount, 0)) AS credit',
-      ])
+      .select(['SUM(COALESCE(debitNote.vat_amount, 0)) AS credit'])
       .where('debitNote.organization_id = :organizationId', { organizationId })
       .andWhere('debitNote.debit_note_date >= :startDate', { startDate })
       .andWhere('debitNote.debit_note_date <= :endDate', { endDate })
@@ -511,9 +515,7 @@ export class ReportsService {
     // Cash/Bank is an asset account: receipts are debits (increase), payments are credits (decrease)
     const expensePaymentsQuery = this.expensePaymentsRepository
       .createQueryBuilder('payment')
-      .select([
-        'SUM(COALESCE(payment.amount, 0)) AS payments',
-      ])
+      .select(['SUM(COALESCE(payment.amount, 0)) AS payments'])
       .where('payment.organization_id = :organizationId', { organizationId })
       .andWhere('payment.payment_date >= :startDate', { startDate })
       .andWhere('payment.payment_date <= :endDate', { endDate });
@@ -523,9 +525,7 @@ export class ReportsService {
 
     const invoicePaymentsQuery = this.invoicePaymentsRepository
       .createQueryBuilder('payment')
-      .select([
-        'SUM(COALESCE(payment.amount, 0)) AS receipts',
-      ])
+      .select(['SUM(COALESCE(payment.amount, 0)) AS receipts'])
       .where('payment.organization_id = :organizationId', { organizationId })
       .andWhere('payment.payment_date >= :startDate', { startDate })
       .andWhere('payment.payment_date <= :endDate', { endDate });
@@ -544,10 +544,15 @@ export class ReportsService {
       .where('entry.organization_id = :organizationId', { organizationId })
       .andWhere('entry.entry_date >= :startDate', { startDate })
       .andWhere('entry.entry_date <= :endDate', { endDate })
-      .andWhere("entry.status IN ('cash_paid', 'cash_received', 'bank_paid', 'bank_received')");
+      .andWhere(
+        "entry.status IN ('cash_paid', 'cash_received', 'bank_paid', 'bank_received')",
+      );
 
-    const cashBankJournalEntriesRow = await cashBankJournalEntriesQuery.getRawOne();
-    const journalReceivedDebit = Number(cashBankJournalEntriesRow?.received || 0);
+    const cashBankJournalEntriesRow =
+      await cashBankJournalEntriesQuery.getRawOne();
+    const journalReceivedDebit = Number(
+      cashBankJournalEntriesRow?.received || 0,
+    );
     const journalPaidCredit = Number(cashBankJournalEntriesRow?.paid || 0);
 
     // Total debits = invoice payments + cash/bank received from journal entries
@@ -581,7 +586,9 @@ export class ReportsService {
       .where('entry.organization_id = :organizationId', { organizationId })
       .andWhere('entry.entry_date >= :startDate', { startDate })
       .andWhere('entry.entry_date <= :endDate', { endDate })
-      .andWhere("entry.status NOT IN ('cash_paid', 'cash_received', 'bank_paid', 'bank_received')")
+      .andWhere(
+        "entry.status NOT IN ('cash_paid', 'cash_received', 'bank_paid', 'bank_received')",
+      )
       .groupBy('entry.category')
       .addGroupBy('entry.type');
 
@@ -593,9 +600,12 @@ export class ReportsService {
         const accountType = row.accounttype || 'Journal Entry';
         // For credit accounts (Equity, Revenue, Liabilities): balance = credit - debit
         // For debit accounts (Assets, Expenses): balance = debit - credit
-        const isCreditAccount = accountType === 'Equity' || accountType === 'Revenue' || accountType === 'Liability';
+        const isCreditAccount =
+          accountType === 'Equity' ||
+          accountType === 'Revenue' ||
+          accountType === 'Liability';
         const balance = isCreditAccount ? credit - debit : debit - credit;
-        
+
         accounts.push({
           accountName: row.accountname || 'Journal Entry',
           accountType: accountType,
@@ -607,7 +617,10 @@ export class ReportsService {
     });
 
     // Calculate opening balances (before startDate) for each account
-    const openingBalances = new Map<string, { debit: number; credit: number; balance: number }>();
+    const openingBalances = new Map<
+      string,
+      { debit: number; credit: number; balance: number }
+    >();
 
     // 1. Opening balances for expenses by category
     // Exclude type='credit' expenses as they are sales/revenue, not expenses
@@ -645,15 +658,17 @@ export class ReportsService {
     // 2. Opening balance for Sales Revenue (including Credit Notes and Debit Notes)
     const openingRevenueQuery = this.salesInvoicesRepository
       .createQueryBuilder('invoice')
-      .select([
-        'SUM(COALESCE(invoice.base_amount, invoice.amount)) AS credit',
-      ])
+      .select(['SUM(COALESCE(invoice.base_amount, invoice.amount)) AS credit'])
       .where('invoice.organization_id = :organizationId', { organizationId })
       .andWhere('invoice.invoice_date < :startDate', { startDate });
 
     if (filters?.['status']) {
-      const statuses = Array.isArray(filters.status) ? filters.status : [filters.status];
-      openingRevenueQuery.andWhere('invoice.status IN (:...statuses)', { statuses });
+      const statuses = Array.isArray(filters.status)
+        ? filters.status
+        : [filters.status];
+      openingRevenueQuery.andWhere('invoice.status IN (:...statuses)', {
+        statuses,
+      });
     }
 
     const openingRevenueRow = await openingRevenueQuery.getRawOne();
@@ -692,8 +707,10 @@ export class ReportsService {
     // For Revenue account: Credits increase (invoices + debit notes), Debits decrease (credit notes)
     // Balance = Credits - Debits
     const openingRevenueDebit = openingCreditNotesAmount; // Credit notes reduce revenue (debit)
-    const totalOpeningRevenueCredit = openingRevenueCredit + openingDebitNotesAmount; // Invoices and debit notes increase revenue (credit)
-    const openingRevenueBalance = totalOpeningRevenueCredit - openingRevenueDebit;
+    const totalOpeningRevenueCredit =
+      openingRevenueCredit + openingDebitNotesAmount; // Invoices and debit notes increase revenue (credit)
+    const openingRevenueBalance =
+      totalOpeningRevenueCredit - openingRevenueDebit;
     // Always set opening balance for Sales Revenue, even if 0
     openingBalances.set('Sales Revenue', {
       debit: openingRevenueDebit,
@@ -705,12 +722,12 @@ export class ReportsService {
     // Include all pending accruals that existed before the start date
     const openingAccrualsQuery = this.accrualsRepository
       .createQueryBuilder('accrual')
-      .select([
-        'SUM(accrual.amount) AS credit',
-      ])
+      .select(['SUM(accrual.amount) AS credit'])
       .where('accrual.organization_id = :organizationId', { organizationId })
       .andWhere('accrual.is_deleted = false')
-      .andWhere('accrual.status = :status', { status: AccrualStatus.PENDING_SETTLEMENT })
+      .andWhere('accrual.status = :status', {
+        status: AccrualStatus.PENDING_SETTLEMENT,
+      })
       .andWhere('accrual.created_at::date < :startDate', { startDate });
 
     const openingAccrualsRow = await openingAccrualsQuery.getRawOne();
@@ -725,54 +742,53 @@ export class ReportsService {
     });
 
     // 4. Opening balance for Accounts Receivable (invoices before startDate that are still unpaid)
-    // Include Credit Notes and Debit Notes that affect receivables
+    // Include Credit Note Applications and Debit Notes that affect receivables
+    // Use subquery to calculate applied credit note amounts per invoice
+    const openingCreditNoteApplicationsSubquery = this.creditNoteApplicationsRepository
+      .createQueryBuilder('cna')
+      .select('COALESCE(SUM(cna.applied_amount), 0)')
+      .where('cna.invoice_id = invoice.id')
+      .andWhere('cna.organization_id = :organizationId', { organizationId })
+      .getQuery();
+
     const openingReceivablesQuery = this.salesInvoicesRepository
       .createQueryBuilder('invoice')
       .select([
-        'SUM(COALESCE(invoice.total_amount, 0) - COALESCE(invoice.paid_amount, 0)) AS invoiceAmount',
+        `SUM(COALESCE(invoice.total_amount, 0) - COALESCE(invoice.paid_amount, 0) - (${openingCreditNoteApplicationsSubquery})) AS invoiceAmount`,
       ])
       .where('invoice.organization_id = :organizationId', { organizationId })
       .andWhere('invoice.invoice_date < :startDate', { startDate })
       .andWhere('invoice.payment_status IN (:...statuses)', {
         statuses: [PaymentStatus.UNPAID, PaymentStatus.PARTIAL],
-      });
+      })
+      .setParameter('organizationId', organizationId);
 
     const openingReceivablesRow = await openingReceivablesQuery.getRawOne();
-    const openingReceivablesDebit = Number(openingReceivablesRow?.invoiceAmount || 0);
-
-    // Opening Credit Notes (reduce receivables)
-    const openingReceivablesCreditNotesQuery = this.creditNotesRepository
-      .createQueryBuilder('creditNote')
-      .select([
-        'SUM(COALESCE(creditNote.total_amount, 0)) AS credit',
-      ])
-      .where('creditNote.organization_id = :organizationId', { organizationId })
-      .andWhere('creditNote.credit_note_date < :startDate', { startDate })
-      .andWhere('creditNote.status IN (:...statuses)', {
-        statuses: [CreditNoteStatus.ISSUED, CreditNoteStatus.APPLIED],
-      });
-
-    const openingReceivablesCreditNotesRow = await openingReceivablesCreditNotesQuery.getRawOne();
-    const openingReceivablesCreditNotesCredit = Number(openingReceivablesCreditNotesRow?.credit || 0);
+    const openingReceivablesDebit = Number(
+      openingReceivablesRow?.invoiceAmount || 0,
+    );
 
     // Opening Debit Notes (increase receivables)
     const openingReceivablesDebitNotesQuery = this.debitNotesRepository
       .createQueryBuilder('debitNote')
-      .select([
-        'SUM(COALESCE(debitNote.total_amount, 0)) AS debit',
-      ])
+      .select(['SUM(COALESCE(debitNote.total_amount, 0)) AS debit'])
       .where('debitNote.organization_id = :organizationId', { organizationId })
       .andWhere('debitNote.debit_note_date < :startDate', { startDate })
       .andWhere('debitNote.status IN (:...statuses)', {
         statuses: [DebitNoteStatus.ISSUED, DebitNoteStatus.APPLIED],
       });
 
-    const openingReceivablesDebitNotesRow = await openingReceivablesDebitNotesQuery.getRawOne();
-    const openingReceivablesDebitNotesDebit = Number(openingReceivablesDebitNotesRow?.debit || 0);
+    const openingReceivablesDebitNotesRow =
+      await openingReceivablesDebitNotesQuery.getRawOne();
+    const openingReceivablesDebitNotesDebit = Number(
+      openingReceivablesDebitNotesRow?.debit || 0,
+    );
 
-    // Net opening Accounts Receivable = Invoices - Credit Notes + Debit Notes
-    const netOpeningReceivablesDebit = openingReceivablesDebit + openingReceivablesDebitNotesDebit;
-    const netOpeningReceivablesCredit = openingReceivablesCreditNotesCredit;
+    // Net opening Accounts Receivable = Invoices (after credit note applications) + Debit Notes
+    // Credit note applications are already subtracted in the query above
+    const netOpeningReceivablesDebit =
+      openingReceivablesDebit + openingReceivablesDebitNotesDebit;
+    const netOpeningReceivablesCredit = 0; // Credit note applications are already subtracted from invoices
     // Always set opening balance for Accounts Receivable, even if 0
     openingBalances.set('Accounts Receivable', {
       debit: netOpeningReceivablesDebit,
@@ -797,11 +813,15 @@ export class ReportsService {
 
     if (filters?.['type']) {
       const types = Array.isArray(filters.type) ? filters.type : [filters.type];
-      openingVatReceivableQuery.andWhere('expense.type IN (:...types)', { types });
+      openingVatReceivableQuery.andWhere('expense.type IN (:...types)', {
+        types,
+      });
     }
 
     const openingVatReceivableRow = await openingVatReceivableQuery.getRawOne();
-    const openingVatReceivableDebit = Number(openingVatReceivableRow?.debit || 0);
+    const openingVatReceivableDebit = Number(
+      openingVatReceivableRow?.debit || 0,
+    );
     if (openingVatReceivableDebit > 0) {
       openingBalances.set('VAT Receivable (Input VAT)', {
         debit: openingVatReceivableDebit,
@@ -813,16 +833,18 @@ export class ReportsService {
     // 6. Opening balance for VAT Payable (including Credit Notes and Debit Notes VAT)
     const openingVatPayableQuery = this.salesInvoicesRepository
       .createQueryBuilder('invoice')
-      .select([
-        'SUM(COALESCE(invoice.vat_amount, 0)) AS credit',
-      ])
+      .select(['SUM(COALESCE(invoice.vat_amount, 0)) AS credit'])
       .where('invoice.organization_id = :organizationId', { organizationId })
       .andWhere('invoice.invoice_date < :startDate', { startDate })
       .andWhere('invoice.vat_amount > 0');
 
     if (filters?.['status']) {
-      const statuses = Array.isArray(filters.status) ? filters.status : [filters.status];
-      openingVatPayableQuery.andWhere('invoice.status IN (:...statuses)', { statuses });
+      const statuses = Array.isArray(filters.status)
+        ? filters.status
+        : [filters.status];
+      openingVatPayableQuery.andWhere('invoice.status IN (:...statuses)', {
+        statuses,
+      });
     }
 
     const openingVatPayableRow = await openingVatPayableQuery.getRawOne();
@@ -831,9 +853,7 @@ export class ReportsService {
     // Opening Credit Notes VAT (reduce VAT Payable)
     const openingVatCreditNotesQuery = this.creditNotesRepository
       .createQueryBuilder('creditNote')
-      .select([
-        'SUM(COALESCE(creditNote.vat_amount, 0)) AS debit',
-      ])
+      .select(['SUM(COALESCE(creditNote.vat_amount, 0)) AS debit'])
       .where('creditNote.organization_id = :organizationId', { organizationId })
       .andWhere('creditNote.credit_note_date < :startDate', { startDate })
       .andWhere('creditNote.status IN (:...statuses)', {
@@ -841,15 +861,16 @@ export class ReportsService {
       })
       .andWhere('creditNote.vat_amount > 0');
 
-    const openingVatCreditNotesRow = await openingVatCreditNotesQuery.getRawOne();
-    const openingVatCreditNotesDebit = Number(openingVatCreditNotesRow?.debit || 0);
+    const openingVatCreditNotesRow =
+      await openingVatCreditNotesQuery.getRawOne();
+    const openingVatCreditNotesDebit = Number(
+      openingVatCreditNotesRow?.debit || 0,
+    );
 
     // Opening Debit Notes VAT (increase VAT Payable)
     const openingVatDebitNotesQuery = this.debitNotesRepository
       .createQueryBuilder('debitNote')
-      .select([
-        'SUM(COALESCE(debitNote.vat_amount, 0)) AS credit',
-      ])
+      .select(['SUM(COALESCE(debitNote.vat_amount, 0)) AS credit'])
       .where('debitNote.organization_id = :organizationId', { organizationId })
       .andWhere('debitNote.debit_note_date < :startDate', { startDate })
       .andWhere('debitNote.status IN (:...statuses)', {
@@ -858,12 +879,15 @@ export class ReportsService {
       .andWhere('debitNote.vat_amount > 0');
 
     const openingVatDebitNotesRow = await openingVatDebitNotesQuery.getRawOne();
-    const openingVatDebitNotesCredit = Number(openingVatDebitNotesRow?.credit || 0);
+    const openingVatDebitNotesCredit = Number(
+      openingVatDebitNotesRow?.credit || 0,
+    );
 
     // Net opening VAT Payable = Output VAT - Credit Note VAT + Debit Note VAT
     // For liability accounts: Credit increases, Debit decreases
     const netOpeningVatPayableDebit = openingVatCreditNotesDebit;
-    const netOpeningVatPayableCredit = openingVatPayableCredit + openingVatDebitNotesCredit;
+    const netOpeningVatPayableCredit =
+      openingVatPayableCredit + openingVatDebitNotesCredit;
     // Always set opening balance for VAT Payable, even if 0
     // For liability accounts, balance = credit - debit
     openingBalances.set('VAT Payable (Output VAT)', {
@@ -876,25 +900,27 @@ export class ReportsService {
     // Calculate net opening balance: all receipts (debits) minus all payments (credits) before startDate
     const openingExpensePaymentsQuery = this.expensePaymentsRepository
       .createQueryBuilder('payment')
-      .select([
-        'SUM(COALESCE(payment.amount, 0)) AS payments',
-      ])
+      .select(['SUM(COALESCE(payment.amount, 0)) AS payments'])
       .where('payment.organization_id = :organizationId', { organizationId })
       .andWhere('payment.payment_date < :startDate', { startDate });
 
-    const openingExpensePaymentsRow = await openingExpensePaymentsQuery.getRawOne();
-    const openingExpensePaymentsCredit = Number(openingExpensePaymentsRow?.payments || 0);
+    const openingExpensePaymentsRow =
+      await openingExpensePaymentsQuery.getRawOne();
+    const openingExpensePaymentsCredit = Number(
+      openingExpensePaymentsRow?.payments || 0,
+    );
 
     const openingInvoicePaymentsQuery = this.invoicePaymentsRepository
       .createQueryBuilder('payment')
-      .select([
-        'SUM(COALESCE(payment.amount, 0)) AS receipts',
-      ])
+      .select(['SUM(COALESCE(payment.amount, 0)) AS receipts'])
       .where('payment.organization_id = :organizationId', { organizationId })
       .andWhere('payment.payment_date < :startDate', { startDate });
 
-    const openingInvoicePaymentsRow = await openingInvoicePaymentsQuery.getRawOne();
-    const openingInvoicePaymentsDebit = Number(openingInvoicePaymentsRow?.receipts || 0);
+    const openingInvoicePaymentsRow =
+      await openingInvoicePaymentsQuery.getRawOne();
+    const openingInvoicePaymentsDebit = Number(
+      openingInvoicePaymentsRow?.receipts || 0,
+    );
 
     // Include opening journal entries with CASH_PAID, CASH_RECEIVED, BANK_PAID, and BANK_RECEIVED statuses
     const openingCashBankJournalEntriesQuery = this.journalEntriesRepository
@@ -905,19 +931,29 @@ export class ReportsService {
       ])
       .where('entry.organization_id = :organizationId', { organizationId })
       .andWhere('entry.entry_date < :startDate', { startDate })
-      .andWhere("entry.status IN ('cash_paid', 'cash_received', 'bank_paid', 'bank_received')");
+      .andWhere(
+        "entry.status IN ('cash_paid', 'cash_received', 'bank_paid', 'bank_received')",
+      );
 
-    const openingCashBankJournalEntriesRow = await openingCashBankJournalEntriesQuery.getRawOne();
-    const openingJournalReceivedDebit = Number(openingCashBankJournalEntriesRow?.received || 0);
-    const openingJournalPaidCredit = Number(openingCashBankJournalEntriesRow?.paid || 0);
+    const openingCashBankJournalEntriesRow =
+      await openingCashBankJournalEntriesQuery.getRawOne();
+    const openingJournalReceivedDebit = Number(
+      openingCashBankJournalEntriesRow?.received || 0,
+    );
+    const openingJournalPaidCredit = Number(
+      openingCashBankJournalEntriesRow?.paid || 0,
+    );
 
     // Total opening debits = invoice payments + cash/bank received from journal entries
     // Total opening credits = expense payments + cash/bank paid from journal entries
-    const totalOpeningCashDebit = openingInvoicePaymentsDebit + openingJournalReceivedDebit;
-    const totalOpeningCashCredit = openingExpensePaymentsCredit + openingJournalPaidCredit;
+    const totalOpeningCashDebit =
+      openingInvoicePaymentsDebit + openingJournalReceivedDebit;
+    const totalOpeningCashCredit =
+      openingExpensePaymentsCredit + openingJournalPaidCredit;
 
     // Calculate net opening balance for Cash/Bank (receipts - payments)
-    const openingCashBankBalance = totalOpeningCashDebit - totalOpeningCashCredit;
+    const openingCashBankBalance =
+      totalOpeningCashDebit - totalOpeningCashCredit;
     // Always set opening balance for Cash/Bank, even if 0, so it appears in the report
     openingBalances.set('Cash/Bank', {
       debit: totalOpeningCashDebit,
@@ -935,7 +971,9 @@ export class ReportsService {
       ])
       .where('entry.organization_id = :organizationId', { organizationId })
       .andWhere('entry.entry_date < :startDate', { startDate })
-      .andWhere("entry.status NOT IN ('cash_paid', 'cash_received', 'bank_paid', 'bank_received')")
+      .andWhere(
+        "entry.status NOT IN ('cash_paid', 'cash_received', 'bank_paid', 'bank_received')",
+      )
       .groupBy('entry.category')
       .addGroupBy('entry.type');
 
@@ -969,13 +1007,13 @@ export class ReportsService {
     // Calculate period totals
     const totalDebit = accounts.reduce((sum, acc) => sum + acc.debit, 0);
     const totalCredit = accounts.reduce((sum, acc) => sum + acc.credit, 0);
-    
+
     // Calculate closing balances (opening + period)
     const totalClosingDebit = totalOpeningDebit + totalDebit;
     const totalClosingCredit = totalOpeningCredit + totalCredit;
     const totalOpeningBalance = totalOpeningDebit - totalOpeningCredit;
     const totalClosingBalance = totalClosingDebit - totalClosingCredit;
-    
+
     // Validate trial balance - it should always balance (debits = credits)
     // In double-entry bookkeeping, every transaction has equal debits and credits
     const periodDifference = Math.abs(totalDebit - totalCredit);
@@ -984,19 +1022,25 @@ export class ReportsService {
 
     // Add accounts that have opening balances but no period transactions
     // This ensures Cash/Bank and Accounts Payable always appear if they have any balance
-    const accountNamesSet = new Set(accounts.map(acc => acc.accountName));
+    const accountNamesSet = new Set(accounts.map((acc) => acc.accountName));
     openingBalances.forEach((opening, accountName) => {
-      if (!accountNamesSet.has(accountName) && (opening.debit > 0 || opening.credit > 0 || opening.balance !== 0)) {
+      if (
+        !accountNamesSet.has(accountName) &&
+        (opening.debit > 0 || opening.credit > 0 || opening.balance !== 0)
+      ) {
         // Determine account type based on account name
         let accountType = 'Asset';
-        if (accountName === 'Accounts Payable' || accountName.includes('VAT Payable')) {
+        if (
+          accountName === 'Accounts Payable' ||
+          accountName.includes('VAT Payable')
+        ) {
           accountType = 'Liability';
         } else if (accountName === 'Sales Revenue') {
           accountType = 'Revenue';
         } else if (accountName.includes('Equity')) {
           accountType = 'Equity';
         }
-        
+
         accounts.push({
           accountName,
           accountType,
@@ -1009,16 +1053,25 @@ export class ReportsService {
 
     // Add opening and closing balance to each account
     const accountsWithBalances = accounts.map((acc) => {
-      const opening = openingBalances.get(acc.accountName) || { debit: 0, credit: 0, balance: 0 };
+      const opening = openingBalances.get(acc.accountName) || {
+        debit: 0,
+        credit: 0,
+        balance: 0,
+      };
       const closingDebit = opening.debit + acc.debit;
       const closingCredit = opening.credit + acc.credit;
-      
+
       // Calculate closing balance based on account type
       // For debit accounts (Assets, Expenses): balance = debit - credit
       // For credit accounts (Liabilities, Revenue, Equity): balance = credit - debit
-      const isCreditAccount = acc.accountType === 'Liability' || acc.accountType === 'Revenue' || acc.accountType === 'Equity';
-      const closingBalance = isCreditAccount ? closingCredit - closingDebit : closingDebit - closingCredit;
-      
+      const isCreditAccount =
+        acc.accountType === 'Liability' ||
+        acc.accountType === 'Revenue' ||
+        acc.accountType === 'Equity';
+      const closingBalance = isCreditAccount
+        ? closingCredit - closingDebit
+        : closingDebit - closingCredit;
+
       return {
         ...acc,
         openingDebit: opening.debit,
@@ -1037,7 +1090,14 @@ export class ReportsService {
       },
       accounts: accountsWithBalances.sort((a, b) => {
         // Sort by account type, then by name
-        const typeOrder = ['Asset', 'Liability', 'Expense', 'Revenue', 'Journal Entry', 'Equity'];
+        const typeOrder = [
+          'Asset',
+          'Liability',
+          'Expense',
+          'Revenue',
+          'Journal Entry',
+          'Equity',
+        ];
         const aTypeIndex = typeOrder.indexOf(a.accountType);
         const bTypeIndex = typeOrder.indexOf(b.accountType);
         const aOrder = aTypeIndex >= 0 ? aTypeIndex : 999;
@@ -1066,7 +1126,7 @@ export class ReportsService {
         isBalanced: isBalanced,
         periodDifference: Number(periodDifference.toFixed(2)),
         closingDifference: Number(closingDifference.toFixed(2)),
-        warning: !isBalanced 
+        warning: !isBalanced
           ? `Trial balance is not balanced! Period difference: ${periodDifference.toFixed(2)}, Closing difference: ${closingDifference.toFixed(2)}. This indicates an accounting error that needs investigation.`
           : null,
       },
@@ -1112,9 +1172,7 @@ export class ReportsService {
     // Get Credit Notes that reduce receivables (as of asOfDate)
     const receivablesCreditNotesQuery = this.creditNotesRepository
       .createQueryBuilder('creditNote')
-      .select([
-        'SUM(COALESCE(creditNote.total_amount, 0)) AS credit',
-      ])
+      .select(['SUM(COALESCE(creditNote.total_amount, 0)) AS credit'])
       .where('creditNote.organization_id = :organizationId', { organizationId })
       .andWhere('creditNote.credit_note_date <= :asOfDate', { asOfDate })
       .andWhere('creditNote.status IN (:...statuses)', {
@@ -1124,26 +1182,31 @@ export class ReportsService {
     // Get Debit Notes that increase receivables (as of asOfDate)
     const receivablesDebitNotesQuery = this.debitNotesRepository
       .createQueryBuilder('debitNote')
-      .select([
-        'SUM(COALESCE(debitNote.total_amount, 0)) AS debit',
-      ])
+      .select(['SUM(COALESCE(debitNote.total_amount, 0)) AS debit'])
       .where('debitNote.organization_id = :organizationId', { organizationId })
       .andWhere('debitNote.debit_note_date <= :asOfDate', { asOfDate })
       .andWhere('debitNote.status IN (:...statuses)', {
         statuses: [DebitNoteStatus.ISSUED, DebitNoteStatus.APPLIED],
       });
 
-    const [receivablesRow, receivablesCreditNotesRow, receivablesDebitNotesRow] = await Promise.all([
+    const [
+      receivablesRow,
+      receivablesCreditNotesRow,
+      receivablesDebitNotesRow,
+    ] = await Promise.all([
       receivablesQuery.getRawOne(),
       receivablesCreditNotesQuery.getRawOne(),
       receivablesDebitNotesQuery.getRawOne(),
     ]);
 
     const receivablesAmount = Number(receivablesRow?.amount || 0);
-    const receivablesCreditNotes = Number(receivablesCreditNotesRow?.credit || 0);
+    const receivablesCreditNotes = Number(
+      receivablesCreditNotesRow?.credit || 0,
+    );
     const receivablesDebitNotes = Number(receivablesDebitNotesRow?.debit || 0);
     // Net Accounts Receivable = Invoices - Credit Notes + Debit Notes
-    const netReceivablesAmount = receivablesAmount - receivablesCreditNotes + receivablesDebitNotes;
+    const netReceivablesAmount =
+      receivablesAmount - receivablesCreditNotes + receivablesDebitNotes;
     if (netReceivablesAmount > 0) {
       assets.push({
         category: 'Accounts Receivable',
@@ -1153,21 +1216,20 @@ export class ReportsService {
     }
 
     // 2. Assets: Cash/Bank balances (net of payments)
-    // Cash = Invoice Payments - Expense Payments + Journal Entries (cash/bank received - paid)
+    // Cash = Opening Cash + Period Invoice Payments - Period Expense Payments + Period Journal Entries (cash/bank received - paid)
+    // Note: Opening cash will be calculated later and added to period transactions
+
+    // Period transactions (from startDate to asOfDate)
     const invoicePaymentsQuery = this.invoicePaymentsRepository
       .createQueryBuilder('payment')
-      .select([
-        'SUM(COALESCE(payment.amount, 0)) AS receipts',
-      ])
+      .select(['SUM(COALESCE(payment.amount, 0)) AS receipts'])
       .where('payment.organization_id = :organizationId', { organizationId })
       .andWhere('payment.payment_date >= :startDate', { startDate })
       .andWhere('payment.payment_date <= :asOfDate', { asOfDate });
 
     const expensePaymentsQuery = this.expensePaymentsRepository
       .createQueryBuilder('payment')
-      .select([
-        'SUM(COALESCE(payment.amount, 0)) AS payments',
-      ])
+      .select(['SUM(COALESCE(payment.amount, 0)) AS payments'])
       .where('payment.organization_id = :organizationId', { organizationId })
       .andWhere('payment.payment_date >= :startDate', { startDate })
       .andWhere('payment.payment_date <= :asOfDate', { asOfDate });
@@ -1182,26 +1244,27 @@ export class ReportsService {
       .where('entry.organization_id = :organizationId', { organizationId })
       .andWhere('entry.entry_date >= :startDate', { startDate })
       .andWhere('entry.entry_date <= :asOfDate', { asOfDate })
-      .andWhere("entry.status IN ('cash_paid', 'cash_received', 'bank_paid', 'bank_received')");
+      .andWhere(
+        "entry.status IN ('cash_paid', 'cash_received', 'bank_paid', 'bank_received')",
+      );
 
-    const [invoicePaymentsRow, expensePaymentsRow, cashBankJournalEntriesRow] = await Promise.all([
-      invoicePaymentsQuery.getRawOne(),
-      expensePaymentsQuery.getRawOne(),
-      cashBankJournalEntriesQuery.getRawOne(),
-    ]);
+    const [invoicePaymentsRow, expensePaymentsRow, cashBankJournalEntriesRow] =
+      await Promise.all([
+        invoicePaymentsQuery.getRawOne(),
+        expensePaymentsQuery.getRawOne(),
+        cashBankJournalEntriesQuery.getRawOne(),
+      ]);
 
-    const receipts = Number(invoicePaymentsRow?.receipts || 0);
-    const payments = Number(expensePaymentsRow?.payments || 0);
-    const journalReceived = Number(cashBankJournalEntriesRow?.received || 0);
-    const journalPaid = Number(cashBankJournalEntriesRow?.paid || 0);
-    const netCash = receipts - payments + journalReceived - journalPaid;
-    if (netCash !== 0) {
-      assets.push({
-        category: 'Cash/Bank',
-        amount: netCash,
-      });
-      totalAssets += netCash;
-    }
+    // Calculate period transactions (will be used later with opening cash)
+    const periodReceipts = Number(invoicePaymentsRow?.receipts || 0);
+    const periodPayments = Number(expensePaymentsRow?.payments || 0);
+    const periodJournalReceived = Number(
+      cashBankJournalEntriesRow?.received || 0,
+    );
+    const periodJournalPaid = Number(cashBankJournalEntriesRow?.paid || 0);
+
+    // Note: We'll calculate netCash later after opening cash is calculated
+    // For now, just store period transactions (will be added to opening cash later)
 
     // 3. Assets: VAT Receivable (Input VAT from expenses)
     // Exclude type='credit' expenses as they are sales/revenue, not expenses
@@ -1219,9 +1282,7 @@ export class ReportsService {
       .andWhere("(expense.type IS NULL OR expense.type != 'credit')");
 
     if (filters?.['type']) {
-      const types = Array.isArray(filters.type)
-        ? filters.type
-        : [filters.type];
+      const types = Array.isArray(filters.type) ? filters.type : [filters.type];
       vatReceivableQuery.andWhere('expense.type IN (:...types)', { types });
     }
 
@@ -1236,7 +1297,12 @@ export class ReportsService {
     }
 
     // Liabilities
-    const liabilities: Array<{ vendor: string; amount: number; status: string; category?: string }> = [];
+    const liabilities: Array<{
+      vendor: string;
+      amount: number;
+      status: string;
+      category?: string;
+    }> = [];
     let totalLiabilities = 0;
 
     // 1. Liabilities: Unpaid accruals (Accounts Payable)
@@ -1303,15 +1369,15 @@ export class ReportsService {
       const statuses = Array.isArray(filters.status)
         ? filters.status
         : [filters.status];
-      vatPayableQuery.andWhere('invoice.status IN (:...statuses)', { statuses });
+      vatPayableQuery.andWhere('invoice.status IN (:...statuses)', {
+        statuses,
+      });
     }
 
     // Get VAT from Credit Notes (reduce VAT Payable)
     const vatCreditNotesQuery = this.creditNotesRepository
       .createQueryBuilder('creditNote')
-      .select([
-        'SUM(COALESCE(creditNote.vat_amount, 0)) AS vat',
-      ])
+      .select(['SUM(COALESCE(creditNote.vat_amount, 0)) AS vat'])
       .where('creditNote.organization_id = :organizationId', { organizationId })
       .andWhere('creditNote.credit_note_date >= :startDate', { startDate })
       .andWhere('creditNote.credit_note_date <= :asOfDate', { asOfDate })
@@ -1323,9 +1389,7 @@ export class ReportsService {
     // Get VAT from Debit Notes (increase VAT Payable)
     const vatDebitNotesQuery = this.debitNotesRepository
       .createQueryBuilder('debitNote')
-      .select([
-        'SUM(COALESCE(debitNote.vat_amount, 0)) AS vat',
-      ])
+      .select(['SUM(COALESCE(debitNote.vat_amount, 0)) AS vat'])
       .where('debitNote.organization_id = :organizationId', { organizationId })
       .andWhere('debitNote.debit_note_date >= :startDate', { startDate })
       .andWhere('debitNote.debit_note_date <= :asOfDate', { asOfDate })
@@ -1334,17 +1398,19 @@ export class ReportsService {
       })
       .andWhere('debitNote.vat_amount > 0');
 
-    const [vatPayableRow, vatCreditNotesRow, vatDebitNotesRow] = await Promise.all([
-      vatPayableQuery.getRawOne(),
-      vatCreditNotesQuery.getRawOne(),
-      vatDebitNotesQuery.getRawOne(),
-    ]);
+    const [vatPayableRow, vatCreditNotesRow, vatDebitNotesRow] =
+      await Promise.all([
+        vatPayableQuery.getRawOne(),
+        vatCreditNotesQuery.getRawOne(),
+        vatDebitNotesQuery.getRawOne(),
+      ]);
 
     const vatPayableAmount = Number(vatPayableRow?.amount || 0);
     const vatCreditNotesAmount = Number(vatCreditNotesRow?.vat || 0);
     const vatDebitNotesAmount = Number(vatDebitNotesRow?.vat || 0);
     // Net VAT Payable = Output VAT - Credit Note VAT + Debit Note VAT
-    const netVatPayableAmount = vatPayableAmount - vatCreditNotesAmount + vatDebitNotesAmount;
+    const netVatPayableAmount =
+      vatPayableAmount - vatCreditNotesAmount + vatDebitNotesAmount;
     if (netVatPayableAmount > 0) {
       liabilities.push({
         vendor: 'VAT Payable (Output VAT)',
@@ -1357,9 +1423,7 @@ export class ReportsService {
     // Equity: Revenue - Expenses + Journal Entries
     const revenueQuery = this.salesInvoicesRepository
       .createQueryBuilder('invoice')
-      .select([
-        'SUM(COALESCE(invoice.base_amount, invoice.amount)) AS revenue',
-      ])
+      .select(['SUM(COALESCE(invoice.base_amount, invoice.amount)) AS revenue'])
       .where('invoice.organization_id = :organizationId', { organizationId })
       .andWhere('invoice.invoice_date >= :startDate', { startDate })
       .andWhere('invoice.invoice_date <= :asOfDate', { asOfDate });
@@ -1393,37 +1457,37 @@ export class ReportsService {
     // Get Journal Entries (equity items) - grouped by type for ledger details
     const journalEntriesQuery = this.journalEntriesRepository
       .createQueryBuilder('entry')
-      .select([
-        "entry.type AS type",
-        "SUM(entry.amount) AS amount",
-      ])
+      .select(['entry.type AS type', 'SUM(entry.amount) AS amount'])
       .where('entry.organization_id = :organizationId', { organizationId })
       .andWhere('entry.entry_date >= :startDate', { startDate })
       .andWhere('entry.entry_date <= :asOfDate', { asOfDate })
-      .andWhere("entry.type IN ('share_capital', 'retained_earnings', 'shareholder_account')")
+      .andWhere(
+        "entry.type IN ('share_capital', 'retained_earnings', 'shareholder_account')",
+      )
       .groupBy('entry.type');
 
-    const [revenueRow, creditNotesRow, debitNotesRow, journalRows] = await Promise.all([
-      revenueQuery.getRawOne(),
-      creditNotesQuery.getRawOne(),
-      debitNotesQuery.getRawOne(),
-      journalEntriesQuery.getRawMany(),
-    ]);
+    const [revenueRow, creditNotesRow, debitNotesRow, journalRows] =
+      await Promise.all([
+        revenueQuery.getRawOne(),
+        creditNotesQuery.getRawOne(),
+        debitNotesQuery.getRawOne(),
+        journalEntriesQuery.getRawMany(),
+      ]);
 
     const totalRevenue = Number(revenueRow?.revenue || 0);
     const creditNotesAmount = Number(creditNotesRow?.creditNotes || 0);
     const debitNotesAmount = Number(debitNotesRow?.debitNotes || 0);
-    
+
     // Process journal entries by type
     const journalEquityMap = new Map<string, number>();
     let journalEquity = 0;
     let journalShareholder = 0;
-    
+
     journalRows.forEach((row) => {
       const amount = Number(row.amount || 0);
       const type = row.type;
       journalEquityMap.set(type, amount);
-      
+
       if (type === 'share_capital' || type === 'retained_earnings') {
         journalEquity += amount;
       } else if (type === 'shareholder_account') {
@@ -1433,14 +1497,12 @@ export class ReportsService {
 
     // Net revenue = Revenue - Credit Notes + Debit Notes
     const netRevenue = totalRevenue - creditNotesAmount + debitNotesAmount;
-    
+
     // Calculate total expenses (expenses reduce equity, they are NOT assets)
     // Exclude type='credit' expenses as they are sales/revenue, not expenses
     const expensesQuery = this.expensesRepository
       .createQueryBuilder('expense')
-      .select([
-        'SUM(COALESCE(expense.base_amount, expense.amount)) AS amount',
-      ])
+      .select(['SUM(COALESCE(expense.base_amount, expense.amount)) AS amount'])
       .where('expense.organization_id = :organizationId', { organizationId })
       .andWhere('expense.is_deleted = false')
       .andWhere('expense.expense_date >= :startDate', { startDate })
@@ -1448,18 +1510,17 @@ export class ReportsService {
       .andWhere("(expense.type IS NULL OR expense.type != 'credit')");
 
     if (filters?.['type']) {
-      const types = Array.isArray(filters.type)
-        ? filters.type
-        : [filters.type];
+      const types = Array.isArray(filters.type) ? filters.type : [filters.type];
       expensesQuery.andWhere('expense.type IN (:...types)', { types });
     }
 
     const expensesRow = await expensesQuery.getRawOne();
     const totalExpenses = Number(expensesRow?.amount || 0);
-    
+
     // Equity = Net Revenue - Expenses + Journal Entries (equity increases, shareholder decreases)
     // Expenses reduce retained earnings (equity), they are NOT assets
-    const totalEquity = netRevenue - totalExpenses + journalEquity - journalShareholder;
+    const totalEquity =
+      netRevenue - totalExpenses + journalEquity - journalShareholder;
 
     // Calculate opening balances (before startDate)
     // Opening Assets
@@ -1474,7 +1535,9 @@ export class ReportsService {
 
     const openingReceivablesQuery = this.salesInvoicesRepository
       .createQueryBuilder('invoice')
-      .select(['SUM(COALESCE(invoice.total_amount, 0) - COALESCE(invoice.paid_amount, 0)) AS amount'])
+      .select([
+        'SUM(COALESCE(invoice.total_amount, 0) - COALESCE(invoice.paid_amount, 0)) AS amount',
+      ])
       .where('invoice.organization_id = :organizationId', { organizationId })
       .andWhere('invoice.invoice_date < :startDate', { startDate })
       .andWhere('invoice.payment_status IN (:...statuses)', {
@@ -1522,7 +1585,9 @@ export class ReportsService {
       ])
       .where('entry.organization_id = :organizationId', { organizationId })
       .andWhere('entry.entry_date < :startDate', { startDate })
-      .andWhere("entry.status IN ('cash_paid', 'cash_received', 'bank_paid', 'bank_received')");
+      .andWhere(
+        "entry.status IN ('cash_paid', 'cash_received', 'bank_paid', 'bank_received')",
+      );
 
     // Exclude type='credit' expenses as they are sales/revenue, not expenses
     const openingVatReceivableQuery = this.expensesRepository
@@ -1540,7 +1605,9 @@ export class ReportsService {
       .select(['SUM(accrual.amount) AS amount'])
       .where('accrual.organization_id = :organizationId', { organizationId })
       .andWhere('accrual.is_deleted = false')
-      .andWhere('accrual.status = :status', { status: AccrualStatus.PENDING_SETTLEMENT })
+      .andWhere('accrual.status = :status', {
+        status: AccrualStatus.PENDING_SETTLEMENT,
+      })
       .andWhere('accrual.created_at::date < :startDate', { startDate });
 
     const openingVatPayableQuery = this.salesInvoicesRepository
@@ -1560,7 +1627,9 @@ export class ReportsService {
     // Opening Credit Notes
     const openingCreditNotesQuery = this.creditNotesRepository
       .createQueryBuilder('creditNote')
-      .select(['SUM(COALESCE(creditNote.base_amount, creditNote.amount)) AS credit'])
+      .select([
+        'SUM(COALESCE(creditNote.base_amount, creditNote.amount)) AS credit',
+      ])
       .where('creditNote.organization_id = :organizationId', { organizationId })
       .andWhere('creditNote.credit_note_date < :startDate', { startDate })
       .andWhere('creditNote.status IN (:...statuses)', {
@@ -1570,7 +1639,9 @@ export class ReportsService {
     // Opening Debit Notes
     const openingDebitNotesQuery = this.debitNotesRepository
       .createQueryBuilder('debitNote')
-      .select(['SUM(COALESCE(debitNote.base_amount, debitNote.amount)) AS debit'])
+      .select([
+        'SUM(COALESCE(debitNote.base_amount, debitNote.amount)) AS debit',
+      ])
       .where('debitNote.organization_id = :organizationId', { organizationId })
       .andWhere('debitNote.debit_note_date < :startDate', { startDate })
       .andWhere('debitNote.status IN (:...statuses)', {
@@ -1580,13 +1651,12 @@ export class ReportsService {
     // Opening Journal Entries - grouped by type for ledger details
     const openingJournalQuery = this.journalEntriesRepository
       .createQueryBuilder('entry')
-      .select([
-        "entry.type AS type",
-        "SUM(entry.amount) AS amount",
-      ])
+      .select(['entry.type AS type', 'SUM(entry.amount) AS amount'])
       .where('entry.organization_id = :organizationId', { organizationId })
       .andWhere('entry.entry_date < :startDate', { startDate })
-      .andWhere("entry.type IN ('share_capital', 'retained_earnings', 'shareholder_account')")
+      .andWhere(
+        "entry.type IN ('share_capital', 'retained_earnings', 'shareholder_account')",
+      )
       .groupBy('entry.type');
 
     const [
@@ -1623,19 +1693,63 @@ export class ReportsService {
 
     const openingExpenses = Number(openingExpensesRow?.amount || 0);
     const openingReceivablesAmount = Number(openingReceivablesRow?.amount || 0);
-    const openingReceivablesCreditNotes = Number(openingReceivablesCreditNotesRow?.credit || 0);
-    const openingReceivablesDebitNotes = Number(openingReceivablesDebitNotesRow?.debit || 0);
+    const openingReceivablesCreditNotes = Number(
+      openingReceivablesCreditNotesRow?.credit || 0,
+    );
+    const openingReceivablesDebitNotes = Number(
+      openingReceivablesDebitNotesRow?.debit || 0,
+    );
     // Net opening Accounts Receivable = Invoices - Credit Notes + Debit Notes
-    const openingReceivables = openingReceivablesAmount - openingReceivablesCreditNotes + openingReceivablesDebitNotes;
+    const openingReceivables =
+      openingReceivablesAmount -
+      openingReceivablesCreditNotes +
+      openingReceivablesDebitNotes;
     const openingCashReceipts = Number(openingCashRow?.receipts || 0);
-    const openingCashPayments = Number(openingExpensePaymentsRow?.payments || 0);
-    const openingJournalReceived = Number(openingCashBankJournalEntriesRow?.received || 0);
-    const openingJournalPaid = Number(openingCashBankJournalEntriesRow?.paid || 0);
-    const openingCash = openingCashReceipts - openingCashPayments + openingJournalReceived - openingJournalPaid;
+    const openingCashPayments = Number(
+      openingExpensePaymentsRow?.payments || 0,
+    );
+    const openingJournalReceived = Number(
+      openingCashBankJournalEntriesRow?.received || 0,
+    );
+    const openingJournalPaid = Number(
+      openingCashBankJournalEntriesRow?.paid || 0,
+    );
+    const openingCash =
+      openingCashReceipts -
+      openingCashPayments +
+      openingJournalReceived -
+      openingJournalPaid;
     const openingVatReceivable = Number(openingVatReceivableRow?.amount || 0);
+
+    // Calculate total cash including opening balance (opening cash + period transactions)
+    // Period transactions were calculated earlier: periodReceipts, periodPayments, periodJournalReceived, periodJournalPaid
+    const periodCashTransactions =
+      periodReceipts -
+      periodPayments +
+      periodJournalReceived -
+      periodJournalPaid;
+    const netCash = openingCash + periodCashTransactions;
+
+    // Update the assets array with correct cash balance (if it was added earlier, update it; otherwise add it)
+    const cashAssetIndex = assets.findIndex((a) => a.category === 'Cash/Bank');
+    if (cashAssetIndex >= 0) {
+      // Update existing cash asset
+      const oldCashAmount = assets[cashAssetIndex].amount;
+      totalAssets = totalAssets - oldCashAmount + netCash;
+      assets[cashAssetIndex].amount = netCash;
+    } else if (Math.abs(netCash) > 0.01) {
+      // Add cash asset if not already added (use small tolerance to avoid floating point issues)
+      assets.push({
+        category: 'Cash/Bank',
+        amount: netCash,
+      });
+      totalAssets += netCash;
+    }
+
     // Opening Assets: Only actual assets (receivables, cash, VAT receivable) - NOT expenses
     // Expenses reduce equity, they are NOT assets
-    const openingAssets = openingReceivables + openingCash + openingVatReceivable;
+    const openingAssets =
+      openingReceivables + openingCash + openingVatReceivable;
 
     const openingAccruals = Number(openingAccrualsRow?.amount || 0);
     const openingVatPayable = Number(openingVatPayableRow?.amount || 0);
@@ -1644,18 +1758,19 @@ export class ReportsService {
     const openingRevenue = Number(openingRevenueRow?.revenue || 0);
     const openingCreditNotes = Number(openingCreditNotesRow?.credit || 0);
     const openingDebitNotes = Number(openingDebitNotesRow?.debit || 0);
-    const openingNetRevenue = openingRevenue - openingCreditNotes + openingDebitNotes;
-    
+    const openingNetRevenue =
+      openingRevenue - openingCreditNotes + openingDebitNotes;
+
     // Process opening journal entries by type
     const openingJournalEquityMap = new Map<string, number>();
     let openingJournalEquity = 0;
     let openingJournalShareholder = 0;
-    
+
     openingJournalRows.forEach((row) => {
       const amount = Number(row.amount || 0);
       const type = row.type;
       openingJournalEquityMap.set(type, amount);
-      
+
       if (type === 'share_capital' || type === 'retained_earnings') {
         openingJournalEquity += amount;
       } else if (type === 'shareholder_account') {
@@ -1682,17 +1797,23 @@ export class ReportsService {
         statuses: [DebitNoteStatus.ISSUED, DebitNoteStatus.APPLIED],
       })
       .andWhere('debitNote.vat_amount > 0');
-    const [openingVatCreditNotesRow, openingVatDebitNotesRow] = await Promise.all([
-      openingVatCreditNotesQuery.getRawOne(),
-      openingVatDebitNotesQuery.getRawOne(),
-    ]);
+    const [openingVatCreditNotesRow, openingVatDebitNotesRow] =
+      await Promise.all([
+        openingVatCreditNotesQuery.getRawOne(),
+        openingVatDebitNotesQuery.getRawOne(),
+      ]);
     const openingVatCreditNotes = Number(openingVatCreditNotesRow?.vat || 0);
     const openingVatDebitNotes = Number(openingVatDebitNotesRow?.vat || 0);
-    const openingNetVatPayable = openingVatPayable - openingVatCreditNotes + openingVatDebitNotes;
+    const openingNetVatPayable =
+      openingVatPayable - openingVatCreditNotes + openingVatDebitNotes;
     const openingLiabilities = openingAccruals + openingNetVatPayable;
 
     // Calculate opening equity using processed journal entries
-    const openingEquity = openingNetRevenue - openingExpenses + openingJournalEquity - openingJournalShareholder;
+    const openingEquity =
+      openingNetRevenue -
+      openingExpenses +
+      openingJournalEquity -
+      openingJournalShareholder;
 
     // Closing balances (opening + period)
     const closingAssets = openingAssets + totalAssets;
@@ -1708,8 +1829,12 @@ export class ReportsService {
     }> = [];
 
     // 1. Share Capital
-    const openingShareCapital = Number(openingJournalEquityMap.get('share_capital') || 0);
-    const periodShareCapital = Number(journalEquityMap.get('share_capital') || 0);
+    const openingShareCapital = Number(
+      openingJournalEquityMap.get('share_capital') || 0,
+    );
+    const periodShareCapital = Number(
+      journalEquityMap.get('share_capital') || 0,
+    );
     const closingShareCapital = openingShareCapital + periodShareCapital;
     equityItems.push({
       account: 'Share Capital',
@@ -1719,11 +1844,18 @@ export class ReportsService {
     });
 
     // 2. Retained Earnings (includes revenue - expenses + retained_earnings journal entries)
-    const openingRetainedEarningsJournal = Number(openingJournalEquityMap.get('retained_earnings') || 0);
-    const periodRetainedEarningsJournal = Number(journalEquityMap.get('retained_earnings') || 0);
-    const openingRetainedEarnings = openingNetRevenue - openingExpenses + openingRetainedEarningsJournal;
-    const periodRetainedEarnings = netRevenue - totalExpenses + periodRetainedEarningsJournal;
-    const closingRetainedEarnings = openingRetainedEarnings + periodRetainedEarnings;
+    const openingRetainedEarningsJournal = Number(
+      openingJournalEquityMap.get('retained_earnings') || 0,
+    );
+    const periodRetainedEarningsJournal = Number(
+      journalEquityMap.get('retained_earnings') || 0,
+    );
+    const openingRetainedEarnings =
+      openingNetRevenue - openingExpenses + openingRetainedEarningsJournal;
+    const periodRetainedEarnings =
+      netRevenue - totalExpenses + periodRetainedEarningsJournal;
+    const closingRetainedEarnings =
+      openingRetainedEarnings + periodRetainedEarnings;
     equityItems.push({
       account: 'Retained Earnings',
       opening: Number(openingRetainedEarnings.toFixed(2)),
@@ -1732,9 +1864,14 @@ export class ReportsService {
     });
 
     // 3. Shareholder Account (reduces equity)
-    const openingShareholderAccount = Number(openingJournalEquityMap.get('shareholder_account') || 0);
-    const periodShareholderAccount = Number(journalEquityMap.get('shareholder_account') || 0);
-    const closingShareholderAccount = openingShareholderAccount + periodShareholderAccount;
+    const openingShareholderAccount = Number(
+      openingJournalEquityMap.get('shareholder_account') || 0,
+    );
+    const periodShareholderAccount = Number(
+      journalEquityMap.get('shareholder_account') || 0,
+    );
+    const closingShareholderAccount =
+      openingShareholderAccount + periodShareholderAccount;
     equityItems.push({
       account: 'Shareholder Account',
       opening: Number(openingShareholderAccount.toFixed(2)),
@@ -1780,7 +1917,9 @@ export class ReportsService {
         openingAssets: Number(openingAssets.toFixed(2)),
         openingLiabilities: Number(openingLiabilities.toFixed(2)),
         openingEquity: Number(openingEquity.toFixed(2)),
-        openingBalance: Number((openingAssets - openingLiabilities - openingEquity).toFixed(2)),
+        openingBalance: Number(
+          (openingAssets - openingLiabilities - openingEquity).toFixed(2),
+        ),
         periodAssets: Number(totalAssets.toFixed(2)),
         periodLiabilities: Number(totalLiabilities.toFixed(2)),
         periodEquity: Number(totalEquity.toFixed(2)),
@@ -1790,7 +1929,9 @@ export class ReportsService {
         closingAssets: Number(closingAssets.toFixed(2)),
         closingLiabilities: Number(closingLiabilities.toFixed(2)),
         closingEquity: Number(closingEquity.toFixed(2)),
-        closingBalance: Number((closingAssets - closingLiabilities - closingEquity).toFixed(2)),
+        closingBalance: Number(
+          (closingAssets - closingLiabilities - closingEquity).toFixed(2),
+        ),
         balance: Number(
           (totalAssets - totalLiabilities - totalEquity).toFixed(2),
         ),
@@ -1862,11 +2003,12 @@ export class ReportsService {
         statuses: [DebitNoteStatus.ISSUED, DebitNoteStatus.APPLIED],
       });
 
-    const [revenueResult, creditNotesResult, debitNotesResult] = await Promise.all([
-      revenueQuery.getRawOne(),
-      creditNotesQuery.getRawOne(),
-      debitNotesQuery.getRawOne(),
-    ]);
+    const [revenueResult, creditNotesResult, debitNotesResult] =
+      await Promise.all([
+        revenueQuery.getRawOne(),
+        creditNotesQuery.getRawOne(),
+        debitNotesQuery.getRawOne(),
+      ]);
 
     const totalRevenue = Number(revenueResult?.revenue || 0);
     const revenueVat = Number(revenueResult?.vat || 0);
@@ -1899,9 +2041,7 @@ export class ReportsService {
       .orderBy('amount', 'DESC');
 
     if (filters?.['type']) {
-      const types = Array.isArray(filters.type)
-        ? filters.type
-        : [filters.type];
+      const types = Array.isArray(filters.type) ? filters.type : [filters.type];
       expenseQuery.andWhere('expense.type IN (:...types)', { types });
     }
 
@@ -2047,15 +2187,20 @@ export class ReportsService {
     }
 
     // Filter by date range
-    if (filters?.['startDate']) {
-      query.andWhere('accrual.expected_payment_date >= :startDate', {
-        startDate: filters.startDate,
+    // For payables, show all pending accruals that exist as of the asOfDate
+    // Filter by creation date, not expected payment date, to ensure all relevant accruals are shown
+    if (filters?.['endDate']) {
+      // Show accruals that were created on or before the asOfDate
+      query.andWhere('accrual.created_at::date <= :asOfDate', {
+        asOfDate: filters.endDate,
       });
     }
-    if (filters?.['endDate']) {
-      query.andWhere('accrual.expected_payment_date <= :endDate', {
-        endDate: filters.endDate,
-      });
+    // Optional: Also allow filtering by expected payment date if needed
+    // But don't make it the primary filter as it may exclude valid accruals
+    if (filters?.['startDate']) {
+      // If startDate is provided, we can optionally filter by expected payment date
+      // But for now, we'll use it for opening balance calculation only
+      // The main query shows all accruals as of asOfDate
     }
 
     // Filter by vendor
@@ -2091,18 +2236,22 @@ export class ReportsService {
     // Calculate opening balance (accruals before startDate that are still pending)
     let openingBalance = 0;
     let periodAmount = totalAmount;
-    
+
     if (startDate) {
       const openingQuery = this.accrualsRepository
         .createQueryBuilder('accrual')
         .select(['SUM(accrual.amount) AS amount'])
         .where('accrual.organization_id = :organizationId', { organizationId })
         .andWhere('accrual.is_deleted = false')
-        .andWhere('accrual.status = :status', { status: AccrualStatus.PENDING_SETTLEMENT })
+        .andWhere('accrual.status = :status', {
+          status: AccrualStatus.PENDING_SETTLEMENT,
+        })
         .andWhere('accrual.created_at::date < :startDate', { startDate });
 
       if (filters?.['status']) {
-        const statuses = Array.isArray(filters.status) ? filters.status : [filters.status];
+        const statuses = Array.isArray(filters.status)
+          ? filters.status
+          : [filters.status];
         openingQuery.andWhere('accrual.status IN (:...statuses)', { statuses });
       }
 
@@ -2119,7 +2268,9 @@ export class ReportsService {
         .andWhere('accrual.created_at::date <= :asOfDate', { asOfDate });
 
       if (filters?.['status']) {
-        const statuses = Array.isArray(filters.status) ? filters.status : [filters.status];
+        const statuses = Array.isArray(filters.status)
+          ? filters.status
+          : [filters.status];
         periodQuery.andWhere('accrual.status IN (:...statuses)', { statuses });
       } else {
         periodQuery.andWhere('accrual.status = :status', {
@@ -2158,9 +2309,8 @@ export class ReportsService {
         totalAmount: Number(totalAmount.toFixed(2)),
         overdueItems: overdueItems.length,
         overdueAmount: Number(overdueAmount.toFixed(2)),
-        paidItems: rows.filter(
-          (r) => r.status === AccrualStatus.SETTLED,
-        ).length,
+        paidItems: rows.filter((r) => r.status === AccrualStatus.SETTLED)
+          .length,
         pendingItems: rows.filter(
           (r) => r.status === AccrualStatus.PENDING_SETTLEMENT,
         ).length,
@@ -2184,6 +2334,11 @@ export class ReportsService {
     const query = this.salesInvoicesRepository
       .createQueryBuilder('invoice')
       .leftJoin('invoice.customer', 'customer')
+      .leftJoin(
+        'credit_note_applications',
+        'cna',
+        'cna.invoice_id = invoice.id AND cna.organization_id = :organizationId',
+      )
       .select([
         'invoice.id AS invoiceId',
         'invoice.invoice_number AS invoiceNumber',
@@ -2197,8 +2352,24 @@ export class ReportsService {
         'invoice.paid_date AS paidDate',
         'invoice.status AS status',
         'invoice.payment_status AS paymentStatus',
+        'COALESCE(SUM(cna.applied_amount), 0) AS appliedCreditAmount',
       ])
-      .where('invoice.organization_id = :organizationId', { organizationId });
+      .where('invoice.organization_id = :organizationId', { organizationId })
+      .groupBy('invoice.id')
+      .addGroupBy('customer.id')
+      .addGroupBy('customer.name')
+      .addGroupBy('invoice.customer_name')
+      .addGroupBy('invoice.invoice_number')
+      .addGroupBy('invoice.amount')
+      .addGroupBy('invoice.vat_amount')
+      .addGroupBy('invoice.total_amount')
+      .addGroupBy('invoice.invoice_date')
+      .addGroupBy('invoice.due_date')
+      .addGroupBy('invoice.paid_amount')
+      .addGroupBy('invoice.paid_date')
+      .addGroupBy('invoice.status')
+      .addGroupBy('invoice.payment_status')
+      .setParameter('organizationId', organizationId);
 
     // Filter by payment status
     if (filters?.['paymentStatus']) {
@@ -2208,11 +2379,9 @@ export class ReportsService {
       query.andWhere('invoice.payment_status IN (:...statuses)', { statuses });
     } else {
       // Default: show invoices with outstanding amounts
-      // Check if total_amount > paid_amount (has outstanding balance)
-      // This catches invoices even if payment_status is incorrectly set to PAID
-      query.andWhere(
-        '(COALESCE(invoice.total_amount, 0) - COALESCE(invoice.paid_amount, 0)) > 0',
-      );
+      // Outstanding = total_amount - paid_amount - appliedCreditNoteAmount
+      // We'll filter after grouping since we need the SUM of credit note applications
+      // This will be handled in the post-processing step
     }
 
     // Filter by invoice status
@@ -2344,7 +2513,11 @@ export class ReportsService {
     const invoiceItems = rows.map((row) => {
       const total = Number(row.total || 0);
       const paid = Number(row.paidamount || row.paidAmount || 0);
-      const outstanding = total - paid;
+      const appliedCreditAmount = Number(
+        row.appliedcreditamount || row.appliedCreditAmount || 0,
+      );
+      // Outstanding = totalAmount - paidAmount - appliedCreditNoteAmount
+      const outstanding = Math.max(0, total - paid - appliedCreditAmount);
       const paymentStatus = row.paymentstatus || row.paymentStatus;
       const dueDate = row.duedate || row.dueDate;
       const isOverdue =
@@ -2424,7 +2597,11 @@ export class ReportsService {
     );
 
     // Combine all items
-    const allItems = [...filteredInvoiceItems, ...creditNoteItems, ...debitNoteItems];
+    const allItems = [
+      ...filteredInvoiceItems,
+      ...creditNoteItems,
+      ...debitNoteItems,
+    ];
 
     const overdueItems = allItems.filter((item) => item.isOverdue);
     const totalOutstanding = allItems.reduce(
@@ -2457,14 +2634,19 @@ export class ReportsService {
         const statuses = Array.isArray(filters.paymentStatus)
           ? filters.paymentStatus
           : [filters.paymentStatus];
-        openingInvoicesQuery.andWhere('invoice.payment_status IN (:...statuses)', { statuses });
+        openingInvoicesQuery.andWhere(
+          'invoice.payment_status IN (:...statuses)',
+          { statuses },
+        );
       }
 
       // Opening credit notes (reduce receivables)
       const openingCreditNotesQuery = this.creditNotesRepository
         .createQueryBuilder('creditNote')
         .select(['SUM(COALESCE(creditNote.total_amount, 0)) AS total'])
-        .where('creditNote.organization_id = :organizationId', { organizationId })
+        .where('creditNote.organization_id = :organizationId', {
+          organizationId,
+        })
         .andWhere('creditNote.status IN (:...statuses)', {
           statuses: [CreditNoteStatus.ISSUED, CreditNoteStatus.APPLIED],
         })
@@ -2474,17 +2656,20 @@ export class ReportsService {
       const openingDebitNotesQuery = this.debitNotesRepository
         .createQueryBuilder('debitNote')
         .select(['SUM(COALESCE(debitNote.total_amount, 0)) AS total'])
-        .where('debitNote.organization_id = :organizationId', { organizationId })
+        .where('debitNote.organization_id = :organizationId', {
+          organizationId,
+        })
         .andWhere('debitNote.status IN (:...statuses)', {
           statuses: [DebitNoteStatus.ISSUED, DebitNoteStatus.APPLIED],
         })
         .andWhere('debitNote.debit_note_date < :startDate', { startDate });
 
-      const [openingInvoicesRow, openingCreditNotesRow, openingDebitNotesRow] = await Promise.all([
-        openingInvoicesQuery.getRawOne(),
-        openingCreditNotesQuery.getRawOne(),
-        openingDebitNotesQuery.getRawOne(),
-      ]);
+      const [openingInvoicesRow, openingCreditNotesRow, openingDebitNotesRow] =
+        await Promise.all([
+          openingInvoicesQuery.getRawOne(),
+          openingCreditNotesQuery.getRawOne(),
+          openingDebitNotesQuery.getRawOne(),
+        ]);
 
       const openingInvoices = Number(openingInvoicesRow?.outstanding || 0);
       const openingCreditNotes = Number(openingCreditNotesRow?.total || 0);
@@ -2508,13 +2693,18 @@ export class ReportsService {
         const statuses = Array.isArray(filters.paymentStatus)
           ? filters.paymentStatus
           : [filters.paymentStatus];
-        periodInvoicesQuery.andWhere('invoice.payment_status IN (:...statuses)', { statuses });
+        periodInvoicesQuery.andWhere(
+          'invoice.payment_status IN (:...statuses)',
+          { statuses },
+        );
       }
 
       const periodCreditNotesQuery = this.creditNotesRepository
         .createQueryBuilder('creditNote')
         .select(['SUM(COALESCE(creditNote.total_amount, 0)) AS total'])
-        .where('creditNote.organization_id = :organizationId', { organizationId })
+        .where('creditNote.organization_id = :organizationId', {
+          organizationId,
+        })
         .andWhere('creditNote.status IN (:...statuses)', {
           statuses: [CreditNoteStatus.ISSUED, CreditNoteStatus.APPLIED],
         })
@@ -2524,18 +2714,21 @@ export class ReportsService {
       const periodDebitNotesQuery = this.debitNotesRepository
         .createQueryBuilder('debitNote')
         .select(['SUM(COALESCE(debitNote.total_amount, 0)) AS total'])
-        .where('debitNote.organization_id = :organizationId', { organizationId })
+        .where('debitNote.organization_id = :organizationId', {
+          organizationId,
+        })
         .andWhere('debitNote.status IN (:...statuses)', {
           statuses: [DebitNoteStatus.ISSUED, DebitNoteStatus.APPLIED],
         })
         .andWhere('debitNote.debit_note_date >= :startDate', { startDate })
         .andWhere('debitNote.debit_note_date <= :asOfDate', { asOfDate });
 
-      const [periodInvoicesRow, periodCreditNotesRow, periodDebitNotesRow] = await Promise.all([
-        periodInvoicesQuery.getRawOne(),
-        periodCreditNotesQuery.getRawOne(),
-        periodDebitNotesQuery.getRawOne(),
-      ]);
+      const [periodInvoicesRow, periodCreditNotesRow, periodDebitNotesRow] =
+        await Promise.all([
+          periodInvoicesQuery.getRawOne(),
+          periodCreditNotesQuery.getRawOne(),
+          periodDebitNotesQuery.getRawOne(),
+        ]);
 
       const periodInvoices = Number(periodInvoicesRow?.outstanding || 0);
       const periodCreditNotes = Number(periodCreditNotesRow?.total || 0);
@@ -2589,8 +2782,12 @@ export class ReportsService {
     // If dates not provided, use current month
     if (!startDate || !endDate) {
       const today = new Date();
-      startDate = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split('T')[0];
-      endDate = new Date(today.getFullYear(), today.getMonth() + 1, 0).toISOString().split('T')[0];
+      startDate = new Date(today.getFullYear(), today.getMonth(), 1)
+        .toISOString()
+        .split('T')[0];
+      endDate = new Date(today.getFullYear(), today.getMonth() + 1, 0)
+        .toISOString()
+        .split('T')[0];
     }
 
     // Get VAT Input from Expenses (excluding reverse charge as it's not reclaimable)
@@ -2612,7 +2809,9 @@ export class ReportsService {
       .andWhere('expense.expense_date >= :startDate', { startDate })
       .andWhere('expense.expense_date <= :endDate', { endDate })
       .andWhere('CAST(expense.vat_amount AS DECIMAL) > 0')
-      .andWhere("(expense.vat_tax_type IS NULL OR expense.vat_tax_type != 'reverse_charge')")
+      .andWhere(
+        "(expense.vat_tax_type IS NULL OR expense.vat_tax_type != 'reverse_charge')",
+      )
       .andWhere("(expense.type IS NULL OR expense.type != 'credit')")
       .orderBy('expense.expense_date', 'DESC');
 
@@ -2620,10 +2819,13 @@ export class ReportsService {
 
     const vatInputItems = vatInputExpenses.map((expense: any) => {
       // Note: Raw SQL queries return lowercase column names in PostgreSQL
-      const vatAmount = parseFloat(expense.vatamount || expense.vatAmount || '0');
+      const vatAmount = parseFloat(
+        expense.vatamount || expense.vatAmount || '0',
+      );
       const amount = parseFloat(expense.amount || '0');
       const baseAmount = amount - vatAmount;
-      const vatRate = baseAmount > 0 ? ((vatAmount / baseAmount) * 100).toFixed(2) : '0';
+      const vatRate =
+        baseAmount > 0 ? ((vatAmount / baseAmount) * 100).toFixed(2) : '0';
       const vendorName = expense.vendorname || expense.vendorName || 'N/A';
       const trn = expense.trn || null;
 
@@ -2701,25 +2903,34 @@ export class ReportsService {
       .andWhere('CAST(debitNote.vat_amount AS DECIMAL) > 0')
       .orderBy('debitNote.debit_note_date', 'DESC');
 
-    const [vatOutputInvoices, vatCreditNotes, vatDebitNotes] = await Promise.all([
-      vatOutputQuery.getRawMany(),
-      vatCreditNotesQuery.getRawMany(),
-      vatDebitNotesQuery.getRawMany(),
-    ]);
+    const [vatOutputInvoices, vatCreditNotes, vatDebitNotes] =
+      await Promise.all([
+        vatOutputQuery.getRawMany(),
+        vatCreditNotesQuery.getRawMany(),
+        vatDebitNotesQuery.getRawMany(),
+      ]);
 
     const vatOutputItems = vatOutputInvoices.map((invoice: any) => {
       // Note: Raw SQL queries return lowercase column names in PostgreSQL
-      const vatAmount = parseFloat(invoice.vatamount || invoice.vatAmount || '0');
+      const vatAmount = parseFloat(
+        invoice.vatamount || invoice.vatAmount || '0',
+      );
       const amount = parseFloat(invoice.amount || '0');
       const baseAmount = amount - vatAmount;
-      const vatRate = baseAmount > 0 ? ((vatAmount / baseAmount) * 100).toFixed(2) : '0';
-      const customerName = invoice.customername || invoice.customerName || 'N/A';
+      const vatRate =
+        baseAmount > 0 ? ((vatAmount / baseAmount) * 100).toFixed(2) : '0';
+      const customerName =
+        invoice.customername || invoice.customerName || 'N/A';
       const trn = invoice.trn || null;
 
       return {
         id: invoice.invoiceid || invoice.invoiceId,
         date: invoice.invoicedate || invoice.invoiceDate,
-        description: invoice.invoicenumber || invoice.invoiceNumber || customerName || 'Invoice',
+        description:
+          invoice.invoicenumber ||
+          invoice.invoiceNumber ||
+          customerName ||
+          'Invoice',
         invoiceNumber: invoice.invoicenumber || invoice.invoiceNumber,
         customerName: customerName,
         amount: Number(amount.toFixed(2)),
@@ -2731,18 +2942,27 @@ export class ReportsService {
     });
 
     const vatCreditNoteItems = vatCreditNotes.map((creditNote: any) => {
-      const vatAmount = parseFloat(creditNote.vatamount || creditNote.vatAmount || '0');
+      const vatAmount = parseFloat(
+        creditNote.vatamount || creditNote.vatAmount || '0',
+      );
       const amount = parseFloat(creditNote.amount || '0');
       const baseAmount = amount - vatAmount;
-      const vatRate = baseAmount > 0 ? ((vatAmount / baseAmount) * 100).toFixed(2) : '0';
-      const customerName = creditNote.customername || creditNote.customerName || 'N/A';
+      const vatRate =
+        baseAmount > 0 ? ((vatAmount / baseAmount) * 100).toFixed(2) : '0';
+      const customerName =
+        creditNote.customername || creditNote.customerName || 'N/A';
       const trn = creditNote.trn || null;
 
       return {
         id: creditNote.creditnoteid || creditNote.creditNoteId,
         date: creditNote.creditnotedate || creditNote.creditNoteDate,
-        description: creditNote.creditnotenumber || creditNote.creditNoteNumber || customerName || 'Credit Note',
-        creditNoteNumber: creditNote.creditnotenumber || creditNote.creditNoteNumber,
+        description:
+          creditNote.creditnotenumber ||
+          creditNote.creditNoteNumber ||
+          customerName ||
+          'Credit Note',
+        creditNoteNumber:
+          creditNote.creditnotenumber || creditNote.creditNoteNumber,
         customerName: customerName,
         amount: Number(amount.toFixed(2)),
         vatRate: Number(vatRate),
@@ -2753,17 +2973,25 @@ export class ReportsService {
     });
 
     const vatDebitNoteItems = vatDebitNotes.map((debitNote: any) => {
-      const vatAmount = parseFloat(debitNote.vatamount || debitNote.vatAmount || '0');
+      const vatAmount = parseFloat(
+        debitNote.vatamount || debitNote.vatAmount || '0',
+      );
       const amount = parseFloat(debitNote.amount || '0');
       const baseAmount = amount - vatAmount;
-      const vatRate = baseAmount > 0 ? ((vatAmount / baseAmount) * 100).toFixed(2) : '0';
-      const customerName = debitNote.customername || debitNote.customerName || 'N/A';
+      const vatRate =
+        baseAmount > 0 ? ((vatAmount / baseAmount) * 100).toFixed(2) : '0';
+      const customerName =
+        debitNote.customername || debitNote.customerName || 'N/A';
       const trn = debitNote.trn || null;
 
       return {
         id: debitNote.debitnoteid || debitNote.debitNoteId,
         date: debitNote.debitnotedate || debitNote.debitNoteDate,
-        description: debitNote.debitnotenumber || debitNote.debitNoteNumber || customerName || 'Debit Note',
+        description:
+          debitNote.debitnotenumber ||
+          debitNote.debitNoteNumber ||
+          customerName ||
+          'Debit Note',
         debitNoteNumber: debitNote.debitnotenumber || debitNote.debitNoteNumber,
         customerName: customerName,
         amount: Number(amount.toFixed(2)),
@@ -2775,19 +3003,36 @@ export class ReportsService {
     });
 
     // Calculate totals
-    const totalVatInput = vatInputItems.reduce((sum, item) => sum + item.vatAmount, 0);
-    const totalVatOutput = vatOutputItems.reduce((sum, item) => sum + item.vatAmount, 0);
-    const totalVatCreditNotes = vatCreditNoteItems.reduce((sum, item) => sum + item.vatAmount, 0);
-    const totalVatDebitNotes = vatDebitNoteItems.reduce((sum, item) => sum + item.vatAmount, 0);
+    const totalVatInput = vatInputItems.reduce(
+      (sum, item) => sum + item.vatAmount,
+      0,
+    );
+    const totalVatOutput = vatOutputItems.reduce(
+      (sum, item) => sum + item.vatAmount,
+      0,
+    );
+    const totalVatCreditNotes = vatCreditNoteItems.reduce(
+      (sum, item) => sum + item.vatAmount,
+      0,
+    );
+    const totalVatDebitNotes = vatDebitNoteItems.reduce(
+      (sum, item) => sum + item.vatAmount,
+      0,
+    );
     // Net VAT Output = Output VAT - Credit Note VAT + Debit Note VAT
-    const netVatOutput = totalVatOutput - totalVatCreditNotes + totalVatDebitNotes;
+    const netVatOutput =
+      totalVatOutput - totalVatCreditNotes + totalVatDebitNotes;
     const netVat = netVatOutput - totalVatInput;
 
     return {
       startDate,
       endDate,
       vatInputItems,
-      vatOutputItems: [...vatOutputItems, ...vatCreditNoteItems, ...vatDebitNoteItems],
+      vatOutputItems: [
+        ...vatOutputItems,
+        ...vatCreditNoteItems,
+        ...vatDebitNoteItems,
+      ],
       summary: {
         vatInput: Number(totalVatInput.toFixed(2)),
         vatOutput: Number(totalVatOutput.toFixed(2)),
@@ -2795,7 +3040,11 @@ export class ReportsService {
         vatDebitNotes: Number(totalVatDebitNotes.toFixed(2)),
         netVatOutput: Number(netVatOutput.toFixed(2)),
         netVat: Number(netVat.toFixed(2)),
-        totalTransactions: vatInputItems.length + vatOutputItems.length + vatCreditNoteItems.length + vatDebitNoteItems.length,
+        totalTransactions:
+          vatInputItems.length +
+          vatOutputItems.length +
+          vatCreditNoteItems.length +
+          vatDebitNoteItems.length,
         inputTransactions: vatInputItems.length,
         outputTransactions: vatOutputItems.length,
         creditNoteTransactions: vatCreditNoteItems.length,

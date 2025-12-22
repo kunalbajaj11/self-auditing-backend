@@ -327,7 +327,9 @@ export class ExpensesService {
     let expenseAmount = dto.amount;
     let isReverseCharge = false;
 
-    if (vatAmount === undefined || vatAmount === null) {
+    // Auto-calculate VAT if not provided or explicitly set to 0
+    // This handles cases where user sets vatAmount = 0 but wants auto-calculation
+    if (vatAmount === undefined || vatAmount === null || vatAmount === 0) {
       // Auto-calculate VAT from tax settings
       const defaultTaxRate = await this.getDefaultTaxRate(organizationId);
       const taxCalculation = await this.calculateVatAmount(
@@ -396,6 +398,13 @@ export class ExpensesService {
       }
     }
 
+    // Calculate totalAmount correctly based on VAT tax type
+    // For reverse charge: totalAmount = amount (VAT not included in total)
+    // For standard/zero/exempt: totalAmount = amount + vatAmount
+    const calculatedTotalAmount = isReverseCharge
+      ? expenseAmount // Reverse charge: total = base amount only (VAT not added)
+      : expenseAmount + vatAmount; // Standard: total = base + VAT
+
     const expense = this.expensesRepository.create({
       organization,
       user,
@@ -418,6 +427,9 @@ export class ExpensesService {
       ocrConfidence:
         dto.ocrConfidence !== undefined ? dto.ocrConfidence.toFixed(2) : null,
       linkedAccrual: linkedAccrualExpense ?? null,
+      // Set totalAmount explicitly to override generated column calculation
+      // This ensures reverse charge expenses have correct totalAmount (amount only, no VAT)
+      totalAmount: this.formatMoney(calculatedTotalAmount),
     });
 
     // Check upload limit before creating attachments
@@ -433,21 +445,30 @@ export class ExpensesService {
       }
     }
 
-    // Save expense first to get the ID
+    // Save expense - totalAmount is set explicitly above, which should override the generated column
     const saved = await this.expensesRepository.save(expense);
 
-    // Override total_amount for reverse charge (DB generated column adds VAT, but reverse charge VAT shouldn't be in total)
+    // Verify totalAmount is correct (especially for reverse charge)
+    // If the generated column still overrides our value, we need to update it
     if (isReverseCharge) {
-      // For reverse charge: total_amount = amount (VAT not included)
-      // The DB generated column would have calculated: total_amount = amount + vatAmount
-      // We need to override it to: total_amount = amount
-      saved.totalAmount = saved.amount;
-      await this.expensesRepository
-        .createQueryBuilder()
-        .update(Expense)
-        .set({ totalAmount: saved.amount })
-        .where('id = :id', { id: saved.id })
-        .execute();
+      const savedTotalAmount = parseFloat(saved.totalAmount || '0');
+      const expectedTotalAmount = parseFloat(this.formatMoney(expenseAmount));
+      // Only update if the generated column incorrectly added VAT
+      if (Math.abs(savedTotalAmount - expectedTotalAmount) > 0.01) {
+        await this.expensesRepository
+          .createQueryBuilder()
+          .update(Expense)
+          .set({ totalAmount: this.formatMoney(expenseAmount) })
+          .where('id = :id', { id: saved.id })
+          .execute();
+        // Reload to get correct totalAmount
+        const reloaded = await this.expensesRepository.findOne({
+          where: { id: saved.id },
+        });
+        if (reloaded) {
+          Object.assign(saved, reloaded);
+        }
+      }
     }
 
     // Then create and save attachments with the saved expense reference
@@ -480,7 +501,7 @@ export class ExpensesService {
         expense: saved,
         organization,
         vendorName: saved.vendorName,
-        amount: saved.amount,
+        amount: saved.totalAmount, // Use totalAmount (includes VAT) - this is the amount owed to vendor
         expectedPaymentDate: dto.expectedPaymentDate ?? dto.expenseDate,
         status: AccrualStatus.PENDING_SETTLEMENT,
       });
@@ -681,7 +702,7 @@ export class ExpensesService {
       return;
     }
 
-    const expenseAmount = Number(expense.amount);
+    const expenseAmount = Number(expense.totalAmount); // Use totalAmount (includes VAT) to match accrual.amount
     const expenseVendor = expense.vendorName.toLowerCase().trim();
     const expenseDate = new Date(expense.expenseDate);
 
@@ -692,7 +713,7 @@ export class ExpensesService {
         continue;
       }
 
-      const accrualAmount = Number(accrual.amount);
+      const accrualAmount = Number(accrual.amount); // accrual.amount is now totalAmount (includes VAT)
       const accrualVendor = accrual.vendorName.toLowerCase().trim();
       const accrualExpectedDate = new Date(accrual.expectedPaymentDate);
 
@@ -816,12 +837,13 @@ export class ExpensesService {
     const isReverseCharge = currentVatTaxType === 'reverse_charge';
 
     // Recalculate VAT if amount changes and VAT not explicitly provided
+    // Also recalculate if vatAmount is explicitly set to 0 (user wants auto-calculation)
     if (dto.amount !== undefined) {
       const newAmount = dto.amount;
       expense.amount = this.formatMoney(newAmount);
       
-      // If VAT amount not explicitly provided, recalculate from tax settings
-      if (dto.vatAmount === undefined) {
+      // If VAT amount not explicitly provided or set to 0, recalculate from tax settings
+      if (dto.vatAmount === undefined || dto.vatAmount === 0) {
         const defaultTaxRate = await this.getDefaultTaxRate(organizationId);
         const taxCalculation = await this.calculateVatAmount(
           organizationId,
@@ -833,8 +855,9 @@ export class ExpensesService {
         // Update amount to base amount for inclusive tax
         expense.amount = this.formatMoney(taxCalculation.baseAmount);
       }
-    } else if (dto.vatTaxType !== undefined && dto.vatAmount === undefined) {
+    } else if (dto.vatTaxType !== undefined && (dto.vatAmount === undefined || dto.vatAmount === 0)) {
       // VAT tax type changed, recalculate VAT with new type
+      // Also recalculate if vatAmount is explicitly set to 0
       const currentAmount = parseFloat(expense.amount);
       const defaultTaxRate = await this.getDefaultTaxRate(organizationId);
       const taxCalculation = await this.calculateVatAmount(
@@ -847,7 +870,8 @@ export class ExpensesService {
       expense.amount = this.formatMoney(taxCalculation.baseAmount);
     }
     
-    if (dto.vatAmount !== undefined) {
+    // Only set vatAmount if explicitly provided and not 0 (0 triggers auto-calculation above)
+    if (dto.vatAmount !== undefined && dto.vatAmount !== 0) {
       expense.vatAmount = this.formatMoney(dto.vatAmount);
     }
     if (dto.expenseDate !== undefined) {
@@ -880,17 +904,32 @@ export class ExpensesService {
       );
     }
 
-    await this.expensesRepository.save(expense);
+    // Calculate totalAmount correctly based on VAT tax type before saving
+    const expenseAmountNum = parseFloat(expense.amount || '0');
+    const vatAmountNum = parseFloat(expense.vatAmount || '0');
+    const calculatedTotalAmount = isReverseCharge
+      ? expenseAmountNum // Reverse charge: total = base amount only (VAT not added)
+      : expenseAmountNum + vatAmountNum; // Standard: total = base + VAT
+    
+    // Set totalAmount explicitly to override generated column calculation
+    expense.totalAmount = this.formatMoney(calculatedTotalAmount);
+    
+    const saved = await this.expensesRepository.save(expense);
 
-    // Override total_amount for reverse charge (DB generated column adds VAT, but reverse charge VAT shouldn't be in total)
+    // Verify totalAmount is correct (especially for reverse charge)
+    // If the generated column still overrides our value, we need to update it
     if (isReverseCharge) {
-      // For reverse charge: total_amount = amount (VAT not included)
-      await this.expensesRepository
-        .createQueryBuilder()
-        .update(Expense)
-        .set({ totalAmount: expense.amount })
-        .where('id = :id', { id: expense.id })
-        .execute();
+      const savedTotalAmount = parseFloat(saved.totalAmount || '0');
+      const expectedTotalAmount = expenseAmountNum;
+      // Only update if the generated column incorrectly added VAT
+      if (Math.abs(savedTotalAmount - expectedTotalAmount) > 0.01) {
+        await this.expensesRepository
+          .createQueryBuilder()
+          .update(Expense)
+          .set({ totalAmount: this.formatMoney(expenseAmountNum) })
+          .where('id = :id', { id: saved.id })
+          .execute();
+      }
     }
 
     // Try auto-matching accrual if vendor or amount was updated and expense is not already linked
@@ -948,8 +987,8 @@ export class ExpensesService {
       throw new BadRequestException('Accrual is already settled');
     }
 
-    const accrualAmount = Number(accrual.amount);
-    const expenseAmount = Number(expense.amount);
+    const accrualAmount = Number(accrual.amount); // accrual.amount is now totalAmount (includes VAT)
+    const expenseAmount = Number(expense.totalAmount); // Compare with expense totalAmount (includes VAT)
     if (Math.abs(accrualAmount - expenseAmount) > DEFAULT_ACCRUAL_TOLERANCE) {
       throw new BadRequestException(
         `Settlement amount differs by more than ${DEFAULT_ACCRUAL_TOLERANCE}`,

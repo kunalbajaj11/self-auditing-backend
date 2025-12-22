@@ -14,6 +14,7 @@ import { InvoicePayment } from '../../entities/invoice-payment.entity';
 import { JournalEntry } from '../../entities/journal-entry.entity';
 import { CreditNote } from '../../entities/credit-note.entity';
 import { DebitNote } from '../../entities/debit-note.entity';
+import { CreditNoteApplication } from '../../entities/credit-note-application.entity';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { SettingsModule } from '../settings/settings.module';
 
@@ -31,6 +32,7 @@ import { SettingsModule } from '../settings/settings.module';
       JournalEntry,
       CreditNote,
       DebitNote,
+      CreditNoteApplication,
     ]),
     NotificationsModule,
     SettingsModule,
