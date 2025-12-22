@@ -303,7 +303,9 @@ export class SalesInvoicesService {
 
     // Calculate totals from line items
     // Separate standard VAT from reverse charge VAT
-    let totalAmount = 0;
+    // CRITICAL: invoice.amount should be SUBTOTAL (before VAT), not total including VAT
+    // The generated totalAmount column will calculate: amount + vatAmount
+    let subtotal = 0; // Amount before VAT
     let standardVatAmount = 0;
     let reverseChargeVatAmount = 0;
 
@@ -335,7 +337,7 @@ export class SalesInvoicesService {
         }
         
         const vatAmount = amount * (itemVatRate / 100);
-        totalAmount += amount;
+        subtotal += amount; // Add base amount to subtotal
         
         if (isReverseCharge) {
           // Reverse charge VAT: calculated but NOT added to total
@@ -345,20 +347,18 @@ export class SalesInvoicesService {
           // Zero rated or exempt: no VAT
           // Do nothing
         } else {
-          // Standard VAT: added to total
+          // Standard VAT: track for vatAmount field, but don't add to subtotal
           standardVatAmount += vatAmount;
-          totalAmount += vatAmount;
         }
       }
     } else {
-      totalAmount = parseFloat(dto.amount || '0');
+      // No line items - use provided amount as subtotal
+      subtotal = parseFloat(dto.amount || '0');
       // If VAT amount not provided, calculate from default rate
       if (!dto.vatAmount || dto.vatAmount === 0) {
-        standardVatAmount = totalAmount * (effectiveDefaultRate / 100);
-        totalAmount += standardVatAmount;
+        standardVatAmount = subtotal * (effectiveDefaultRate / 100);
       } else {
         standardVatAmount = parseFloat(dto.vatAmount || '0');
-        totalAmount += standardVatAmount;
       }
     }
 
@@ -368,10 +368,10 @@ export class SalesInvoicesService {
     if (shippingAmount > 0 && taxSettings.taxCalculateOnShipping) {
       shippingVatAmount = shippingAmount * (effectiveDefaultRate / 100);
       standardVatAmount += shippingVatAmount;
-      totalAmount += shippingAmount + shippingVatAmount;
+      subtotal += shippingAmount; // Add shipping to subtotal (before VAT)
     } else if (shippingAmount > 0) {
       // Shipping without tax
-      totalAmount += shippingAmount;
+      subtotal += shippingAmount;
     }
 
     // Calculate tax on discounts if enabled
@@ -381,10 +381,10 @@ export class SalesInvoicesService {
       // Tax on discount: reverse calculation (subtract tax from discount)
       discountVatAmount = discountAmount * (effectiveDefaultRate / 100);
       standardVatAmount -= discountVatAmount; // Subtract tax on discount
-      totalAmount -= discountAmount; // Subtract discount from total
+      subtotal -= discountAmount; // Subtract discount from subtotal
     } else if (discountAmount > 0) {
       // Discount without tax
-      totalAmount -= discountAmount;
+      subtotal -= discountAmount;
     }
 
     // Total VAT amount includes both standard and reverse charge (for reporting)
@@ -396,7 +396,7 @@ export class SalesInvoicesService {
       invoiceNumber,
       invoiceDate: dto.invoiceDate,
       dueDate: dto.dueDate,
-      amount: totalAmount.toString(),
+      amount: subtotal.toString(), // Subtotal BEFORE VAT
       vatAmount: totalVatAmount.toString(),
       currency: dto.currency || 'AED',
       description: dto.description,
@@ -414,13 +414,14 @@ export class SalesInvoicesService {
 
     // Override total_amount for invoices with reverse charge (DB generated column adds VAT incorrectly)
     if (reverseChargeVatAmount > 0) {
-      // For invoices with reverse charge: total_amount = amount (which already excludes reverse charge VAT)
+      // For invoices with reverse charge: total_amount = subtotal + standardVatAmount (excludes reverse charge VAT)
       // The DB generated column would calculate: total_amount = amount + vatAmount
       // But vatAmount includes reverse charge VAT, so we need to override
+      const correctTotal = subtotal + standardVatAmount;
       await this.invoicesRepository
         .createQueryBuilder()
         .update(SalesInvoice)
-        .set({ totalAmount: totalAmount.toString() })
+        .set({ totalAmount: correctTotal.toString() })
         .where('id = :id', { id: savedInvoice.id })
         .execute();
     }
@@ -1310,7 +1311,8 @@ export class SalesInvoicesService {
       await this.lineItemsRepository.save(lineItems);
 
       // Recalculate totals (separate standard VAT from reverse charge)
-      let totalAmount = 0;
+      // CRITICAL: invoice.amount should be SUBTOTAL (before VAT), not total including VAT
+      let subtotal = 0; // Amount before VAT
       let standardVatAmount = 0;
       let reverseChargeVatAmount = 0;
 
@@ -1319,7 +1321,7 @@ export class SalesInvoicesService {
         const vatAmount = parseFloat(item.vatAmount);
         const isReverseCharge = item.vatTaxType === 'reverse_charge' || item.vatTaxType === 'REVERSE_CHARGE';
         
-        totalAmount += amount;
+        subtotal += amount; // Add base amount to subtotal
         
         if (isReverseCharge) {
           reverseChargeVatAmount += vatAmount;
@@ -1329,7 +1331,7 @@ export class SalesInvoicesService {
           // Zero rated or exempt: no VAT
         } else {
           standardVatAmount += vatAmount;
-          totalAmount += vatAmount; // Standard VAT added to total
+          // Standard VAT tracked but not added to subtotal
         }
       }
 
@@ -1339,10 +1341,10 @@ export class SalesInvoicesService {
       if (shippingAmount > 0 && taxSettings.taxCalculateOnShipping) {
         shippingVatAmount = shippingAmount * (effectiveDefaultRate / 100);
         standardVatAmount += shippingVatAmount;
-        totalAmount += shippingAmount + shippingVatAmount;
+        subtotal += shippingAmount; // Add shipping to subtotal (before VAT)
       } else if (shippingAmount > 0) {
         // Shipping without tax
-        totalAmount += shippingAmount;
+        subtotal += shippingAmount;
       }
 
       // Calculate tax on discounts if enabled (use taxSettings already declared above)
@@ -1352,13 +1354,13 @@ export class SalesInvoicesService {
         // Tax on discount: reverse calculation (subtract tax from discount)
         discountVatAmount = discountAmount * (effectiveDefaultRate / 100);
         standardVatAmount -= discountVatAmount; // Subtract tax on discount
-        totalAmount -= discountAmount; // Subtract discount from total
+        subtotal -= discountAmount; // Subtract discount from subtotal
       } else if (discountAmount > 0) {
         // Discount without tax
-        totalAmount -= discountAmount;
+        subtotal -= discountAmount;
       }
 
-      invoice.amount = totalAmount.toString();
+      invoice.amount = subtotal.toString(); // Subtotal BEFORE VAT
       invoice.vatAmount = (standardVatAmount + reverseChargeVatAmount).toString(); // Both for reporting
     } else if (dto.amount !== undefined || dto.vatAmount !== undefined) {
       // Update amounts directly
@@ -1380,12 +1382,14 @@ export class SalesInvoicesService {
       );
       if (hasReverseCharge) {
         // Recalculate to get correct total (excluding reverse charge VAT)
+        // Total = subtotal (invoice.amount) + standardVatAmount
+        const subtotal = parseFloat(updated.amount);
+        // Calculate standard VAT only (excluding reverse charge)
         const lineItems = await this.lineItemsRepository.find({
           where: { invoice: { id: invoice.id } },
         });
-        let correctTotal = 0;
+        let standardVatOnly = 0;
         for (const item of lineItems) {
-          const amount = parseFloat(item.amount);
           const vatTaxTypeStr = String(item.vatTaxType || '').toLowerCase();
           const isReverseCharge = vatTaxTypeStr === 'reverse_charge' || 
                                   item.vatTaxType === VatTaxType.REVERSE_CHARGE;
@@ -1394,11 +1398,11 @@ export class SalesInvoicesService {
           const isExempt = vatTaxTypeStr === 'exempt' || 
                           item.vatTaxType === VatTaxType.EXEMPT;
           
-          correctTotal += amount;
           if (!isReverseCharge && !isZeroRated && !isExempt) {
-            correctTotal += parseFloat(item.vatAmount);
+            standardVatOnly += parseFloat(item.vatAmount);
           }
         }
+        const correctTotal = subtotal + standardVatOnly;
         await this.invoicesRepository
           .createQueryBuilder()
           .update(SalesInvoice)
