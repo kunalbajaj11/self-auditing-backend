@@ -74,12 +74,13 @@ export class ReportsService {
 
   async getFilterOptions(organizationId: string): Promise<{
     vendors: string[];
+    customers: string[];
     categories: string[];
   }> {
-    
     const vendorResults = await this.expensesRepository
       .createQueryBuilder('expense')
-      .select('DISTINCT expense.vendor_name', 'vendorName')
+      .select('expense.vendor_name', 'vendorName')
+      .distinct(true)
       .where('expense.organization_id = :organizationId', { organizationId })
       .andWhere('expense.is_deleted = false')
       .andWhere('expense.vendor_name IS NOT NULL')
@@ -87,13 +88,31 @@ export class ReportsService {
       .orderBy('expense.vendor_name', 'ASC')
       .getRawMany();
 
+    const customerResults = await this.salesInvoicesRepository
+      .createQueryBuilder('invoice')
+      .leftJoin('invoice.customer', 'customer')
+      .select('COALESCE(customer.name, invoice.customer_name)', 'customerName')
+      .distinct(true)
+      .where('invoice.organization_id = :organizationId', { organizationId })
+      .andWhere('COALESCE(customer.name, invoice.customer_name) IS NOT NULL')
+      .andWhere("COALESCE(customer.name, invoice.customer_name) != ''")
+      .orderBy('customerName', 'ASC')
+      .getRawMany();
+
+    const vendors = vendorResults
+      .map((r) => r.vendorname || r.vendorName || r.vendor_name)
+      .filter((v) => v)
+      .sort();
+
+    const customers = customerResults
+      .map((r) => r.customername || r.customerName || r.customer_name)
+      .filter((c) => c)
+      .sort();
+
     return {
-      
-      vendors: vendorResults
-        .map((r) => r.vendorname || r.vendorName)
-        .filter((v) => v)
-        .sort(),
-      categories: [], 
+      vendors,
+      customers,
+      categories: [],
     };
   }
 
@@ -158,7 +177,7 @@ export class ReportsService {
     if (!startDate || !endDate) {
       const taxSettings =
         await this.settingsService.getTaxSettings(organizationId);
-      const taxYearEnd = taxSettings.taxYearEnd; 
+      const taxYearEnd = taxSettings.taxYearEnd;
 
       if (taxYearEnd) {
         const [month, day] = taxYearEnd.split('-').map(Number);
@@ -167,14 +186,12 @@ export class ReportsService {
         const fiscalYearEnd = new Date(currentYear, month - 1, day);
 
         if (now > fiscalYearEnd) {
-          
           const lastYearEnd = new Date(currentYear - 1, month - 1, day);
           const startDateObj = new Date(lastYearEnd);
           startDateObj.setDate(startDateObj.getDate() + 1);
           startDate = startDateObj.toISOString().split('T')[0];
           endDate = fiscalYearEnd.toISOString().split('T')[0];
         } else {
-          
           const yearBeforeLastEnd = new Date(currentYear - 2, month - 1, day);
           const startDateObj = new Date(yearBeforeLastEnd);
           startDateObj.setDate(startDateObj.getDate() + 1);
@@ -184,7 +201,6 @@ export class ReportsService {
             .split('T')[0];
         }
       } else {
-        
         startDate = new Date(new Date().getFullYear(), 0, 1)
           .toISOString()
           .split('T')[0];
@@ -287,8 +303,8 @@ export class ReportsService {
     const debitNotesRow = await debitNotesQuery.getRawOne();
     const debitNotesAmount = Number(debitNotesRow?.amount || 0);
 
-    const revenueDebit = creditNotesAmount; 
-    const totalRevenueCredit = revenueCredit + debitNotesAmount; 
+    const revenueDebit = creditNotesAmount;
+    const totalRevenueCredit = revenueCredit + debitNotesAmount;
     const revenueBalance = totalRevenueCredit - revenueDebit;
 
     accounts.push({
@@ -326,32 +342,36 @@ export class ReportsService {
 
     const accrualsAtEnd = Number(accrualsAtEndRow?.credit || 0);
     const accrualsAtStart = Number(accrualsAtStartRow?.credit || 0);
-    const accrualsPeriodMovement = accrualsAtEnd - accrualsAtStart; 
+    const accrualsPeriodMovement = accrualsAtEnd - accrualsAtStart;
 
-    const accrualsPeriodDebit = accrualsPeriodMovement < 0 ? Math.abs(accrualsPeriodMovement) : 0;
-    const accrualsPeriodCredit = accrualsPeriodMovement > 0 ? accrualsPeriodMovement : 0;
+    const accrualsPeriodDebit =
+      accrualsPeriodMovement < 0 ? Math.abs(accrualsPeriodMovement) : 0;
+    const accrualsPeriodCredit =
+      accrualsPeriodMovement > 0 ? accrualsPeriodMovement : 0;
 
     accounts.push({
       accountName: 'Accounts Payable',
       accountType: 'Liability',
       debit: accrualsPeriodDebit,
       credit: accrualsPeriodCredit,
-      balance: accrualsPeriodCredit - accrualsPeriodDebit, 
+      balance: accrualsPeriodCredit - accrualsPeriodDebit,
     });
 
-    const creditNoteApplicationsSubqueryEnd = this.creditNoteApplicationsRepository
-      .createQueryBuilder('cna')
-      .select('COALESCE(SUM(cna.appliedAmount), 0)')
-      .where('cna.invoice_id = invoice.id')
-      .andWhere('cna.organization_id = :organizationId', { organizationId })
-      .getQuery();
+    const creditNoteApplicationsSubqueryEnd =
+      this.creditNoteApplicationsRepository
+        .createQueryBuilder('cna')
+        .select('COALESCE(SUM(cna.appliedAmount), 0)')
+        .where('cna.invoice_id = invoice.id')
+        .andWhere('cna.organization_id = :organizationId', { organizationId })
+        .getQuery();
 
-    const creditNoteApplicationsSubqueryStart = this.creditNoteApplicationsRepository
-      .createQueryBuilder('cna')
-      .select('COALESCE(SUM(cna.appliedAmount), 0)')
-      .where('cna.invoice_id = invoice.id')
-      .andWhere('cna.organization_id = :organizationId', { organizationId })
-      .getQuery();
+    const creditNoteApplicationsSubqueryStart =
+      this.creditNoteApplicationsRepository
+        .createQueryBuilder('cna')
+        .select('COALESCE(SUM(cna.appliedAmount), 0)')
+        .where('cna.invoice_id = invoice.id')
+        .andWhere('cna.organization_id = :organizationId', { organizationId })
+        .getQuery();
 
     const receivablesAtEndQuery = this.salesInvoicesRepository
       .createQueryBuilder('invoice')
@@ -408,16 +428,19 @@ export class ReportsService {
     ]);
 
     const receivablesAtEnd = Number(receivablesAtEndRow?.invoiceAmount || 0);
-    const receivablesAtStart = Number(receivablesAtStartRow?.invoiceAmount || 0);
+    const receivablesAtStart = Number(
+      receivablesAtStartRow?.invoiceAmount || 0,
+    );
     const debitNotesAtEnd = Number(debitNotesAtEndRow?.debit || 0);
     const debitNotesAtStart = Number(debitNotesAtStartRow?.debit || 0);
 
     const arAtEnd = receivablesAtEnd + debitNotesAtEnd;
     const arAtStart = receivablesAtStart + debitNotesAtStart;
-    const arPeriodMovement = arAtEnd - arAtStart; 
+    const arPeriodMovement = arAtEnd - arAtStart;
 
     const arPeriodDebit = arPeriodMovement > 0 ? arPeriodMovement : 0;
-    const arPeriodCredit = arPeriodMovement < 0 ? Math.abs(arPeriodMovement) : 0;
+    const arPeriodCredit =
+      arPeriodMovement < 0 ? Math.abs(arPeriodMovement) : 0;
     const arPeriodBalance = arPeriodDebit - arPeriodCredit;
 
     accounts.push({
@@ -425,7 +448,7 @@ export class ReportsService {
       accountType: 'Asset',
       debit: arPeriodDebit,
       credit: arPeriodCredit,
-      balance: arPeriodBalance, 
+      balance: arPeriodBalance,
     });
 
     const vatReceivableQuery = this.expensesRepository
@@ -591,7 +614,9 @@ export class ReportsService {
       periodCashBankJournalEntriesQuery.getRawOne(),
     ]);
 
-    const openingCashReceipts = Number(openingInvoicePaymentsRow?.receipts || 0);
+    const openingCashReceipts = Number(
+      openingInvoicePaymentsRow?.receipts || 0,
+    );
     const openingCashPayments = Number(
       openingExpensePaymentsRow?.payments || 0,
     );
@@ -619,14 +644,18 @@ export class ReportsService {
     const periodCashCredit = periodCashPayments + periodJournalPaid;
 
     const closingCashBalance =
-      openingCashBalance + periodCashReceipts - periodCashPayments + periodJournalReceived - periodJournalPaid;
+      openingCashBalance +
+      periodCashReceipts -
+      periodCashPayments +
+      periodJournalReceived -
+      periodJournalPaid;
 
     accounts.push({
       accountName: 'Cash/Bank',
       accountType: 'Asset',
       debit: periodCashDebit,
       credit: periodCashCredit,
-      balance: closingCashBalance, 
+      balance: closingCashBalance,
     });
 
     const journalEntriesQuery = this.journalEntriesRepository
@@ -652,7 +681,7 @@ export class ReportsService {
       const credit = Number(row.credit || 0);
       if (debit > 0 || credit > 0) {
         const accountType = row.accounttype || 'Journal Entry';
-        
+
         const isCreditAccount =
           accountType === 'Equity' ||
           accountType === 'Revenue' ||
@@ -751,12 +780,12 @@ export class ReportsService {
     const openingDebitNotesRow = await openingDebitNotesQuery.getRawOne();
     const openingDebitNotesAmount = Number(openingDebitNotesRow?.amount || 0);
 
-    const openingRevenueDebit = openingCreditNotesAmount; 
+    const openingRevenueDebit = openingCreditNotesAmount;
     const totalOpeningRevenueCredit =
-      openingRevenueCredit + openingDebitNotesAmount; 
+      openingRevenueCredit + openingDebitNotesAmount;
     const openingRevenueBalance =
       totalOpeningRevenueCredit - openingRevenueDebit;
-    
+
     openingBalances.set('Sales Revenue', {
       debit: openingRevenueDebit,
       credit: totalOpeningRevenueCredit,
@@ -775,21 +804,22 @@ export class ReportsService {
 
     const openingAccrualsRow = await openingAccrualsQuery.getRawOne();
     const openingAccrualsCredit = Number(openingAccrualsRow?.credit || 0);
-    
-    const openingAccrualsBalance = openingAccrualsCredit - 0; 
-    
+
+    const openingAccrualsBalance = openingAccrualsCredit - 0;
+
     openingBalances.set('Accounts Payable', {
       debit: 0,
       credit: openingAccrualsCredit,
       balance: openingAccrualsBalance,
     });
 
-    const openingCreditNoteApplicationsSubquery = this.creditNoteApplicationsRepository
-      .createQueryBuilder('cna')
-      .select('COALESCE(SUM(cna.appliedAmount), 0)')
-      .where('cna.invoice_id = invoice.id')
-      .andWhere('cna.organization_id = :organizationId', { organizationId })
-      .getQuery();
+    const openingCreditNoteApplicationsSubquery =
+      this.creditNoteApplicationsRepository
+        .createQueryBuilder('cna')
+        .select('COALESCE(SUM(cna.appliedAmount), 0)')
+        .where('cna.invoice_id = invoice.id')
+        .andWhere('cna.organization_id = :organizationId', { organizationId })
+        .getQuery();
 
     const openingReceivablesQuery = this.salesInvoicesRepository
       .createQueryBuilder('invoice')
@@ -825,8 +855,8 @@ export class ReportsService {
 
     const netOpeningReceivablesDebit =
       openingReceivablesDebit + openingReceivablesDebitNotesDebit;
-    const netOpeningReceivablesCredit = 0; 
-    
+    const netOpeningReceivablesCredit = 0;
+
     openingBalances.set('Accounts Receivable', {
       debit: netOpeningReceivablesDebit,
       credit: netOpeningReceivablesCredit,
@@ -918,24 +948,15 @@ export class ReportsService {
     const netOpeningVatPayableDebit = openingVatCreditNotesDebit;
     const netOpeningVatPayableCredit =
       openingVatPayableCredit + openingVatDebitNotesCredit;
-    
+
     openingBalances.set('VAT Payable (Output VAT)', {
       debit: netOpeningVatPayableDebit,
       credit: netOpeningVatPayableCredit,
       balance: netOpeningVatPayableCredit - netOpeningVatPayableDebit,
     });
 
-    const openingJournalReceivedDebit = Number(
-      openingCashBankJournalEntriesRow?.received || 0,
-    );
-    const openingJournalPaidCredit = Number(
-      openingCashBankJournalEntriesRow?.paid || 0,
-    );
-
-    const totalOpeningCashDebit =
-      openingCashReceipts + openingJournalReceived;
-    const totalOpeningCashCredit =
-      openingCashPayments + openingJournalPaid;
+    const totalOpeningCashDebit = openingCashReceipts + openingJournalReceived;
+    const totalOpeningCashCredit = openingCashPayments + openingJournalPaid;
 
     openingBalances.set('Cash/Bank', {
       debit: totalOpeningCashDebit,
@@ -964,9 +985,9 @@ export class ReportsService {
       const credit = Number(row.credit || 0);
       if (debit > 0 || credit > 0) {
         const accountName = row.accountname || row.accountName;
-        
+
         const isEquityAccount = accountName.includes('Equity');
-        
+
         const balance = isEquityAccount ? credit - debit : debit - credit;
         openingBalances.set(accountName, {
           debit,
@@ -997,7 +1018,8 @@ export class ReportsService {
     const retainedEarningsRevenueDebit = accounts
       .filter((acc) => acc.accountName === 'Sales Revenue')
       .reduce((sum, acc) => sum + acc.debit, 0);
-    const retainedEarningsNetRevenue = retainedEarningsRevenueCredit - retainedEarningsRevenueDebit;
+    const retainedEarningsNetRevenue =
+      retainedEarningsRevenueCredit - retainedEarningsRevenueDebit;
 
     const totalExpensesDebit = accounts
       .filter((acc) => acc.accountType === 'Expense')
@@ -1006,7 +1028,10 @@ export class ReportsService {
     const equityJournalCredit = accounts
       .filter((acc) => acc.accountName.includes('Equity'))
       .reduce((sum, acc) => {
-        if (acc.accountName.includes('share_capital') || acc.accountName.includes('retained_earnings')) {
+        if (
+          acc.accountName.includes('share_capital') ||
+          acc.accountName.includes('retained_earnings')
+        ) {
           return sum + acc.credit;
         }
         return sum;
@@ -1021,25 +1046,28 @@ export class ReportsService {
       }, 0);
     const netEquityJournal = equityJournalCredit - equityJournalDebit;
 
-    const retainedEarningsBalance = retainedEarningsNetRevenue - totalExpensesDebit + netEquityJournal;
+    const retainedEarningsBalance =
+      retainedEarningsNetRevenue - totalExpensesDebit + netEquityJournal;
 
     accounts.push({
       accountName: 'Retained Earnings / Current Year Profit',
       accountType: 'Equity',
-      debit: retainedEarningsBalance < 0 ? Math.abs(retainedEarningsBalance) : 0,
+      debit:
+        retainedEarningsBalance < 0 ? Math.abs(retainedEarningsBalance) : 0,
       credit: retainedEarningsBalance > 0 ? retainedEarningsBalance : 0,
       balance: retainedEarningsBalance,
     });
 
     const calculatedRetainedEarnings = totalClosingBalance;
-    const accountingDifference = calculatedRetainedEarnings - retainedEarningsBalance;
+    const accountingDifference =
+      calculatedRetainedEarnings - retainedEarningsBalance;
 
     const finalTotalDebit = accounts.reduce((sum, acc) => sum + acc.debit, 0);
     const finalTotalCredit = accounts.reduce((sum, acc) => sum + acc.credit, 0);
 
     const periodDifference = Math.abs(totalDebit - totalCredit);
     const closingDifference = Math.abs(finalTotalDebit - finalTotalCredit);
-    const isBalanced = periodDifference < 0.01 && closingDifference < 0.01; 
+    const isBalanced = periodDifference < 0.01 && closingDifference < 0.01;
 
     const accountNamesSet = new Set(accounts.map((acc) => acc.accountName));
     openingBalances.forEach((opening, accountName) => {
@@ -1047,7 +1075,6 @@ export class ReportsService {
         !accountNamesSet.has(accountName) &&
         (opening.debit > 0 || opening.credit > 0 || opening.balance !== 0)
       ) {
-        
         let accountType = 'Asset';
         if (
           accountName === 'Accounts Payable' ||
@@ -1104,7 +1131,6 @@ export class ReportsService {
         endDate,
       },
       accounts: accountsWithBalances.sort((a, b) => {
-        
         const typeOrder = [
           'Asset',
           'Liability',
@@ -1132,19 +1158,19 @@ export class ReportsService {
         closingDebit: Number(totalClosingDebit.toFixed(2)),
         closingCredit: Number(totalClosingCredit.toFixed(2)),
         closingBalance: Number(totalClosingBalance.toFixed(2)),
-        
+
         totalDebit: Number(totalDebit.toFixed(2)),
         totalCredit: Number(totalCredit.toFixed(2)),
         totalBalance: Number((totalDebit - totalCredit).toFixed(2)),
         accountCount: accounts.length,
-        
+
         retainedEarnings: Number(retainedEarningsBalance.toFixed(2)),
         netRevenue: Number(retainedEarningsNetRevenue.toFixed(2)),
         totalExpenses: Number(totalExpensesDebit.toFixed(2)),
         netEquityJournal: Number(netEquityJournal.toFixed(2)),
-        
+
         accountingDifference: Number(accountingDifference.toFixed(2)),
-        
+
         isBalanced: isBalanced,
         periodDifference: Number(periodDifference.toFixed(2)),
         closingDifference: Number(closingDifference.toFixed(2)),
@@ -1206,7 +1232,7 @@ export class ReportsService {
 
     const receivablesAmount = Number(receivablesRow?.amount || 0);
     const receivablesDebitNotes = Number(receivablesDebitNotesRow?.debit || 0);
-    
+
     const netReceivablesAmount = receivablesAmount + receivablesDebitNotes;
     if (netReceivablesAmount > 0) {
       assets.push({
@@ -1253,7 +1279,8 @@ export class ReportsService {
       cashBankJournalEntriesRow?.received || 0,
     );
     const totalJournalPaid = Number(cashBankJournalEntriesRow?.paid || 0);
-    const netCash = totalReceipts - totalPayments + totalJournalReceived - totalJournalPaid;
+    const netCash =
+      totalReceipts - totalPayments + totalJournalReceived - totalJournalPaid;
 
     const vatReceivableQuery = this.expensesRepository
       .createQueryBuilder('expense')
@@ -1290,50 +1317,63 @@ export class ReportsService {
     }> = [];
     let totalLiabilities = 0;
 
+    // Calculate Accounts Payable based on unpaid expenses linked to accruals
+    // Instead of using accrual status, we check if the expense has been fully paid
+    const expensePaymentsSubquery = this.expensePaymentsRepository
+      .createQueryBuilder('payment')
+      .select('COALESCE(SUM(payment.amount), 0)')
+      .where('payment.expense_id = expense.id')
+      .andWhere('payment.payment_date <= :asOfDate')
+      .andWhere('payment.organization_id = :organizationId')
+      .getQuery();
+
     const accrualsQuery = this.accrualsRepository
       .createQueryBuilder('accrual')
+      .leftJoin('accrual.expense', 'expense')
       .select([
         'accrual.vendor_name AS vendor',
-        'SUM(accrual.amount) AS amount',
-        'accrual.status AS status',
+        'expense.id AS expenseId',
+        'expense.total_amount AS expenseTotalAmount',
+        `(${expensePaymentsSubquery}) AS paidAmount`,
       ])
       .where('accrual.organization_id = :organizationId', { organizationId })
       .andWhere('accrual.is_deleted = false')
-      .andWhere('accrual.status = :status', {
-        status: AccrualStatus.PENDING_SETTLEMENT,
-      })
+      .andWhere('expense.is_deleted = false')
       .andWhere('accrual.created_at::date <= :asOfDate', { asOfDate })
-      .groupBy('accrual.vendor_name')
-      .addGroupBy('accrual.status');
-
-    if (filters?.['status']) {
-      const statuses = Array.isArray(filters.status)
-        ? filters.status
-        : [filters.status];
-      accrualsQuery.andWhere('accrual.status IN (:...statuses)', {
-        statuses,
-      });
-    }
+      .setParameter('organizationId', organizationId)
+      .setParameter('asOfDate', asOfDate);
 
     const accrualsRows = await accrualsQuery.getRawMany();
-    let totalAccountsPayable = 0;
+
+    // Group by vendor and calculate outstanding amounts
+    const vendorPayables = new Map<string, number>();
+
     accrualsRows.forEach((row) => {
-      const amount = Number(row.amount || 0);
-      if (amount > 0) {
-        liabilities.push({
-          vendor: row.vendor || 'N/A',
-          amount,
-          status: row.status,
-          category: 'Accounts Payable',
-        });
-        totalLiabilities += amount;
-        totalAccountsPayable += amount;
+      const expenseTotal = Number(
+        row.expenseTotalAmount || row.expensetotalamount || 0,
+      );
+      const paidAmount = Number(row.paidAmount || row.paidamount || 0);
+      const outstanding = expenseTotal - paidAmount;
+
+      if (outstanding > 0) {
+        const vendor = row.vendor || 'N/A';
+        const currentAmount = vendorPayables.get(vendor) || 0;
+        vendorPayables.set(vendor, currentAmount + outstanding);
       }
     });
 
-    if (totalAccountsPayable > 0) {
-      
-    }
+    // Add to liabilities
+    vendorPayables.forEach((amount, vendor) => {
+      if (amount > 0) {
+        liabilities.push({
+          vendor,
+          amount,
+          status: 'Unpaid',
+          category: 'Accounts Payable',
+        });
+        totalLiabilities += amount;
+      }
+    });
 
     const vatPayableQuery = this.salesInvoicesRepository
       .createQueryBuilder('invoice')
@@ -1384,7 +1424,7 @@ export class ReportsService {
     const vatPayableAmount = Number(vatPayableRow?.amount || 0);
     const vatCreditNotesAmount = Number(vatCreditNotesRow?.vat || 0);
     const vatDebitNotesAmount = Number(vatDebitNotesRow?.vat || 0);
-    
+
     const netVatPayableAmount =
       vatPayableAmount - vatCreditNotesAmount + vatDebitNotesAmount;
     if (netVatPayableAmount > 0) {
@@ -1523,12 +1563,13 @@ export class ReportsService {
       .andWhere('expense.expense_date < :startDate', { startDate })
       .andWhere("(expense.type IS NULL OR expense.type != 'credit')");
 
-    const openingCreditNoteApplicationsSubquery = this.creditNoteApplicationsRepository
-      .createQueryBuilder('cna')
-      .select('COALESCE(SUM(cna.appliedAmount), 0)')
-      .where('cna.invoice_id = invoice.id')
-      .andWhere('cna.organization_id = :organizationId', { organizationId })
-      .getQuery();
+    const openingCreditNoteApplicationsSubquery =
+      this.creditNoteApplicationsRepository
+        .createQueryBuilder('cna')
+        .select('COALESCE(SUM(cna.appliedAmount), 0)')
+        .where('cna.invoice_id = invoice.id')
+        .andWhere('cna.organization_id = :organizationId', { organizationId })
+        .getQuery();
 
     const openingReceivablesQuery = this.salesInvoicesRepository
       .createQueryBuilder('invoice')
@@ -1674,7 +1715,7 @@ export class ReportsService {
     const openingReceivablesDebitNotes = Number(
       openingReceivablesDebitNotesRow?.debit || 0,
     );
-    
+
     const openingReceivables =
       openingReceivablesAmount + openingReceivablesDebitNotes;
     const openingCashReceipts = Number(openingCashRow?.receipts || 0);
@@ -1695,8 +1736,9 @@ export class ReportsService {
     const openingVatReceivable = Number(openingVatReceivableRow?.amount || 0);
 
     if (netCash > 0) {
-      
-      const cashAssetIndex = assets.findIndex((a) => a.category === 'Cash/Bank');
+      const cashAssetIndex = assets.findIndex(
+        (a) => a.category === 'Cash/Bank',
+      );
       if (cashAssetIndex >= 0) {
         const oldCashAmount = assets[cashAssetIndex].amount;
         totalAssets = totalAssets - oldCashAmount + netCash;
@@ -1709,13 +1751,13 @@ export class ReportsService {
         totalAssets += netCash;
       }
     } else if (netCash < 0) {
-      
       const overdraftIndex = liabilities.findIndex(
         (l) => l.vendor === 'Bank Overdraft',
       );
       if (overdraftIndex >= 0) {
         const oldOverdraftAmount = liabilities[overdraftIndex].amount;
-        totalLiabilities = totalLiabilities - oldOverdraftAmount + Math.abs(netCash);
+        totalLiabilities =
+          totalLiabilities - oldOverdraftAmount + Math.abs(netCash);
         liabilities[overdraftIndex].amount = Math.abs(netCash);
       } else {
         liabilities.push({
@@ -1899,6 +1941,7 @@ export class ReportsService {
         opening: Number(openingEquity.toFixed(2)),
         period: Number(totalEquity.toFixed(2)),
         closing: Number(closingEquity.toFixed(2)),
+        total: Number(closingEquity.toFixed(2)),
         net: Number(totalEquity.toFixed(2)),
       },
       summary: {
@@ -2149,21 +2192,18 @@ export class ReportsService {
         : [filters.status];
       query.andWhere('accrual.status IN (:...statuses)', { statuses });
     } else {
-      
       query.andWhere('accrual.status = :status', {
         status: AccrualStatus.PENDING_SETTLEMENT,
       });
     }
 
     if (filters?.['endDate']) {
-      
       query.andWhere('accrual.created_at::date <= :asOfDate', {
         asOfDate: filters.endDate,
       });
     }
-    
+
     if (filters?.['startDate']) {
-      
     }
 
     if (filters?.['vendorName']) {
@@ -2318,7 +2358,6 @@ export class ReportsService {
         : [filters.paymentStatus];
       query.andWhere('invoice.payment_status IN (:...statuses)', { statuses });
     } else {
-      
     }
 
     if (filters?.['status']) {
@@ -2329,12 +2368,11 @@ export class ReportsService {
     }
 
     if (filters?.['endDate']) {
-      
       query.andWhere('invoice.invoice_date <= :endDate', {
         endDate: filters.endDate,
       });
     }
-    
+
     if (filters?.['customerName']) {
       const customers = Array.isArray(filters.customerName)
         ? filters.customerName
@@ -2349,12 +2387,13 @@ export class ReportsService {
 
     const rows = await query.getRawMany();
 
-    const unappliedCreditNoteApplicationsSubquery = this.creditNoteApplicationsRepository
-      .createQueryBuilder('cna')
-      .select('COALESCE(SUM(cna.appliedAmount), 0)')
-      .where('cna.credit_note_id = creditNote.id')
-      .andWhere('cna.organization_id = :organizationId', { organizationId })
-      .getQuery();
+    const unappliedCreditNoteApplicationsSubquery =
+      this.creditNoteApplicationsRepository
+        .createQueryBuilder('cna')
+        .select('COALESCE(SUM(cna.appliedAmount), 0)')
+        .where('cna.credit_note_id = creditNote.id')
+        .andWhere('cna.organization_id = :organizationId', { organizationId })
+        .getQuery();
 
     const unappliedCreditNotesQuery = this.creditNotesRepository
       .createQueryBuilder('creditNote')
@@ -2382,14 +2421,20 @@ export class ReportsService {
       .setParameter('organizationId', organizationId);
 
     if (filters?.['startDate']) {
-      unappliedCreditNotesQuery.andWhere('creditNote.credit_note_date >= :startDate', {
-        startDate: filters.startDate,
-      });
+      unappliedCreditNotesQuery.andWhere(
+        'creditNote.credit_note_date >= :startDate',
+        {
+          startDate: filters.startDate,
+        },
+      );
     }
     if (filters?.['endDate']) {
-      unappliedCreditNotesQuery.andWhere('creditNote.credit_note_date <= :endDate', {
-        endDate: filters.endDate,
-      });
+      unappliedCreditNotesQuery.andWhere(
+        'creditNote.credit_note_date <= :endDate',
+        {
+          endDate: filters.endDate,
+        },
+      );
     }
     if (filters?.['customerName']) {
       const customers = Array.isArray(filters.customerName)
@@ -2452,7 +2497,7 @@ export class ReportsService {
       const appliedCreditAmount = Number(
         row.appliedcreditamount || row.appliedCreditAmount || 0,
       );
-      
+
       const outstanding = Math.max(0, total - paid - appliedCreditAmount);
       const paymentStatus = row.paymentstatus || row.paymentStatus;
       const dueDate = row.duedate || row.dueDate;
@@ -2483,7 +2528,7 @@ export class ReportsService {
     const unappliedCreditNoteItems = unappliedCreditNotesRows.map((row) => {
       const total = Number(row.total || 0);
       const appliedAmount = Number(row.appliedamount || row.appliedAmount || 0);
-      const unappliedAmount = total - appliedAmount; 
+      const unappliedAmount = total - appliedAmount;
       return {
         type: 'credit_note',
         creditNoteId: row.creditnoteid || row.creditNoteId,
@@ -2495,7 +2540,7 @@ export class ReportsService {
         appliedAmount: appliedAmount,
         unappliedAmount: unappliedAmount,
         paid: 0,
-        outstanding: -unappliedAmount, 
+        outstanding: -unappliedAmount,
         invoiceDate: row.creditnotedate || row.creditNoteDate,
         dueDate: null,
         paidDate: null,
@@ -2517,7 +2562,7 @@ export class ReportsService {
         vat: Number(row.vat || 0),
         total: total,
         paid: 0,
-        outstanding: total, 
+        outstanding: total,
         invoiceDate: row.debitnotedate || row.debitNoteDate,
         dueDate: null,
         paidDate: null,
@@ -2552,12 +2597,13 @@ export class ReportsService {
     let periodOutstanding = totalOutstanding;
 
     if (startDate) {
-      const openingCreditNoteApplicationsSubquery = this.creditNoteApplicationsRepository
-        .createQueryBuilder('cna')
-        .select('COALESCE(SUM(cna.appliedAmount), 0)')
-        .where('cna.invoice_id = invoice.id')
-        .andWhere('cna.organization_id = :organizationId', { organizationId })
-        .getQuery();
+      const openingCreditNoteApplicationsSubquery =
+        this.creditNoteApplicationsRepository
+          .createQueryBuilder('cna')
+          .select('COALESCE(SUM(cna.appliedAmount), 0)')
+          .where('cna.invoice_id = invoice.id')
+          .andWhere('cna.organization_id = :organizationId', { organizationId })
+          .getQuery();
 
       const openingInvoicesQueryWithCN = this.salesInvoicesRepository
         .createQueryBuilder('invoice')
@@ -2601,12 +2647,13 @@ export class ReportsService {
       const openingDebitNotes = Number(openingDebitNotesRow?.total || 0);
       openingBalance = openingInvoices + openingDebitNotes;
 
-      const periodCreditNoteApplicationsSubquery = this.creditNoteApplicationsRepository
-        .createQueryBuilder('cna')
-        .select('COALESCE(SUM(cna.appliedAmount), 0)')
-        .where('cna.invoice_id = invoice.id')
-        .andWhere('cna.organization_id = :organizationId', { organizationId })
-        .getQuery();
+      const periodCreditNoteApplicationsSubquery =
+        this.creditNoteApplicationsRepository
+          .createQueryBuilder('cna')
+          .select('COALESCE(SUM(cna.appliedAmount), 0)')
+          .where('cna.invoice_id = invoice.id')
+          .andWhere('cna.organization_id = :organizationId', { organizationId })
+          .getQuery();
 
       const periodInvoicesQuery = this.salesInvoicesRepository
         .createQueryBuilder('invoice')
@@ -2662,7 +2709,7 @@ export class ReportsService {
       summary: {
         openingBalance: Number(openingBalance.toFixed(2)),
         periodOutstanding: Number(periodOutstanding.toFixed(2)),
-        periodAmount: Number(periodOutstanding.toFixed(2)), 
+        periodAmount: Number(periodOutstanding.toFixed(2)),
         closingBalance: Number(closingBalance.toFixed(2)),
         totalInvoices: filteredInvoiceItems.length,
         totalCreditNotes: unappliedCreditNoteItems.length,
@@ -2727,12 +2774,11 @@ export class ReportsService {
     const vatInputExpenses = await vatInputQuery.getRawMany();
 
     const vatInputItems = vatInputExpenses.map((expense: any) => {
-      
       const vatAmount = parseFloat(
         expense.vatamount || expense.vatAmount || '0',
       );
       const amount = parseFloat(expense.amount || '0');
-      
+
       const baseAmount = amount;
       const grossAmount = amount + vatAmount;
       const vatRate =
@@ -2820,12 +2866,11 @@ export class ReportsService {
       ]);
 
     const vatOutputItems = vatOutputInvoices.map((invoice: any) => {
-      
       const vatAmount = parseFloat(
         invoice.vatamount || invoice.vatAmount || '0',
       );
       const amount = parseFloat(invoice.amount || '0');
-      
+
       const baseAmount = amount;
       const grossAmount = amount + vatAmount;
       const vatRate =
@@ -2858,7 +2903,7 @@ export class ReportsService {
         creditNote.vatamount || creditNote.vatAmount || '0',
       );
       const amount = parseFloat(creditNote.amount || '0');
-      
+
       const baseAmount = amount;
       const grossAmount = amount + vatAmount;
       const vatRate =
@@ -2892,7 +2937,7 @@ export class ReportsService {
         debitNote.vatamount || debitNote.vatAmount || '0',
       );
       const amount = parseFloat(debitNote.amount || '0');
-      
+
       const baseAmount = amount;
       const grossAmount = amount + vatAmount;
       const vatRate =
@@ -2936,7 +2981,7 @@ export class ReportsService {
       (sum, item) => sum + item.vatAmount,
       0,
     );
-    
+
     const netVatOutput =
       totalVatOutput - totalVatCreditNotes + totalVatDebitNotes;
     const netVat = netVatOutput - totalVatInput;

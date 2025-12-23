@@ -54,6 +54,10 @@ export class UpdateExpenseDto {
 
   @IsOptional()
   @IsString()
+  invoiceNumber?: string;
+
+  @IsOptional()
+  @IsString()
   description?: string;
 
   @IsOptional()

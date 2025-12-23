@@ -62,6 +62,9 @@ export class Expense extends AbstractEntity {
   @Column({ name: 'vendor_trn', length: 50, nullable: true })
   vendorTrn?: string | null; // Keep for backward compatibility
 
+  @Column({ name: 'invoice_number', length: 100, nullable: true })
+  invoiceNumber?: string | null;
+
   @Column({ type: 'text', nullable: true })
   description?: string | null;
 

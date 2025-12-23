@@ -58,6 +58,10 @@ export class CreateExpenseDto {
 
   @IsOptional()
   @IsString()
+  invoiceNumber?: string;
+
+  @IsOptional()
+  @IsString()
   currency?: string; // Defaults to organization currency
 
   @IsOptional()
