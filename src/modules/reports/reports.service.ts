@@ -571,17 +571,18 @@ export class ReportsService {
     });
 
     // 9. Get Journal Entries (excluding cash/bank entries which are already included in Cash/Bank account)
-    // Journal entries: equity types (share_capital, retained_earnings) are typically credits
-    // shareholder_account entries are typically debits
+    // Journal entries: Handle all types dynamically
+    // Debit types: shareholder_account, prepaid, accrued_income, depreciation
+    // Credit types: share_capital, retained_earnings, outstanding
     // CASH_PAID and CASH_RECEIVED are excluded here as they're included in Cash/Bank account
     // BANK_PAID and BANK_RECEIVED should be handled similarly if there's a Bank account
     const journalEntriesQuery = this.journalEntriesRepository
       .createQueryBuilder('entry')
       .select([
-        "CASE WHEN entry.category = 'equity' THEN 'Equity - ' || entry.type::text ELSE 'Other - ' || entry.category::text END AS accountName",
-        "CASE WHEN entry.category = 'equity' THEN 'Equity' ELSE 'Journal Entry' END AS accountType",
-        "SUM(CASE WHEN entry.type = 'shareholder_account' THEN entry.amount ELSE 0 END) AS debit",
-        "SUM(CASE WHEN entry.type IN ('share_capital', 'retained_earnings') THEN entry.amount ELSE 0 END) AS credit",
+        "CASE WHEN entry.category = 'equity' THEN 'Equity - ' || entry.type::text WHEN entry.type = 'prepaid' THEN 'Prepaid Expenses' WHEN entry.type = 'accrued_income' THEN 'Accrued Income' WHEN entry.type = 'depreciation' THEN 'Depreciation' WHEN entry.type = 'outstanding' THEN 'Outstanding Liabilities' ELSE 'Other - ' || entry.category::text END AS accountName",
+        "CASE WHEN entry.category = 'equity' THEN 'Equity' WHEN entry.type IN ('prepaid', 'accrued_income') THEN 'Asset' WHEN entry.type = 'depreciation' THEN 'Expense' WHEN entry.type = 'outstanding' THEN 'Liability' ELSE 'Journal Entry' END AS accountType",
+        "SUM(CASE WHEN entry.type IN ('shareholder_account', 'prepaid', 'accrued_income', 'depreciation') THEN entry.amount ELSE 0 END) AS debit",
+        "SUM(CASE WHEN entry.type IN ('share_capital', 'retained_earnings', 'outstanding') THEN entry.amount ELSE 0 END) AS credit",
       ])
       .where('entry.organization_id = :organizationId', { organizationId })
       .andWhere('entry.entry_date >= :startDate', { startDate })
@@ -965,9 +966,9 @@ export class ReportsService {
     const openingJournalQuery = this.journalEntriesRepository
       .createQueryBuilder('entry')
       .select([
-        "CASE WHEN entry.category = 'equity' THEN 'Equity - ' || entry.type::text ELSE 'Other - ' || entry.category::text END AS accountName",
-        "SUM(CASE WHEN entry.type = 'shareholder_account' THEN entry.amount ELSE 0 END) AS debit",
-        "SUM(CASE WHEN entry.type IN ('share_capital', 'retained_earnings') THEN entry.amount ELSE 0 END) AS credit",
+        "CASE WHEN entry.category = 'equity' THEN 'Equity - ' || entry.type::text WHEN entry.type = 'prepaid' THEN 'Prepaid Expenses' WHEN entry.type = 'accrued_income' THEN 'Accrued Income' WHEN entry.type = 'depreciation' THEN 'Depreciation' WHEN entry.type = 'outstanding' THEN 'Outstanding Liabilities' ELSE 'Other - ' || entry.category::text END AS accountName",
+        "SUM(CASE WHEN entry.type IN ('shareholder_account', 'prepaid', 'accrued_income', 'depreciation') THEN entry.amount ELSE 0 END) AS debit",
+        "SUM(CASE WHEN entry.type IN ('share_capital', 'retained_earnings', 'outstanding') THEN entry.amount ELSE 0 END) AS credit",
       ])
       .where('entry.organization_id = :organizationId', { organizationId })
       .andWhere('entry.entry_date < :startDate', { startDate })
@@ -1296,6 +1297,8 @@ export class ReportsService {
       totalAssets += vatReceivableAmount;
     }
 
+    // Note: Prepaid Expenses and Accrued Income will be added after journal entries are processed
+
     // Liabilities
     const liabilities: Array<{
       vendor: string;
@@ -1454,7 +1457,7 @@ export class ReportsService {
         statuses: [DebitNoteStatus.ISSUED, DebitNoteStatus.APPLIED],
       });
 
-    // Get Journal Entries (equity items) - grouped by type for ledger details
+    // Get Journal Entries (equity items and other types) - grouped by type for ledger details
     const journalEntriesQuery = this.journalEntriesRepository
       .createQueryBuilder('entry')
       .select(['entry.type AS type', 'SUM(entry.amount) AS amount'])
@@ -1462,7 +1465,7 @@ export class ReportsService {
       .andWhere('entry.entry_date >= :startDate', { startDate })
       .andWhere('entry.entry_date <= :asOfDate', { asOfDate })
       .andWhere(
-        "entry.type IN ('share_capital', 'retained_earnings', 'shareholder_account')",
+        "entry.status NOT IN ('cash_paid', 'cash_received', 'bank_paid', 'bank_received')",
       )
       .groupBy('entry.type');
 
@@ -1482,6 +1485,10 @@ export class ReportsService {
     const journalEquityMap = new Map<string, number>();
     let journalEquity = 0;
     let journalShareholder = 0;
+    let journalPrepaid = 0;
+    let journalAccruedIncome = 0;
+    let journalDepreciation = 0;
+    let journalOutstanding = 0;
 
     journalRows.forEach((row) => {
       const amount = Number(row.amount || 0);
@@ -1492,6 +1499,14 @@ export class ReportsService {
         journalEquity += amount;
       } else if (type === 'shareholder_account') {
         journalShareholder += amount;
+      } else if (type === 'prepaid') {
+        journalPrepaid += amount;
+      } else if (type === 'accrued_income') {
+        journalAccruedIncome += amount;
+      } else if (type === 'depreciation') {
+        journalDepreciation += amount;
+      } else if (type === 'outstanding') {
+        journalOutstanding += amount;
       }
     });
 
@@ -1517,10 +1532,35 @@ export class ReportsService {
     const expensesRow = await expensesQuery.getRawOne();
     const totalExpenses = Number(expensesRow?.amount || 0);
 
-    // Equity = Net Revenue - Expenses + Journal Entries (equity increases, shareholder decreases)
-    // Expenses reduce retained earnings (equity), they are NOT assets
+    // Add Prepaid Expenses and Accrued Income to assets (now that journal entries are processed)
+    if (journalPrepaid > 0) {
+      assets.push({
+        category: 'Prepaid Expenses',
+        amount: journalPrepaid,
+      });
+      totalAssets += journalPrepaid;
+    }
+    if (journalAccruedIncome > 0) {
+      assets.push({
+        category: 'Accrued Income',
+        amount: journalAccruedIncome,
+      });
+      totalAssets += journalAccruedIncome;
+    }
+
+    // Equity = Net Revenue - Expenses + Journal Entries
+    // Equity increases: share_capital, retained_earnings
+    // Equity decreases: shareholder_account (if debit), outstanding (liability, reduces equity)
+    // Assets: prepaid, accrued_income (increase assets)
+    // Expenses: depreciation (reduces equity)
+    // Liabilities: outstanding (reduces equity)
     const totalEquity =
-      netRevenue - totalExpenses + journalEquity - journalShareholder;
+      netRevenue -
+      totalExpenses -
+      journalDepreciation +
+      journalEquity -
+      journalShareholder -
+      journalOutstanding;
 
     // Calculate opening balances (before startDate)
     // Opening Assets
@@ -1655,7 +1695,7 @@ export class ReportsService {
       .where('entry.organization_id = :organizationId', { organizationId })
       .andWhere('entry.entry_date < :startDate', { startDate })
       .andWhere(
-        "entry.type IN ('share_capital', 'retained_earnings', 'shareholder_account')",
+        "entry.status NOT IN ('cash_paid', 'cash_received', 'bank_paid', 'bank_received')",
       )
       .groupBy('entry.type');
 
@@ -1748,7 +1788,8 @@ export class ReportsService {
 
     // Opening Assets: Only actual assets (receivables, cash, VAT receivable) - NOT expenses
     // Expenses reduce equity, they are NOT assets
-    const openingAssets =
+    // Note: Prepaid and Accrued Income will be added after opening journal entries are processed
+    const openingAssetsBase =
       openingReceivables + openingCash + openingVatReceivable;
 
     const openingAccruals = Number(openingAccrualsRow?.amount || 0);
@@ -1765,6 +1806,10 @@ export class ReportsService {
     const openingJournalEquityMap = new Map<string, number>();
     let openingJournalEquity = 0;
     let openingJournalShareholder = 0;
+    let openingJournalPrepaid = 0;
+    let openingJournalAccruedIncome = 0;
+    let openingJournalDepreciation = 0;
+    let openingJournalOutstanding = 0;
 
     openingJournalRows.forEach((row) => {
       const amount = Number(row.amount || 0);
@@ -1775,8 +1820,20 @@ export class ReportsService {
         openingJournalEquity += amount;
       } else if (type === 'shareholder_account') {
         openingJournalShareholder += amount;
+      } else if (type === 'prepaid') {
+        openingJournalPrepaid += amount;
+      } else if (type === 'accrued_income') {
+        openingJournalAccruedIncome += amount;
+      } else if (type === 'depreciation') {
+        openingJournalDepreciation += amount;
+      } else if (type === 'outstanding') {
+        openingJournalOutstanding += amount;
       }
     });
+
+    // Add opening Prepaid Expenses and Accrued Income to opening assets
+    const openingAssets =
+      openingAssetsBase + openingJournalPrepaid + openingJournalAccruedIncome;
 
     // Opening VAT Payable: Include Credit Notes and Debit Notes VAT
     const openingVatCreditNotesQuery = this.creditNotesRepository
@@ -1806,14 +1863,18 @@ export class ReportsService {
     const openingVatDebitNotes = Number(openingVatDebitNotesRow?.vat || 0);
     const openingNetVatPayable =
       openingVatPayable - openingVatCreditNotes + openingVatDebitNotes;
-    const openingLiabilities = openingAccruals + openingNetVatPayable;
+    const openingLiabilities =
+      openingAccruals + openingNetVatPayable + openingJournalOutstanding;
 
     // Calculate opening equity using processed journal entries
+    // Equity = Revenue - Expenses + Equity Journal Entries - Shareholder Account - Depreciation - Outstanding
     const openingEquity =
       openingNetRevenue -
-      openingExpenses +
+      openingExpenses -
+      openingJournalDepreciation +
       openingJournalEquity -
-      openingJournalShareholder;
+      openingJournalShareholder -
+      openingJournalOutstanding;
 
     // Closing balances (opening + period)
     const closingAssets = openingAssets + totalAssets;
