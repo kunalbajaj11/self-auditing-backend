@@ -37,17 +37,14 @@ export class JournalEntriesService {
       .where('journalEntry.organization_id = :organizationId', { organizationId })
       .andWhere('journalEntry.is_deleted = false');
 
-    if (filters.type) {
-      query.andWhere('journalEntry.type = :type', { type: filters.type });
-    }
-    if (filters.category) {
-      query.andWhere('journalEntry.category = :category', {
-        category: filters.category,
+    if (filters.debitAccount) {
+      query.andWhere('journalEntry.debit_account = :debitAccount', {
+        debitAccount: filters.debitAccount,
       });
     }
-    if (filters.status) {
-      query.andWhere('journalEntry.status = :status', {
-        status: filters.status,
+    if (filters.creditAccount) {
+      query.andWhere('journalEntry.credit_account = :creditAccount', {
+        creditAccount: filters.creditAccount,
       });
     }
     if (filters.startDate) {
@@ -58,6 +55,16 @@ export class JournalEntriesService {
     if (filters.endDate) {
       query.andWhere('journalEntry.entry_date <= :endDate', {
         endDate: filters.endDate,
+      });
+    }
+    if (filters.description) {
+      query.andWhere('journalEntry.description ILIKE :description', {
+        description: `%${filters.description}%`,
+      });
+    }
+    if (filters.referenceNumber) {
+      query.andWhere('journalEntry.reference_number ILIKE :referenceNumber', {
+        referenceNumber: `%${filters.referenceNumber}%`,
       });
     }
 
@@ -100,16 +107,35 @@ export class JournalEntriesService {
       throw new NotFoundException('User not found');
     }
 
+    // Validate: Debit and Credit accounts must be different
+    if (dto.debitAccount === dto.creditAccount) {
+      throw new BadRequestException(
+        'Debit account and credit account cannot be the same',
+      );
+    }
+
+    // Validate: Retained Earnings cannot be manually selected (system calculated)
+    if (
+      dto.debitAccount === 'retained_earnings' ||
+      dto.creditAccount === 'retained_earnings'
+    ) {
+      throw new BadRequestException(
+        'Retained Earnings is a system-calculated account and cannot be used in journal entries',
+      );
+    }
+
     const journalEntry = this.journalEntriesRepository.create({
       organization: { id: organizationId },
       user: { id: userId },
-      type: dto.type,
-      category: dto.category,
-      status: dto.status,
+      debitAccount: dto.debitAccount,
+      creditAccount: dto.creditAccount,
       amount: dto.amount.toFixed(2),
       entryDate: dto.entryDate,
       description: dto.description,
       referenceNumber: dto.referenceNumber,
+      customerVendorId: dto.customerVendorId,
+      customerVendorName: dto.customerVendorName,
+      attachmentId: dto.attachmentId,
       notes: dto.notes,
     });
 
@@ -134,14 +160,39 @@ export class JournalEntriesService {
   ): Promise<JournalEntry> {
     const journalEntry = await this.findById(organizationId, id);
 
-    if (dto.type !== undefined) journalEntry.type = dto.type;
-    if (dto.category !== undefined) journalEntry.category = dto.category;
-    if (dto.status !== undefined) journalEntry.status = dto.status;
+    // Validate: Debit and Credit accounts must be different
+    const debitAccount = dto.debitAccount ?? journalEntry.debitAccount;
+    const creditAccount = dto.creditAccount ?? journalEntry.creditAccount;
+    
+    if (debitAccount === creditAccount) {
+      throw new BadRequestException(
+        'Debit account and credit account cannot be the same',
+      );
+    }
+
+    // Validate: Retained Earnings cannot be manually selected
+    if (
+      debitAccount === 'retained_earnings' ||
+      creditAccount === 'retained_earnings'
+    ) {
+      throw new BadRequestException(
+        'Retained Earnings is a system-calculated account and cannot be used in journal entries',
+      );
+    }
+
+    if (dto.debitAccount !== undefined) journalEntry.debitAccount = dto.debitAccount;
+    if (dto.creditAccount !== undefined) journalEntry.creditAccount = dto.creditAccount;
     if (dto.amount !== undefined) journalEntry.amount = dto.amount.toFixed(2);
     if (dto.entryDate !== undefined) journalEntry.entryDate = dto.entryDate;
     if (dto.description !== undefined) journalEntry.description = dto.description;
     if (dto.referenceNumber !== undefined)
       journalEntry.referenceNumber = dto.referenceNumber;
+    if (dto.customerVendorId !== undefined)
+      journalEntry.customerVendorId = dto.customerVendorId;
+    if (dto.customerVendorName !== undefined)
+      journalEntry.customerVendorName = dto.customerVendorName;
+    if (dto.attachmentId !== undefined)
+      journalEntry.attachmentId = dto.attachmentId;
     if (dto.notes !== undefined) journalEntry.notes = dto.notes;
 
     const updated = await this.journalEntriesRepository.save(journalEntry);

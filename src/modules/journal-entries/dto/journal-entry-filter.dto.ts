@@ -1,20 +1,14 @@
 import { IsDateString, IsEnum, IsOptional, IsString } from 'class-validator';
-import { JournalEntryType } from '../../../common/enums/journal-entry-type.enum';
-import { JournalEntryCategory } from '../../../common/enums/journal-entry-category.enum';
-import { JournalEntryStatus } from '../../../common/enums/journal-entry-status.enum';
+import { JournalEntryAccount } from '../../../common/enums/journal-entry-account.enum';
 
 export class JournalEntryFilterDto {
   @IsOptional()
-  @IsEnum(JournalEntryType)
-  type?: JournalEntryType;
+  @IsEnum(JournalEntryAccount)
+  debitAccount?: JournalEntryAccount;
 
   @IsOptional()
-  @IsEnum(JournalEntryCategory)
-  category?: JournalEntryCategory;
-
-  @IsOptional()
-  @IsEnum(JournalEntryStatus)
-  status?: JournalEntryStatus;
+  @IsEnum(JournalEntryAccount)
+  creditAccount?: JournalEntryAccount;
 
   @IsOptional()
   @IsDateString()
@@ -23,5 +17,13 @@ export class JournalEntryFilterDto {
   @IsOptional()
   @IsDateString()
   endDate?: string;
+
+  @IsOptional()
+  @IsString()
+  description?: string;
+
+  @IsOptional()
+  @IsString()
+  referenceNumber?: string;
 }
 

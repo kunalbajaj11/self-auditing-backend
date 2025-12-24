@@ -20,6 +20,10 @@ import { PaymentStatus } from '../../common/enums/payment-status.enum';
 import { CreditNoteStatus } from '../../common/enums/credit-note-status.enum';
 import { DebitNoteStatus } from '../../common/enums/debit-note-status.enum';
 import { SettingsService } from '../settings/settings.service';
+import {
+  JournalEntryAccount,
+  ACCOUNT_METADATA,
+} from '../../common/enums/journal-entry-account.enum';
 
 @Injectable()
 export class ReportsService {
@@ -85,7 +89,6 @@ export class ReportsService {
       .andWhere('expense.is_deleted = false')
       .andWhere('expense.vendor_name IS NOT NULL')
       .andWhere("expense.vendor_name != ''")
-      .orderBy('expense.vendor_name', 'ASC')
       .getRawMany();
 
     const customerResults = await this.salesInvoicesRepository
@@ -96,7 +99,6 @@ export class ReportsService {
       .where('invoice.organization_id = :organizationId', { organizationId })
       .andWhere('COALESCE(customer.name, invoice.customer_name) IS NOT NULL')
       .andWhere("COALESCE(customer.name, invoice.customer_name) != ''")
-      .orderBy('customerName', 'ASC')
       .getRawMany();
 
     const vendors = vendorResults
@@ -562,13 +564,13 @@ export class ReportsService {
     const openingCashBankJournalEntriesQuery = this.journalEntriesRepository
       .createQueryBuilder('entry')
       .select([
-        "SUM(CASE WHEN entry.status IN ('cash_received', 'bank_received') THEN entry.amount ELSE 0 END) AS received",
-        "SUM(CASE WHEN entry.status IN ('cash_paid', 'bank_paid') THEN entry.amount ELSE 0 END) AS paid",
+        "SUM(CASE WHEN entry.debit_account = 'cash_bank' THEN entry.amount ELSE 0 END) AS received",
+        "SUM(CASE WHEN entry.credit_account = 'cash_bank' THEN entry.amount ELSE 0 END) AS paid",
       ])
       .where('entry.organization_id = :organizationId', { organizationId })
       .andWhere('entry.entry_date < :startDate', { startDate })
       .andWhere(
-        "entry.status IN ('cash_paid', 'cash_received', 'bank_paid', 'bank_received')",
+        "(entry.debit_account = 'cash_bank' OR entry.credit_account = 'cash_bank')",
       );
 
     const periodExpensePaymentsQuery = this.expensePaymentsRepository
@@ -588,14 +590,14 @@ export class ReportsService {
     const periodCashBankJournalEntriesQuery = this.journalEntriesRepository
       .createQueryBuilder('entry')
       .select([
-        "SUM(CASE WHEN entry.status IN ('cash_received', 'bank_received') THEN entry.amount ELSE 0 END) AS received",
-        "SUM(CASE WHEN entry.status IN ('cash_paid', 'bank_paid') THEN entry.amount ELSE 0 END) AS paid",
+        "SUM(CASE WHEN entry.debit_account = 'cash_bank' THEN entry.amount ELSE 0 END) AS received",
+        "SUM(CASE WHEN entry.credit_account = 'cash_bank' THEN entry.amount ELSE 0 END) AS paid",
       ])
       .where('entry.organization_id = :organizationId', { organizationId })
       .andWhere('entry.entry_date >= :startDate', { startDate })
       .andWhere('entry.entry_date <= :endDate', { endDate })
       .andWhere(
-        "entry.status IN ('cash_paid', 'cash_received', 'bank_paid', 'bank_received')",
+        "(entry.debit_account = 'cash_bank' OR entry.credit_account = 'cash_bank')",
       );
 
     const [
@@ -658,42 +660,78 @@ export class ReportsService {
       balance: closingCashBalance,
     });
 
+    // Get journal entries grouped by account (excluding Cash/Bank which is handled separately)
     const journalEntriesQuery = this.journalEntriesRepository
       .createQueryBuilder('entry')
       .select([
-        "CASE WHEN entry.category = 'equity' THEN 'Equity - ' || entry.type::text WHEN entry.type = 'prepaid' THEN 'Prepaid Expenses' WHEN entry.type = 'accrued_income' THEN 'Accrued Income' WHEN entry.type = 'depreciation' THEN 'Depreciation' WHEN entry.type = 'outstanding' THEN 'Outstanding Liabilities' ELSE 'Other - ' || entry.category::text END AS accountName",
-        "CASE WHEN entry.category = 'equity' THEN 'Equity' WHEN entry.type IN ('prepaid', 'accrued_income') THEN 'Asset' WHEN entry.type = 'depreciation' THEN 'Expense' WHEN entry.type = 'outstanding' THEN 'Liability' ELSE 'Journal Entry' END AS accountType",
-        "SUM(CASE WHEN entry.type IN ('shareholder_account', 'prepaid', 'accrued_income', 'depreciation') THEN entry.amount ELSE 0 END) AS debit",
-        "SUM(CASE WHEN entry.type IN ('share_capital', 'retained_earnings', 'outstanding') THEN entry.amount ELSE 0 END) AS credit",
+        'entry.debit_account AS debitAccount',
+        'entry.credit_account AS creditAccount',
+        'SUM(entry.amount) AS amount',
       ])
       .where('entry.organization_id = :organizationId', { organizationId })
       .andWhere('entry.entry_date >= :startDate', { startDate })
       .andWhere('entry.entry_date <= :endDate', { endDate })
-      .andWhere(
-        "entry.status NOT IN ('cash_paid', 'cash_received', 'bank_paid', 'bank_received')",
-      )
-      .groupBy('entry.category')
-      .addGroupBy('entry.type');
+      .andWhere("entry.debit_account != 'cash_bank'")
+      .andWhere("entry.credit_account != 'cash_bank'")
+      .groupBy('entry.debit_account')
+      .addGroupBy('entry.credit_account');
 
     const journalRows = await journalEntriesQuery.getRawMany();
+
+    // Aggregate by account (debit side and credit side separately)
+    const accountMap = new Map<string, { debit: number; credit: number }>();
+
     journalRows.forEach((row) => {
-      const debit = Number(row.debit || 0);
-      const credit = Number(row.credit || 0);
-      if (debit > 0 || credit > 0) {
-        const accountType = row.accounttype || 'Journal Entry';
+      const amount = Number(row.amount || 0);
+      const debitAccount = row.debitaccount || row.debitAccount;
+      const creditAccount = row.creditaccount || row.creditAccount;
+
+      // Add to debit account
+      if (debitAccount && debitAccount !== 'cash_bank') {
+        const existing = accountMap.get(debitAccount) || {
+          debit: 0,
+          credit: 0,
+        };
+        existing.debit += amount;
+        accountMap.set(debitAccount, existing);
+      }
+
+      // Add to credit account
+      if (creditAccount && creditAccount !== 'cash_bank') {
+        const existing = accountMap.get(creditAccount) || {
+          debit: 0,
+          credit: 0,
+        };
+        existing.credit += amount;
+        accountMap.set(creditAccount, existing);
+      }
+    });
+
+    // Convert to accounts array
+    accountMap.forEach((balances, accountCode) => {
+      if (balances.debit > 0 || balances.credit > 0) {
+        const accountMeta =
+          ACCOUNT_METADATA[accountCode as JournalEntryAccount];
+        const accountName = accountMeta?.name || accountCode;
+        const accountType = accountMeta?.category
+          ? accountMeta.category.charAt(0).toUpperCase() +
+            accountMeta.category.slice(1)
+          : 'Journal Entry';
 
         const isCreditAccount =
           accountType === 'Equity' ||
           accountType === 'Revenue' ||
           accountType === 'Liability';
-        const balance = isCreditAccount ? credit - debit : debit - credit;
+        const balance = isCreditAccount
+          ? balances.credit - balances.debit
+          : balances.debit - balances.credit;
 
         accounts.push({
-          accountName: row.accountname || 'Journal Entry',
-          accountType: accountType,
-          debit,
-          credit,
-          balance: balance,
+          accountName,
+          accountType,
+          debit: balances.debit,
+          credit: balances.credit,
+          balance,
         });
       }
     });
@@ -967,32 +1005,69 @@ export class ReportsService {
     const openingJournalQuery = this.journalEntriesRepository
       .createQueryBuilder('entry')
       .select([
-        "CASE WHEN entry.category = 'equity' THEN 'Equity - ' || entry.type::text WHEN entry.type = 'prepaid' THEN 'Prepaid Expenses' WHEN entry.type = 'accrued_income' THEN 'Accrued Income' WHEN entry.type = 'depreciation' THEN 'Depreciation' WHEN entry.type = 'outstanding' THEN 'Outstanding Liabilities' ELSE 'Other - ' || entry.category::text END AS accountName",
-        "SUM(CASE WHEN entry.type IN ('shareholder_account', 'prepaid', 'accrued_income', 'depreciation') THEN entry.amount ELSE 0 END) AS debit",
-        "SUM(CASE WHEN entry.type IN ('share_capital', 'retained_earnings', 'outstanding') THEN entry.amount ELSE 0 END) AS credit",
+        'entry.debit_account AS debitAccount',
+        'entry.credit_account AS creditAccount',
+        'SUM(entry.amount) AS amount',
       ])
       .where('entry.organization_id = :organizationId', { organizationId })
       .andWhere('entry.entry_date < :startDate', { startDate })
-      .andWhere(
-        "entry.status NOT IN ('cash_paid', 'cash_received', 'bank_paid', 'bank_received')",
-      )
-      .groupBy('entry.category')
-      .addGroupBy('entry.type');
+      .andWhere("entry.debit_account != 'cash_bank'")
+      .andWhere("entry.credit_account != 'cash_bank'")
+      .groupBy('entry.debit_account')
+      .addGroupBy('entry.credit_account');
 
     const openingJournalRows = await openingJournalQuery.getRawMany();
+
+    // Aggregate opening balances by account
+    const openingAccountMap = new Map<
+      string,
+      { debit: number; credit: number }
+    >();
+
     openingJournalRows.forEach((row) => {
-      const debit = Number(row.debit || 0);
-      const credit = Number(row.credit || 0);
-      if (debit > 0 || credit > 0) {
-        const accountName = row.accountname || row.accountName;
+      const amount = Number(row.amount || 0);
+      const debitAccount = row.debitaccount || row.debitAccount;
+      const creditAccount = row.creditaccount || row.creditAccount;
 
-        const isEquityAccount = accountName.includes('Equity');
+      if (debitAccount && debitAccount !== 'cash_bank') {
+        const existing = openingAccountMap.get(debitAccount) || {
+          debit: 0,
+          credit: 0,
+        };
+        existing.debit += amount;
+        openingAccountMap.set(debitAccount, existing);
+      }
 
-        const balance = isEquityAccount ? credit - debit : debit - credit;
+      if (creditAccount && creditAccount !== 'cash_bank') {
+        const existing = openingAccountMap.get(creditAccount) || {
+          debit: 0,
+          credit: 0,
+        };
+        existing.credit += amount;
+        openingAccountMap.set(creditAccount, existing);
+      }
+    });
+
+    // Convert to opening balances map
+    openingAccountMap.forEach((balances, accountCode) => {
+      if (balances.debit > 0 || balances.credit > 0) {
+        const accountMeta =
+          ACCOUNT_METADATA[accountCode as JournalEntryAccount];
+        const accountName = accountMeta?.name || accountCode;
+        const accountType = accountMeta?.category || 'asset';
+
+        const isCreditAccount =
+          accountType === 'equity' ||
+          accountType === 'revenue' ||
+          accountType === 'liability';
+        const balance = isCreditAccount
+          ? balances.credit - balances.debit
+          : balances.debit - balances.credit;
+
         openingBalances.set(accountName, {
-          debit,
-          credit,
-          balance: balance,
+          debit: balances.debit,
+          credit: balances.credit,
+          balance,
         });
       }
     });
@@ -1257,13 +1332,13 @@ export class ReportsService {
     const cashBankJournalEntriesQuery = this.journalEntriesRepository
       .createQueryBuilder('entry')
       .select([
-        "SUM(CASE WHEN entry.status IN ('cash_received', 'bank_received') THEN entry.amount ELSE 0 END) AS received",
-        "SUM(CASE WHEN entry.status IN ('cash_paid', 'bank_paid') THEN entry.amount ELSE 0 END) AS paid",
+        "SUM(CASE WHEN entry.debit_account = 'cash_bank' THEN entry.amount ELSE 0 END) AS received",
+        "SUM(CASE WHEN entry.credit_account = 'cash_bank' THEN entry.amount ELSE 0 END) AS paid",
       ])
       .where('entry.organization_id = :organizationId', { organizationId })
       .andWhere('entry.entry_date <= :asOfDate', { asOfDate })
       .andWhere(
-        "entry.status IN ('cash_paid', 'cash_received', 'bank_paid', 'bank_received')",
+        "(entry.debit_account = 'cash_bank' OR entry.credit_account = 'cash_bank')",
       );
 
     const [invoicePaymentsRow, expensePaymentsRow, cashBankJournalEntriesRow] =
@@ -1466,13 +1541,17 @@ export class ReportsService {
 
     const journalEntriesQuery = this.journalEntriesRepository
       .createQueryBuilder('entry')
-      .select(['entry.type AS type', 'SUM(entry.amount) AS amount'])
+      .select([
+        'entry.debit_account AS debitAccount',
+        'entry.credit_account AS creditAccount',
+        'SUM(entry.amount) AS amount',
+      ])
       .where('entry.organization_id = :organizationId', { organizationId })
       .andWhere('entry.entry_date <= :asOfDate', { asOfDate })
-      .andWhere(
-        "entry.status NOT IN ('cash_paid', 'cash_received', 'bank_paid', 'bank_received')",
-      )
-      .groupBy('entry.type');
+      .andWhere("entry.debit_account != 'cash_bank'")
+      .andWhere("entry.credit_account != 'cash_bank'")
+      .groupBy('entry.debit_account')
+      .addGroupBy('entry.credit_account');
 
     const [revenueRow, creditNotesRow, debitNotesRow, journalRows] =
       await Promise.all([
@@ -1486,33 +1565,59 @@ export class ReportsService {
     const creditNotesAmount = Number(creditNotesRow?.creditNotes || 0);
     const debitNotesAmount = Number(debitNotesRow?.debitNotes || 0);
 
-    const journalEquityMap = new Map<string, number>();
-    let journalEquity = 0;
-    let journalShareholder = 0;
-    let journalPrepaid = 0;
-    let journalAccruedIncome = 0;
-    let journalDepreciation = 0;
-    let journalOutstanding = 0;
+    // Aggregate journal entries by account
+    const accountAmounts = new Map<JournalEntryAccount, number>();
 
     journalRows.forEach((row) => {
       const amount = Number(row.amount || 0);
-      const type = row.type;
-      journalEquityMap.set(type, amount);
+      const debitAccount = row.debitaccount || row.debitAccount;
+      const creditAccount = row.creditaccount || row.creditAccount;
 
-      if (type === 'share_capital' || type === 'retained_earnings') {
-        journalEquity += amount;
-      } else if (type === 'shareholder_account') {
-        journalShareholder += amount;
-      } else if (type === 'prepaid') {
-        journalPrepaid += amount;
-      } else if (type === 'accrued_income') {
-        journalAccruedIncome += amount;
-      } else if (type === 'depreciation') {
-        journalDepreciation += amount;
-      } else if (type === 'outstanding') {
-        journalOutstanding += amount;
+      // Sum amounts for each account
+      if (debitAccount) {
+        const existing =
+          accountAmounts.get(debitAccount as JournalEntryAccount) || 0;
+        accountAmounts.set(
+          debitAccount as JournalEntryAccount,
+          existing + amount,
+        );
+      }
+      if (creditAccount) {
+        const existing =
+          accountAmounts.get(creditAccount as JournalEntryAccount) || 0;
+        accountAmounts.set(
+          creditAccount as JournalEntryAccount,
+          existing + amount,
+        );
       }
     });
+
+    // Extract specific account balances for equity calculation
+    const journalEquity =
+      (accountAmounts.get(JournalEntryAccount.SHARE_CAPITAL) || 0) +
+      (accountAmounts.get(JournalEntryAccount.RETAINED_EARNINGS) || 0);
+    const journalShareholder =
+      accountAmounts.get(JournalEntryAccount.OWNER_SHAREHOLDER_ACCOUNT) || 0;
+    const journalPrepaid =
+      accountAmounts.get(JournalEntryAccount.PREPAID_EXPENSES) || 0;
+    const journalAccruedIncome =
+      accountAmounts.get(JournalEntryAccount.ACCOUNTS_RECEIVABLE) || 0;
+    const journalDepreciation =
+      accountAmounts.get(JournalEntryAccount.GENERAL_EXPENSE) || 0;
+    const journalOutstanding =
+      accountAmounts.get(JournalEntryAccount.ACCOUNTS_PAYABLE) || 0;
+
+    // Create equity map for compatibility with existing code
+    const journalEquityMap = new Map<string, number>();
+    journalEquityMap.set(
+      'share_capital',
+      accountAmounts.get(JournalEntryAccount.SHARE_CAPITAL) || 0,
+    );
+    journalEquityMap.set(
+      'retained_earnings',
+      accountAmounts.get(JournalEntryAccount.RETAINED_EARNINGS) || 0,
+    );
+    journalEquityMap.set('shareholder_account', journalShareholder);
 
     const netRevenue = totalRevenue - creditNotesAmount + debitNotesAmount;
 
@@ -1607,13 +1712,13 @@ export class ReportsService {
     const openingCashBankJournalEntriesQuery = this.journalEntriesRepository
       .createQueryBuilder('entry')
       .select([
-        "SUM(CASE WHEN entry.status IN ('cash_received', 'bank_received') THEN entry.amount ELSE 0 END) AS received",
-        "SUM(CASE WHEN entry.status IN ('cash_paid', 'bank_paid') THEN entry.amount ELSE 0 END) AS paid",
+        "SUM(CASE WHEN entry.debit_account = 'cash_bank' THEN entry.amount ELSE 0 END) AS received",
+        "SUM(CASE WHEN entry.credit_account = 'cash_bank' THEN entry.amount ELSE 0 END) AS paid",
       ])
       .where('entry.organization_id = :organizationId', { organizationId })
       .andWhere('entry.entry_date < :startDate', { startDate })
       .andWhere(
-        "entry.status IN ('cash_paid', 'cash_received', 'bank_paid', 'bank_received')",
+        "(entry.debit_account = 'cash_bank' OR entry.credit_account = 'cash_bank')",
       );
 
     const openingVatReceivableQuery = this.expensesRepository
@@ -1672,13 +1777,17 @@ export class ReportsService {
 
     const openingJournalQuery = this.journalEntriesRepository
       .createQueryBuilder('entry')
-      .select(['entry.type AS type', 'SUM(entry.amount) AS amount'])
+      .select([
+        'entry.debit_account AS debitAccount',
+        'entry.credit_account AS creditAccount',
+        'SUM(entry.amount) AS amount',
+      ])
       .where('entry.organization_id = :organizationId', { organizationId })
       .andWhere('entry.entry_date < :startDate', { startDate })
-      .andWhere(
-        "entry.status NOT IN ('cash_paid', 'cash_received', 'bank_paid', 'bank_received')",
-      )
-      .groupBy('entry.type');
+      .andWhere("entry.debit_account != 'cash_bank'")
+      .andWhere("entry.credit_account != 'cash_bank'")
+      .groupBy('entry.debit_account')
+      .addGroupBy('entry.credit_account');
 
     const [
       openingExpensesRow,
@@ -1781,33 +1890,63 @@ export class ReportsService {
     const openingNetRevenue =
       openingRevenue - openingCreditNotes + openingDebitNotes;
 
-    const openingJournalEquityMap = new Map<string, number>();
-    let openingJournalEquity = 0;
-    let openingJournalShareholder = 0;
-    let openingJournalPrepaid = 0;
-    let openingJournalAccruedIncome = 0;
-    let openingJournalDepreciation = 0;
-    let openingJournalOutstanding = 0;
+    // Aggregate opening journal entries by account
+    const openingAccountAmounts = new Map<JournalEntryAccount, number>();
 
     openingJournalRows.forEach((row) => {
       const amount = Number(row.amount || 0);
-      const type = row.type;
-      openingJournalEquityMap.set(type, amount);
+      const debitAccount = row.debitaccount || row.debitAccount;
+      const creditAccount = row.creditaccount || row.creditAccount;
 
-      if (type === 'share_capital' || type === 'retained_earnings') {
-        openingJournalEquity += amount;
-      } else if (type === 'shareholder_account') {
-        openingJournalShareholder += amount;
-      } else if (type === 'prepaid') {
-        openingJournalPrepaid += amount;
-      } else if (type === 'accrued_income') {
-        openingJournalAccruedIncome += amount;
-      } else if (type === 'depreciation') {
-        openingJournalDepreciation += amount;
-      } else if (type === 'outstanding') {
-        openingJournalOutstanding += amount;
+      if (debitAccount) {
+        const existing =
+          openingAccountAmounts.get(debitAccount as JournalEntryAccount) || 0;
+        openingAccountAmounts.set(
+          debitAccount as JournalEntryAccount,
+          existing + amount,
+        );
+      }
+      if (creditAccount) {
+        const existing =
+          openingAccountAmounts.get(creditAccount as JournalEntryAccount) || 0;
+        openingAccountAmounts.set(
+          creditAccount as JournalEntryAccount,
+          existing + amount,
+        );
       }
     });
+
+    // Extract specific account balances
+    const openingJournalEquity =
+      (openingAccountAmounts.get(JournalEntryAccount.SHARE_CAPITAL) || 0) +
+      (openingAccountAmounts.get(JournalEntryAccount.RETAINED_EARNINGS) || 0);
+    const openingJournalShareholder =
+      openingAccountAmounts.get(
+        JournalEntryAccount.OWNER_SHAREHOLDER_ACCOUNT,
+      ) || 0;
+    const openingJournalPrepaid =
+      openingAccountAmounts.get(JournalEntryAccount.PREPAID_EXPENSES) || 0;
+    const openingJournalAccruedIncome =
+      openingAccountAmounts.get(JournalEntryAccount.ACCOUNTS_RECEIVABLE) || 0;
+    const openingJournalDepreciation =
+      openingAccountAmounts.get(JournalEntryAccount.GENERAL_EXPENSE) || 0;
+    const openingJournalOutstanding =
+      openingAccountAmounts.get(JournalEntryAccount.ACCOUNTS_PAYABLE) || 0;
+
+    // Create equity map for compatibility
+    const openingJournalEquityMap = new Map<string, number>();
+    openingJournalEquityMap.set(
+      'share_capital',
+      openingAccountAmounts.get(JournalEntryAccount.SHARE_CAPITAL) || 0,
+    );
+    openingJournalEquityMap.set(
+      'retained_earnings',
+      openingAccountAmounts.get(JournalEntryAccount.RETAINED_EARNINGS) || 0,
+    );
+    openingJournalEquityMap.set(
+      'shareholder_account',
+      openingJournalShareholder,
+    );
 
     const openingAssets =
       openingAssetsBase + openingJournalPrepaid + openingJournalAccruedIncome;
@@ -2058,7 +2197,7 @@ export class ReportsService {
       .andWhere('expense.expense_date <= :endDate', { endDate })
       .andWhere("(expense.type IS NULL OR expense.type != 'credit')")
       .groupBy('category.name')
-      .orderBy('amount', 'DESC');
+      .orderBy('MAX(expense.created_at)', 'DESC');
 
     if (filters?.['type']) {
       const types = Array.isArray(filters.type) ? filters.type : [filters.type];
@@ -2213,7 +2352,7 @@ export class ReportsService {
       query.andWhere('accrual.vendor_name IN (:...vendors)', { vendors });
     }
 
-    query.orderBy('accrual.expected_payment_date', 'ASC');
+    query.orderBy('accrual.created_at', 'DESC');
 
     const rows = await query.getRawMany();
 
@@ -2383,7 +2522,7 @@ export class ReportsService {
       );
     }
 
-    query.orderBy('invoice.due_date', 'ASC');
+    query.orderBy('invoice.created_at', 'DESC');
 
     const rows = await query.getRawMany();
 
@@ -2769,7 +2908,7 @@ export class ReportsService {
         "(expense.vat_tax_type IS NULL OR expense.vat_tax_type != 'reverse_charge')",
       )
       .andWhere("(expense.type IS NULL OR expense.type != 'credit')")
-      .orderBy('expense.expense_date', 'DESC');
+      .orderBy('expense.created_at', 'DESC');
 
     const vatInputExpenses = await vatInputQuery.getRawMany();
 
@@ -2816,7 +2955,7 @@ export class ReportsService {
       .andWhere('invoice.invoice_date >= :startDate', { startDate })
       .andWhere('invoice.invoice_date <= :endDate', { endDate })
       .andWhere('CAST(invoice.vat_amount AS DECIMAL) > 0')
-      .orderBy('invoice.invoice_date', 'DESC');
+      .orderBy('invoice.created_at', 'DESC');
 
     const vatCreditNotesQuery = this.creditNotesRepository
       .createQueryBuilder('creditNote')
@@ -2836,7 +2975,7 @@ export class ReportsService {
         statuses: [CreditNoteStatus.ISSUED, CreditNoteStatus.APPLIED],
       })
       .andWhere('CAST(creditNote.vat_amount AS DECIMAL) > 0')
-      .orderBy('creditNote.credit_note_date', 'DESC');
+      .orderBy('creditNote.created_at', 'DESC');
 
     const vatDebitNotesQuery = this.debitNotesRepository
       .createQueryBuilder('debitNote')
@@ -2856,7 +2995,7 @@ export class ReportsService {
         statuses: [DebitNoteStatus.ISSUED, DebitNoteStatus.APPLIED],
       })
       .andWhere('CAST(debitNote.vat_amount AS DECIMAL) > 0')
-      .orderBy('debitNote.debit_note_date', 'DESC');
+      .orderBy('debitNote.created_at', 'DESC');
 
     const [vatOutputInvoices, vatCreditNotes, vatDebitNotes] =
       await Promise.all([

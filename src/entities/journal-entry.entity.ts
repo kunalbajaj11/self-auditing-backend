@@ -2,9 +2,7 @@ import { Column, Entity, JoinColumn, ManyToOne } from 'typeorm';
 import { AbstractEntity } from './abstract.entity';
 import { Organization } from './organization.entity';
 import { User } from './user.entity';
-import { JournalEntryType } from '../common/enums/journal-entry-type.enum';
-import { JournalEntryCategory } from '../common/enums/journal-entry-category.enum';
-import { JournalEntryStatus } from '../common/enums/journal-entry-status.enum';
+import { JournalEntryAccount } from '../common/enums/journal-entry-account.enum';
 
 @Entity({ name: 'journal_entries' })
 export class JournalEntry extends AbstractEntity {
@@ -22,24 +20,19 @@ export class JournalEntry extends AbstractEntity {
 
   @Column({
     type: 'enum',
-    enum: JournalEntryType,
-    nullable: false,
+    enum: JournalEntryAccount,
+    name: 'debit_account',
+    nullable: true, // Temporarily nullable for migration
   })
-  type: JournalEntryType;
+  debitAccount?: JournalEntryAccount | null;
 
   @Column({
     type: 'enum',
-    enum: JournalEntryCategory,
-    nullable: false,
+    enum: JournalEntryAccount,
+    name: 'credit_account',
+    nullable: true, // Temporarily nullable for migration
   })
-  category: JournalEntryCategory;
-
-  @Column({
-    type: 'enum',
-    enum: JournalEntryStatus,
-    nullable: false,
-  })
-  status: JournalEntryStatus;
+  creditAccount?: JournalEntryAccount | null;
 
   @Column({ type: 'decimal', precision: 12, scale: 2 })
   amount: string;
@@ -53,7 +46,42 @@ export class JournalEntry extends AbstractEntity {
   @Column({ name: 'reference_number', length: 100, nullable: true })
   referenceNumber?: string | null;
 
+  @Column({ name: 'customer_vendor_id', length: 100, nullable: true })
+  customerVendorId?: string | null;
+
+  @Column({ name: 'customer_vendor_name', length: 200, nullable: true })
+  customerVendorName?: string | null;
+
+  @Column({ name: 'attachment_id', length: 100, nullable: true })
+  attachmentId?: string | null;
+
   @Column({ type: 'text', nullable: true })
   notes?: string | null;
+
+  // Legacy fields - kept for backward compatibility during migration
+  // These will be removed after migration is complete
+  @Column({
+    type: 'varchar',
+    length: 50,
+    nullable: true,
+    name: 'legacy_type',
+  })
+  legacyType?: string | null;
+
+  @Column({
+    type: 'varchar',
+    length: 50,
+    nullable: true,
+    name: 'legacy_category',
+  })
+  legacyCategory?: string | null;
+
+  @Column({
+    type: 'varchar',
+    length: 50,
+    nullable: true,
+    name: 'legacy_status',
+  })
+  legacyStatus?: string | null;
 }
 

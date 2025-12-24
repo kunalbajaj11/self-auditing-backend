@@ -5,23 +5,21 @@ import {
   IsOptional,
   IsString,
   Min,
+  ValidateIf,
 } from 'class-validator';
-import { JournalEntryType } from '../../../common/enums/journal-entry-type.enum';
-import { JournalEntryCategory } from '../../../common/enums/journal-entry-category.enum';
-import { JournalEntryStatus } from '../../../common/enums/journal-entry-status.enum';
+import { JournalEntryAccount } from '../../../common/enums/journal-entry-account.enum';
 
 export class UpdateJournalEntryDto {
   @IsOptional()
-  @IsEnum(JournalEntryType)
-  type?: JournalEntryType;
+  @IsEnum(JournalEntryAccount)
+  debitAccount?: JournalEntryAccount;
 
   @IsOptional()
-  @IsEnum(JournalEntryCategory)
-  category?: JournalEntryCategory;
-
-  @IsOptional()
-  @IsEnum(JournalEntryStatus)
-  status?: JournalEntryStatus;
+  @IsEnum(JournalEntryAccount)
+  @ValidateIf((o) => o.debitAccount && o.creditAccount && o.debitAccount !== o.creditAccount, {
+    message: 'Debit account and credit account cannot be the same',
+  })
+  creditAccount?: JournalEntryAccount;
 
   @IsOptional()
   @IsNumber()
@@ -39,6 +37,18 @@ export class UpdateJournalEntryDto {
   @IsOptional()
   @IsString()
   referenceNumber?: string;
+
+  @IsOptional()
+  @IsString()
+  customerVendorId?: string;
+
+  @IsOptional()
+  @IsString()
+  customerVendorName?: string;
+
+  @IsOptional()
+  @IsString()
+  attachmentId?: string;
 
   @IsOptional()
   @IsString()
