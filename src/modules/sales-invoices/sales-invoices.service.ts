@@ -54,6 +54,7 @@ export class SalesInvoicesService {
       .createQueryBuilder('invoice')
       .leftJoinAndSelect('invoice.customer', 'customer')
       .leftJoinAndSelect('invoice.lineItems', 'lineItems')
+      .leftJoinAndSelect('invoice.creditNoteApplications', 'creditNoteApplications')
       .where('invoice.organization_id = :organizationId', { organizationId })
       .andWhere('invoice.is_deleted = false');
 

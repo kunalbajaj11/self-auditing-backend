@@ -62,11 +62,43 @@ export class ReportGeneratorService {
    */
   private async fetchImageAsBuffer(url: string): Promise<Buffer | null> {
     try {
+      // Skip SVG files as PDFKit doesn't support them
+      const urlLower = url.toLowerCase();
+      if (urlLower.endsWith('.svg') || urlLower.includes('image/svg+xml')) {
+        console.warn(
+          `Skipping SVG image from URL: ${url} (PDFKit doesn't support SVG)`,
+        );
+        return null;
+      }
+
       const response = await axios.get(url, {
         responseType: 'arraybuffer',
         timeout: 10000, // 10 second timeout
       });
-      return Buffer.from(response.data);
+
+      // Check Content-Type header to skip SVG
+      const contentType = response.headers['content-type'] || '';
+      if (
+        contentType.includes('image/svg+xml') ||
+        contentType.includes('image/svg')
+      ) {
+        console.warn(
+          `Skipping SVG image from URL: ${url} (Content-Type: ${contentType})`,
+        );
+        return null;
+      }
+
+      // Check if buffer starts with SVG markers
+      const buffer = Buffer.from(response.data);
+      const bufferStart = buffer.slice(0, 100).toString('utf-8').toLowerCase();
+      if (bufferStart.includes('<svg') || bufferStart.includes('<?xml')) {
+        console.warn(
+          `Skipping SVG image from URL: ${url} (detected SVG content)`,
+        );
+        return null;
+      }
+
+      return buffer;
     } catch (error) {
       console.warn(`Failed to fetch image from URL: ${url}`, error);
       return null;
@@ -308,10 +340,14 @@ export class ReportGeneratorService {
 
         // Use landscape for wide tables, portrait for summary reports
         const useLandscape = this.shouldUseLandscape(reportData.type);
+        // A4 dimensions in points: 595.28 x 841.89 (210mm x 297mm)
+        // For landscape, swap width and height: 841.89 x 595.28
+        const pageSize = useLandscape 
+          ? [841.89, 595.28] // Landscape A4: width 841.89, height 595.28
+          : [595.28, 841.89]; // Portrait A4: width 595.28, height 841.89
         const doc = new PDFDocument({
           margin: 50,
-          size: 'A4',
-          layout: useLandscape ? 'landscape' : 'portrait',
+          size: pageSize,
           bufferPages: true, // Enable page buffering for footer insertion
           autoFirstPage: true,
         });
@@ -403,13 +439,10 @@ export class ReportGeneratorService {
 
     // Get application logo path (default logo)
     const getApplicationLogoPath = (): string | null => {
-      // Try multiple possible paths for the logo (prioritize SVG, then JPG)
+      // PDFKit only supports JPEG, PNG, GIF - NOT SVG
+      // Try multiple possible paths for the logo (prioritize JPG/JPEG/PNG)
       const possiblePaths = [
-        // SVG logo paths (preferred)
-        path.join(process.cwd(), 'assets', 'images', 'logo.svg'),
-        path.join(__dirname, '..', '..', '..', 'assets', 'images', 'logo.svg'),
-        path.join(__dirname, '..', '..', 'assets', 'images', 'logo.svg'),
-        // JPG logo paths (fallback)
+        // JPG/JPEG logo paths (preferred - PDFKit compatible)
         path.join(process.cwd(), 'assets', 'images', 'app-logo.jpg'),
         path.join(
           __dirname,
@@ -421,10 +454,25 @@ export class ReportGeneratorService {
           'app-logo.jpg',
         ),
         path.join(__dirname, '..', '..', 'assets', 'images', 'app-logo.jpg'),
+        path.join(process.cwd(), 'assets', 'images', 'logo.jpeg'),
+        path.join(__dirname, '..', '..', '..', 'assets', 'images', 'logo.jpeg'),
+        path.join(__dirname, '..', '..', 'assets', 'images', 'logo.jpeg'),
+        path.join(process.cwd(), 'assets', 'images', 'logo.jpg'),
+        path.join(__dirname, '..', '..', '..', 'assets', 'images', 'logo.jpg'),
+        path.join(__dirname, '..', '..', 'assets', 'images', 'logo.jpg'),
+        // PNG logo paths (fallback)
+        path.join(process.cwd(), 'assets', 'images', 'logo.png'),
+        path.join(__dirname, '..', '..', '..', 'assets', 'images', 'logo.png'),
+        path.join(__dirname, '..', '..', 'assets', 'images', 'logo.png'),
       ];
 
       for (const logoPath of possiblePaths) {
         if (fs.existsSync(logoPath)) {
+          // Double-check it's not an SVG file (case-insensitive)
+          const ext = path.extname(logoPath).toLowerCase();
+          if (ext === '.svg') {
+            continue; // Skip SVG files as PDFKit doesn't support them
+          }
           return logoPath;
         }
       }
@@ -440,26 +488,38 @@ export class ReportGeneratorService {
 
     try {
       if (logoBuffer) {
-        // Use pre-fetched logo buffer (for remote URLs)
-        doc.image(logoBuffer, logoX, logoY, {
-          width: logoSize,
-          height: logoSize,
-          fit: [logoSize, logoSize],
-        });
-        logoLoaded = true;
+        // Check if buffer contains SVG content (PDFKit doesn't support SVG)
+        const bufferStart = logoBuffer
+          .slice(0, 100)
+          .toString('utf-8')
+          .toLowerCase();
+        if (bufferStart.includes('<svg') || bufferStart.includes('<?xml')) {
+          console.warn("Skipping SVG logo buffer (PDFKit doesn't support SVG)");
+        } else {
+          // Use pre-fetched logo buffer (for remote URLs)
+          doc.image(logoBuffer, logoX, logoY, {
+            width: logoSize,
+            height: logoSize,
+            fit: [logoSize, logoSize],
+          });
+          logoLoaded = true;
+        }
       } else if (
         logoUrl &&
         !logoUrl.startsWith('http://') &&
         !logoUrl.startsWith('https://') &&
         fs.existsSync(logoUrl)
       ) {
-        // For local file paths
-        doc.image(logoUrl, logoX, logoY, {
-          width: logoSize,
-          height: logoSize,
-          fit: [logoSize, logoSize],
-        });
-        logoLoaded = true;
+        // For local file paths - skip SVG files as PDFKit doesn't support them
+        const ext = path.extname(logoUrl).toLowerCase();
+        if (ext !== '.svg') {
+          doc.image(logoUrl, logoX, logoY, {
+            width: logoSize,
+            height: logoSize,
+            fit: [logoSize, logoSize],
+          });
+          logoLoaded = true;
+        }
       } else if (localLogoPath) {
         // Use application default logo
         doc.image(localLogoPath, logoX, logoY, {
@@ -1770,6 +1830,38 @@ export class ReportGeneratorService {
       'inputVat',
       'outputVat',
       'netVatPayable',
+      'openingDebit',
+      'openingCredit',
+      'openingBalance',
+      'periodDebit',
+      'periodCredit',
+      'periodBalance',
+      'closingDebit',
+      'closingCredit',
+      'closingBalance',
+      'paidAmount',
+      'outstanding',
+      'outstandingAmount',
+      'openingAssets',
+      'openingLiabilities',
+      'openingEquity',
+      'periodAssets',
+      'periodLiabilities',
+      'periodEquity',
+      'closingAssets',
+      'closingLiabilities',
+      'closingEquity',
+      'grossProfit',
+      'totalExpenses',
+      'netProfit',
+      'openingRetainedEarnings',
+      'closingRetainedEarnings',
+      'periodAmount',
+      'overdueAmount',
+      'totalOutstanding',
+      'totalDebit',
+      'totalCredit',
+      'totalBalance',
     ];
     if (currencyFields.some((field) => header.toLowerCase().includes(field))) {
       const numValue = typeof value === 'string' ? parseFloat(value) : value;
@@ -1803,6 +1895,38 @@ export class ReportGeneratorService {
       'balance',
       'price',
       'cost',
+      'openingDebit',
+      'openingCredit',
+      'openingBalance',
+      'periodDebit',
+      'periodCredit',
+      'periodBalance',
+      'closingDebit',
+      'closingCredit',
+      'closingBalance',
+      'paidAmount',
+      'outstanding',
+      'outstandingAmount',
+      'openingAssets',
+      'openingLiabilities',
+      'openingEquity',
+      'periodAssets',
+      'periodLiabilities',
+      'periodEquity',
+      'closingAssets',
+      'closingLiabilities',
+      'closingEquity',
+      'grossProfit',
+      'totalExpenses',
+      'netProfit',
+      'openingRetainedEarnings',
+      'closingRetainedEarnings',
+      'periodAmount',
+      'overdueAmount',
+      'totalOutstanding',
+      'totalDebit',
+      'totalCredit',
+      'totalBalance',
     ];
     if (
       rightAlignFields.some((field) => header.toLowerCase().includes(field))
@@ -1969,88 +2093,103 @@ export class ReportGeneratorService {
     }
     // Handle Trial Balance
     else if (reportData.type === 'trial_balance') {
-      const margin = 50;
+      const margin = 40; // Reduced margin for more space
+      const pageWidth = doc.page.width;
+      const contentWidth = pageWidth - 2 * margin;
 
-      // Summary section with spacing from header
-      doc.moveDown(0.5);
-      doc.fontSize(12).font('Helvetica-Bold').fillColor('#1a1a1a');
-      doc.text('Summary', margin, doc.y, { underline: true });
-      doc.moveDown(0.3);
-      doc.fontSize(10).font('Helvetica');
+      // Summary section with compact spacing
+      doc.y = 175;
+      doc.fontSize(10).font('Helvetica-Bold').fillColor('#1a1a1a');
+      doc.text('Summary', margin, doc.y);
+      doc.y += 12;
+      doc.fontSize(8).font('Helvetica').fillColor('#1a1a1a');
       if (data.summary) {
         doc.text('Opening Balances:', margin);
+        doc.y += 10;
         doc.text(
-          `  Opening Debit: ${this.formatCurrency(data.summary.openingDebit || 0, currency)}`,
-          margin + 10,
+          `Opening Debit: ${this.formatCurrency(data.summary.openingDebit || 0, currency)}`,
+          margin + 8,
         );
+        doc.y += 9;
         doc.text(
-          `  Opening Credit: ${this.formatCurrency(data.summary.openingCredit || 0, currency)}`,
-          margin + 10,
+          `Opening Credit: ${this.formatCurrency(data.summary.openingCredit || 0, currency)}`,
+          margin + 8,
         );
-        doc.font('Helvetica-Bold');
+        doc.y += 9;
+        doc.font('Helvetica-Bold').fontSize(9);
         doc.text(
-          `  Opening Balance: ${this.formatCurrency(data.summary.openingBalance || 0, currency)}`,
-          margin + 10,
+          `Opening Balance: ${this.formatCurrency(data.summary.openingBalance || 0, currency)}`,
+          margin + 8,
         );
-        doc.font('Helvetica');
-        doc.moveDown(0.2);
+        doc.y += 12;
+        doc.font('Helvetica').fontSize(8);
         doc.text('Period Transactions:', margin);
+        doc.y += 10;
         doc.text(
-          `  Period Debit: ${this.formatCurrency(data.summary.periodDebit || 0, currency)}`,
-          margin + 10,
+          `Period Debit: ${this.formatCurrency(data.summary.periodDebit || 0, currency)}`,
+          margin + 8,
         );
+        doc.y += 9;
         doc.text(
-          `  Period Credit: ${this.formatCurrency(data.summary.periodCredit || 0, currency)}`,
-          margin + 10,
+          `Period Credit: ${this.formatCurrency(data.summary.periodCredit || 0, currency)}`,
+          margin + 8,
         );
+        doc.y += 9;
         doc.text(
-          `  Period Balance: ${this.formatCurrency(data.summary.periodBalance || 0, currency)}`,
-          margin + 10,
+          `Period Balance: ${this.formatCurrency(data.summary.periodBalance || 0, currency)}`,
+          margin + 8,
         );
-        doc.moveDown(0.2);
+        doc.y += 12;
         doc.text('Closing Balances:', margin);
+        doc.y += 10;
         doc.text(
-          `  Closing Debit: ${this.formatCurrency(data.summary.closingDebit || 0, currency)}`,
-          margin + 10,
+          `Closing Debit: ${this.formatCurrency(data.summary.closingDebit || 0, currency)}`,
+          margin + 8,
         );
+        doc.y += 9;
         doc.text(
-          `  Closing Credit: ${this.formatCurrency(data.summary.closingCredit || 0, currency)}`,
-          margin + 10,
+          `Closing Credit: ${this.formatCurrency(data.summary.closingCredit || 0, currency)}`,
+          margin + 8,
         );
-        doc.font('Helvetica-Bold');
+        doc.y += 9;
+        doc.font('Helvetica-Bold').fontSize(9);
         doc.text(
-          `  Closing Balance: ${this.formatCurrency(data.summary.closingBalance || 0, currency)}`,
-          margin + 10,
+          `Closing Balance: ${this.formatCurrency(data.summary.closingBalance || 0, currency)}`,
+          margin + 8,
         );
-        doc.font('Helvetica');
-        doc.moveDown(0.2);
+        doc.y += 12;
+        doc.font('Helvetica').fontSize(8);
         doc.text('Total Summary:', margin);
-        doc.font('Helvetica-Bold');
+        doc.y += 10;
+        doc.font('Helvetica-Bold').fontSize(9);
         doc.text(
-          `  Total Debit: ${this.formatCurrency(data.summary.closingDebit || data.summary.totalDebit || 0, currency)}`,
-          margin + 10,
+          `Total Debit: ${this.formatCurrency(data.summary.closingDebit || data.summary.totalDebit || 0, currency)}`,
+          margin + 8,
         );
+        doc.y += 9;
         doc.text(
-          `  Total Credit: ${this.formatCurrency(data.summary.closingCredit || data.summary.totalCredit || 0, currency)}`,
-          margin + 10,
+          `Total Credit: ${this.formatCurrency(data.summary.closingCredit || data.summary.totalCredit || 0, currency)}`,
+          margin + 8,
         );
+        doc.y += 9;
+        doc.fontSize(10);
         doc.text(
-          `  Total Balance: ${this.formatCurrency(data.summary.closingBalance || data.summary.totalBalance || 0, currency)}`,
-          margin + 10,
+          `Total Balance: ${this.formatCurrency(data.summary.closingBalance || data.summary.totalBalance || 0, currency)}`,
+          margin + 8,
         );
-        doc.font('Helvetica');
+        doc.y += 15;
       }
 
-      // Accounts table with spacing
-      doc.moveDown(0.5);
+      // Accounts table with compact spacing
       if (
         data.accounts &&
         Array.isArray(data.accounts) &&
         data.accounts.length > 0
       ) {
-        doc.fontSize(12).font('Helvetica-Bold');
-        doc.text('Accounts', margin, doc.y, { underline: true });
-        doc.moveDown(0.3);
+        doc.fontSize(10).font('Helvetica-Bold').fillColor('#1a1a1a');
+        doc.text('Accounts', margin, doc.y);
+        doc.y += 12;
+
         // Update table to include opening/closing columns
         const accountsWithBalances = data.accounts.map((acc: any) => ({
           accountName: acc.accountName,
@@ -2065,7 +2204,9 @@ export class ReportGeneratorService {
           closingCredit: acc.closingCredit || 0,
           closingBalance: acc.closingBalance || 0,
         }));
-        this.addPDFTable(
+
+        // Use custom table rendering for trial balance with smaller fonts
+        this.addTrialBalanceTable(
           doc,
           accountsWithBalances,
           [
@@ -2082,10 +2223,12 @@ export class ReportGeneratorService {
             'closingBalance',
           ],
           currency,
+          margin,
+          contentWidth,
         );
       } else {
         doc
-          .fontSize(10)
+          .fontSize(8)
           .font('Helvetica')
           .text('No accounts data available.', margin);
       }
@@ -2509,10 +2652,29 @@ export class ReportGeneratorService {
     // Table rows
     const rowHeight = 28;
     items.forEach((item: any, index: number) => {
-      // Check page overflow
+      // Check page overflow (check BEFORE adding the row to prevent overflow)
       if (doc.y + rowHeight > doc.page.height - 80) {
         doc.addPage();
         doc.y = 50;
+
+        // Redraw table header on new page
+        const newHeaderY = doc.y;
+        doc
+          .rect(margin + 5, newHeaderY, contentWidth - 10, tableHeaderHeight)
+          .fillColor(accentColor)
+          .fill();
+        let headerX = margin + 15;
+        doc.fontSize(9).font('Helvetica-Bold').fillColor('#ffffff');
+        headers.forEach((header, i) => {
+          const isNumeric = columns[i] === 'amount';
+          doc.text(header, headerX, newHeaderY + 9, {
+            width: colWidths[i] - 20,
+            align: isNumeric ? 'right' : 'left',
+            lineBreak: false,
+          });
+          headerX += colWidths[i];
+        });
+        doc.y = newHeaderY + tableHeaderHeight;
       }
 
       const rowY = doc.y; // Save row Y position
@@ -3500,9 +3662,17 @@ export class ReportGeneratorService {
       contentWidth * 0.2, // TRN
     ];
 
+    // Table header dimensions
+    const headerHeight = 28;
+    const rowHeight = 22;
+
+    // Check if header fits on current page, add new page if needed
+    if (doc.y + headerHeight + rowHeight > doc.page.height - 60) {
+      doc.addPage();
+      doc.y = 50;
+    }
     // Table header
     const headerY = doc.y;
-    const headerHeight = 28;
 
     doc
       .rect(margin, headerY, contentWidth, headerHeight)
@@ -3532,13 +3702,13 @@ export class ReportGeneratorService {
 
     // Data rows
     let rowY = headerY + headerHeight;
-    const rowHeight = 22;
 
     items.forEach((item, index) => {
-      // Check if we need a new page
-      if (rowY > doc.page.height - 100) {
+      // Check if we need a new page (check BEFORE adding the row to prevent overflow)
+      if (rowY + rowHeight > doc.page.height - 100) {
         doc.addPage();
         rowY = 50;
+        doc.y = rowY; // Sync doc.y with rowY position
 
         // Re-draw header on new page
         doc
@@ -3556,6 +3726,7 @@ export class ReportGeneratorService {
         });
         doc.fillColor(textDark);
         rowY += headerHeight;
+        doc.y = rowY; // Sync doc.y after header
       }
 
       // Alternate row background
@@ -3704,6 +3875,11 @@ export class ReportGeneratorService {
     const colWidth = availableWidth / columns.length;
 
     // Header - Professional clean styling
+    // Check if header fits on current page, add new page if needed
+    if (doc.y + 45 > doc.page.height - 60) {
+      doc.addPage();
+      doc.y = 50;
+    }
     const headerY = doc.y;
     doc
       .rect(margin, headerY, availableWidth, 25)
@@ -3727,10 +3903,12 @@ export class ReportGeneratorService {
     // Rows
     let rowY = headerY + 25;
     data.forEach((row: any, index: number) => {
-      if (rowY > doc.page.height - 80) {
+      // Check if we need a new page (check BEFORE adding the row to prevent overflow)
+      if (rowY + 20 > doc.page.height - 80) {
         doc.addPage();
         // Start table at top of new page (with some margin)
         rowY = 50;
+        doc.y = rowY; // Sync doc.y with rowY position
         // Redraw table column header
         doc
           .rect(margin, rowY, availableWidth, 25)
@@ -3750,6 +3928,7 @@ export class ReportGeneratorService {
         });
         doc.fillColor('#1a1a1a');
         rowY += 25;
+        doc.y = rowY; // Sync doc.y after header
       }
 
       // Draw row borders for clean professional look
@@ -3779,15 +3958,148 @@ export class ReportGeneratorService {
     doc.y = rowY + 10;
   }
 
+  /**
+   * Custom table rendering for Trial Balance with smaller fonts to prevent collisions
+   */
+  private addTrialBalanceTable(
+    doc: PDFKit.PDFDocument,
+    data: any[],
+    columns: string[],
+    currency: string,
+    margin: number,
+    contentWidth: number,
+  ): void {
+    if (data.length === 0) return;
+
+    // Calculate column widths - give more space to account name, less to numeric columns
+    const numCols = columns.length;
+    const accountNameWidth = contentWidth * 0.25; // 25% for account name
+    const accountTypeWidth = contentWidth * 0.12; // 12% for account type
+    const numericColWidth =
+      (contentWidth - accountNameWidth - accountTypeWidth) / (numCols - 2); // Remaining space divided equally
+
+    const colWidths: number[] = [];
+    columns.forEach((col) => {
+      if (col === 'accountName') {
+        colWidths.push(accountNameWidth);
+      } else if (col === 'accountType') {
+        colWidths.push(accountTypeWidth);
+      } else {
+        colWidths.push(numericColWidth);
+      }
+    });
+
+    // Header - Compact styling
+    // Check if header fits on current page, add new page if needed
+    const headerHeight = 20;
+    const rowHeight = 16;
+    if (doc.y + headerHeight + rowHeight > doc.page.height - 60) {
+      doc.addPage();
+      doc.y = 50;
+    }
+    const headerY = doc.y;
+    doc
+      .rect(margin, headerY, contentWidth, headerHeight)
+      .fillColor('#0f172a')
+      .fill()
+      .strokeColor('#0f172a')
+      .lineWidth(0.5)
+      .stroke();
+
+    doc.fontSize(7).font('Helvetica-Bold').fillColor('#ffffff');
+    let x = margin + 3;
+    columns.forEach((col, index) => {
+      const label = this.formatHeaderLabel(col);
+      doc.text(label, x, headerY + 6, {
+        width: colWidths[index] - 6,
+        align: this.getColumnAlignment(col),
+        lineBreak: false,
+        ellipsis: true,
+      });
+      x += colWidths[index];
+    });
+
+    // Rows - Compact with smaller fonts
+    let rowY = headerY + headerHeight;
+    data.forEach((row: any, index: number) => {
+      // Check if we need a new page (check BEFORE adding the row to prevent overflow)
+      if (rowY + rowHeight > doc.page.height - 60) {
+        doc.addPage();
+        rowY = 50;
+        doc.y = rowY; // Sync doc.y with rowY position
+
+        // Redraw header on new page
+        doc
+          .rect(margin, rowY, contentWidth, headerHeight)
+          .fillColor('#0f172a')
+          .fill()
+          .strokeColor('#0f172a')
+          .lineWidth(0.5)
+          .stroke();
+
+        doc.fontSize(7).font('Helvetica-Bold').fillColor('#ffffff');
+        x = margin + 3;
+        columns.forEach((col, colIndex) => {
+          const label = this.formatHeaderLabel(col);
+          doc.text(label, x, rowY + 6, {
+            width: colWidths[colIndex] - 6,
+            align: this.getColumnAlignment(col),
+            lineBreak: false,
+            ellipsis: true,
+          });
+          x += colWidths[colIndex];
+        });
+        rowY += headerHeight;
+        doc.y = rowY; // Sync doc.y after header
+      }
+
+      // Row background (alternating)
+      if (index % 2 === 0) {
+        doc.rect(margin, rowY, contentWidth, rowHeight).fillColor('#f8fafc').fill();
+      }
+
+      // Row border
+      doc.strokeColor('#e2e8f0').lineWidth(0.3);
+      doc.rect(margin, rowY, contentWidth, rowHeight).stroke();
+
+      // Row content - Very small font to prevent collisions
+      doc.fillColor('#1a1a1a').fontSize(7).font('Helvetica');
+      x = margin + 3;
+      columns.forEach((col, colIndex) => {
+        const value = this.formatCellValue(row[col], col, currency);
+        doc.text(value, x, rowY + 4, {
+          width: colWidths[colIndex] - 6,
+          align: this.getColumnAlignment(col),
+          lineBreak: false,
+          ellipsis: true,
+        });
+        x += colWidths[colIndex];
+      });
+      rowY += rowHeight;
+    });
+
+    doc.y = rowY + 10;
+  }
+
   private addXLSXHeader(
     worksheet: ExcelJS.Worksheet,
     reportData: ReportData,
   ): void {
+    // Check if worksheet already has content (header already added)
+    if (worksheet.rowCount > 0) {
+      return; // Header already exists, skip
+    }
+
     // Company header - Enhanced professional styling
     worksheet.addRow([
       reportData.metadata?.organizationName || 'SelfAccounting.AI',
     ]);
-    worksheet.mergeCells(`A1:D1`);
+    // Check if cells are already merged before merging
+    try {
+      worksheet.mergeCells(`A1:D1`);
+    } catch {
+      // Cells already merged, skip silently
+    }
     const headerCell = worksheet.getCell('A1');
     headerCell.font = {
       size: 18,
@@ -3810,7 +4122,11 @@ export class ReportGeneratorService {
 
     // Report title - Enhanced styling
     worksheet.addRow([this.getReportTitle(reportData.type)]);
-    worksheet.mergeCells(`A2:D2`);
+    try {
+      worksheet.mergeCells(`A2:D2`);
+    } catch {
+      // Cells already merged, skip silently
+    }
     const titleCell = worksheet.getCell('A2');
     titleCell.font = {
       size: 16,
@@ -3821,25 +4137,38 @@ export class ReportGeneratorService {
     worksheet.getRow(2).height = 24;
 
     // Period
+    let rowNum = 3;
     if (
       reportData.metadata?.reportPeriod?.startDate ||
       reportData.metadata?.reportPeriod?.endDate
     ) {
       const period = `Period: ${this.formatDate(reportData.metadata.reportPeriod.startDate || '')} to ${this.formatDate(reportData.metadata.reportPeriod.endDate || '')}`;
       worksheet.addRow([period]);
-      worksheet.mergeCells(`A3:D3`);
+      try {
+        worksheet.mergeCells(`A${rowNum}:D${rowNum}`);
+      } catch {
+        // Cells already merged, skip silently
+      }
+      rowNum++;
     }
 
     // Organization details
-    let rowNum = 4;
     if (reportData.metadata?.vatNumber) {
       worksheet.addRow([`VAT Number: ${reportData.metadata.vatNumber}`]);
-      worksheet.mergeCells(`A${rowNum}:D${rowNum}`);
+      try {
+        worksheet.mergeCells(`A${rowNum}:D${rowNum}`);
+      } catch {
+        // Cells already merged, skip silently
+      }
       rowNum++;
     }
     if (reportData.metadata?.address) {
       worksheet.addRow([`Address: ${reportData.metadata.address}`]);
-      worksheet.mergeCells(`A${rowNum}:D${rowNum}`);
+      try {
+        worksheet.mergeCells(`A${rowNum}:D${rowNum}`);
+      } catch {
+        // Cells already merged, skip silently
+      }
       rowNum++;
     }
 
@@ -3848,7 +4177,11 @@ export class ReportGeneratorService {
       ? this.formatDate(reportData.metadata.generatedAt)
       : new Date().toLocaleDateString('en-GB');
     worksheet.addRow([`Generated: ${generatedDate}`]);
-    worksheet.mergeCells(`A${rowNum}:D${rowNum}`);
+    try {
+      worksheet.mergeCells(`A${rowNum}:D${rowNum}`);
+    } catch {
+      // Cells already merged, skip silently
+    }
 
     worksheet.addRow([]); // Empty row
   }
@@ -4251,9 +4584,12 @@ export class ReportGeneratorService {
   ): void {
     const data = reportData.data;
 
-    // Summary sheet
-    const summarySheet =
-      workbook.getWorksheet('Summary') || workbook.addWorksheet('Summary');
+    // Summary sheet - Remove existing worksheet if it exists to avoid merge conflicts
+    const existingSheet = workbook.getWorksheet('Summary');
+    if (existingSheet) {
+      workbook.removeWorksheet(existingSheet.id);
+    }
+    const summarySheet = workbook.addWorksheet('Summary');
     this.addXLSXHeader(summarySheet, reportData);
 
     if (data.summary) {
@@ -5212,6 +5548,38 @@ export class ReportGeneratorService {
             'debit',
             'credit',
             'balance',
+            'openingDebit',
+            'openingCredit',
+            'openingBalance',
+            'periodDebit',
+            'periodCredit',
+            'periodBalance',
+            'closingDebit',
+            'closingCredit',
+            'closingBalance',
+            'paidAmount',
+            'outstanding',
+            'outstandingAmount',
+            'openingAssets',
+            'openingLiabilities',
+            'openingEquity',
+            'periodAssets',
+            'periodLiabilities',
+            'periodEquity',
+            'closingAssets',
+            'closingLiabilities',
+            'closingEquity',
+            'grossProfit',
+            'totalExpenses',
+            'netProfit',
+            'openingRetainedEarnings',
+            'closingRetainedEarnings',
+            'periodAmount',
+            'overdueAmount',
+            'totalOutstanding',
+            'totalDebit',
+            'totalCredit',
+            'totalBalance',
           ];
           if (currencyFields.some((field) => h.toLowerCase().includes(field))) {
             const numValue =
@@ -5263,6 +5631,21 @@ export class ReportGeneratorService {
             'totalAmount',
             'vatAmount',
             'baseAmount',
+            'debit',
+            'credit',
+            'balance',
+            'openingDebit',
+            'openingCredit',
+            'openingBalance',
+            'periodDebit',
+            'periodCredit',
+            'periodBalance',
+            'closingDebit',
+            'closingCredit',
+            'closingBalance',
+            'paidAmount',
+            'outstanding',
+            'outstandingAmount',
           ];
           if (currencyFields.some((field) => h.toLowerCase().includes(field))) {
             const val = totalRow[h];
@@ -5517,19 +5900,29 @@ export class ReportGeneratorService {
         ) {
           lines.push('Accounts');
           lines.push(
-            'Account Name,Account Type,Opening Debit,Opening Credit,Opening Balance,Period Debit,Period Credit,Period Balance,Closing Debit,Closing Credit,Closing Balance',
+            'Account Name,Account Type,Account Code,Opening Debit,Opening Credit,Opening Balance,Period Debit,Period Credit,Period Balance,Closing Debit,Closing Credit,Closing Balance',
           );
           data.accounts.forEach((item: any) => {
             lines.push(
               [
                 item.accountName || 'N/A',
                 item.accountType || 'N/A',
+                item.accountCode || 'N/A',
                 this.formatCurrency(item.openingDebit || 0, currency),
                 this.formatCurrency(item.openingCredit || 0, currency),
                 this.formatCurrency(item.openingBalance || 0, currency),
-                this.formatCurrency(item.debit || 0, currency),
-                this.formatCurrency(item.credit || 0, currency),
-                this.formatCurrency(item.balance || 0, currency),
+                this.formatCurrency(
+                  item.debit || item.periodDebit || 0,
+                  currency,
+                ),
+                this.formatCurrency(
+                  item.credit || item.periodCredit || 0,
+                  currency,
+                ),
+                this.formatCurrency(
+                  item.balance || item.periodBalance || 0,
+                  currency,
+                ),
                 this.formatCurrency(item.closingDebit || 0, currency),
                 this.formatCurrency(item.closingCredit || 0, currency),
                 this.formatCurrency(item.closingBalance || 0, currency),
@@ -5772,17 +6165,33 @@ export class ReportGeneratorService {
         lines.push('');
         if (data.items && Array.isArray(data.items) && data.items.length > 0) {
           lines.push('Payables');
-          lines.push('Vendor,Amount,Expected Date,Status');
+          lines.push(
+            'Vendor,Description,Invoice Number,Amount,VAT Amount,Total Amount,Expected Date,Due Date,Status,Payment Method,Reference Number,Notes',
+          );
           data.items.forEach((item: any) => {
-            const date = item.expectedDate
+            const expectedDate = item.expectedDate
               ? new Date(item.expectedDate).toLocaleDateString('en-GB')
+              : 'N/A';
+            const dueDate = item.dueDate
+              ? new Date(item.dueDate).toLocaleDateString('en-GB')
               : 'N/A';
             lines.push(
               [
-                item.vendor || 'N/A',
+                item.vendor || item.vendorName || 'N/A',
+                item.description || 'N/A',
+                item.invoiceNumber || 'N/A',
                 this.formatCurrency(item.amount || 0, currency),
-                date,
+                this.formatCurrency(item.vatAmount || 0, currency),
+                this.formatCurrency(
+                  item.totalAmount || item.amount + (item.vatAmount || 0) || 0,
+                  currency,
+                ),
+                expectedDate,
+                dueDate,
                 item.status || 'N/A',
+                item.paymentMethod || 'N/A',
+                item.referenceNumber || 'N/A',
+                item.notes || 'N/A',
               ].join(','),
             );
           });
@@ -5826,20 +6235,35 @@ export class ReportGeneratorService {
         if (data.items && Array.isArray(data.items) && data.items.length > 0) {
           lines.push('Receivables');
           lines.push(
-            'Invoice Number,Customer,Total,Outstanding,Due Date,Payment Status',
+            'Invoice Number,Invoice Date,Customer,Customer TRN,Description,Amount,VAT Amount,Total Amount,Paid Amount,Outstanding,Due Date,Payment Status,Status,Currency,Notes',
           );
           data.items.forEach((item: any) => {
+            const invoiceDate = item.invoiceDate
+              ? new Date(item.invoiceDate).toLocaleDateString('en-GB')
+              : 'N/A';
             const dueDate = item.dueDate
               ? new Date(item.dueDate).toLocaleDateString('en-GB')
               : 'N/A';
             lines.push(
               [
                 item.invoiceNumber || 'N/A',
-                item.customer || 'N/A',
-                this.formatCurrency(item.total || 0, currency),
+                invoiceDate,
+                item.customer || item.customerName || 'N/A',
+                item.customerTrn || 'N/A',
+                item.description || 'N/A',
+                this.formatCurrency(item.amount || 0, currency),
+                this.formatCurrency(item.vatAmount || 0, currency),
+                this.formatCurrency(
+                  item.total || item.totalAmount || 0,
+                  currency,
+                ),
+                this.formatCurrency(item.paidAmount || 0, currency),
                 this.formatCurrency(item.outstanding || 0, currency),
                 dueDate,
                 item.paymentStatus || 'N/A',
+                item.status || 'N/A',
+                item.currency || currency,
+                item.notes || 'N/A',
               ].join(','),
             );
           });
@@ -5885,11 +6309,9 @@ export class ReportGeneratorService {
         const organization = invoice.organization;
         const customer = invoice.customer;
         const currency = metadata.currency || invoice.currency || 'AED';
-        const currencySettings = metadata.currencySettings || {};
-        const exchangeRate = metadata.exchangeRate || null;
 
         const doc = new PDFDocument({
-          margin: 50,
+          margin: 56, // Increased from 50 to match premium preview (48px = ~56pt)
           size: 'A4',
           layout: 'portrait',
         });
@@ -5903,7 +6325,7 @@ export class ReportGeneratorService {
         doc.on('error', reject);
 
         const pageWidth = doc.page.width;
-        const margin = 50;
+        const margin = 56; // Increased from 50 to match premium preview
         const contentWidth = pageWidth - 2 * margin;
 
         // Get template settings from metadata
@@ -5956,13 +6378,14 @@ export class ReportGeneratorService {
 
         const colors = {
           primary: primaryColor,
-          text: '#1a1a1a',
-          textLight: '#666666',
-          textMuted: '#999999',
-          border: '#e0e0e0',
-          borderLight: '#f0f0f0',
+          text: '#0f172a',
+          textLight: '#475569',
+          textMuted: '#94a3b8',
+          border: '#e2e8f0',
+          borderLight: '#f1f5f9',
           background: '#ffffff',
-          backgroundLight: '#f8f9fa',
+          backgroundLight: '#f8fafc',
+          backgroundDark: '#0f172a', // For dark table header
         };
 
         // Currency formatting helper
@@ -5974,27 +6397,38 @@ export class ReportGeneratorService {
         };
 
         // ============================================================================
-        // TOP BORDER BAR (Blue line at top of page)
+        // TOP BORDER BAR (Premium 6px border matching preview)
         // ============================================================================
-        doc.fillColor(colors.primary).rect(0, 0, pageWidth, 8).fill();
+        doc.fillColor(colors.primary).rect(0, 0, pageWidth, 6).fill();
 
         // ============================================================================
-        // HEADER: Logo on left, Title centered
+        // HEADER: Logo on left, Title on right (Premium layout matching preview)
         // ============================================================================
-        let currentY = 30;
+        let currentY = 40;
 
         // Add logo on the left if available
         if (templateSettings.logoBuffer) {
           try {
-            const logoSize = 50;
-            const logoX = margin;
-            const logoY = currentY;
+            // Check if buffer contains SVG content (PDFKit doesn't support SVG)
+            const bufferStart = templateSettings.logoBuffer
+              .slice(0, 100)
+              .toString('utf-8')
+              .toLowerCase();
+            if (bufferStart.includes('<svg') || bufferStart.includes('<?xml')) {
+              console.warn(
+                "Skipping SVG invoice logo buffer (PDFKit doesn't support SVG)",
+              );
+            } else {
+              const logoSize = 60; // Increased from 50
+              const logoX = margin;
+              const logoY = currentY;
 
-            doc.image(templateSettings.logoBuffer, logoX, logoY, {
-              width: logoSize,
-              height: logoSize,
-              fit: [logoSize, logoSize],
-            });
+              doc.image(templateSettings.logoBuffer, logoX, logoY, {
+                width: logoSize,
+                height: logoSize,
+                fit: [logoSize, logoSize],
+              });
+            }
           } catch (error) {
             console.warn('Failed to load invoice logo:', error);
             // No placeholder - just skip logo if it fails
@@ -6006,15 +6440,23 @@ export class ReportGeneratorService {
           fs.existsSync(templateSettings.logoUrl)
         ) {
           try {
-            const logoSize = 50;
-            const logoX = margin;
-            const logoY = currentY;
+            // Skip SVG files as PDFKit doesn't support them
+            const ext = path.extname(templateSettings.logoUrl).toLowerCase();
+            if (ext !== '.svg') {
+              const logoSize = 60; // Increased from 50
+              const logoX = margin;
+              const logoY = currentY;
 
-            doc.image(templateSettings.logoUrl, logoX, logoY, {
-              width: logoSize,
-              height: logoSize,
-              fit: [logoSize, logoSize],
-            });
+              doc.image(templateSettings.logoUrl, logoX, logoY, {
+                width: logoSize,
+                height: logoSize,
+                fit: [logoSize, logoSize],
+              });
+            } else {
+              console.warn(
+                "Skipping SVG invoice logo file (PDFKit doesn't support SVG)",
+              );
+            }
           } catch (error) {
             console.warn('Failed to load invoice logo from file:', error);
             // No placeholder - just skip logo if it fails
@@ -6022,104 +6464,153 @@ export class ReportGeneratorService {
         }
         // No placeholder text - if no logo is configured, just skip it
 
-        // Invoice Title - Centered
+        // Invoice Title - Right aligned (matching premium preview)
         doc.fontSize(24).font('Helvetica-Bold').fillColor(colors.primary);
-        doc.text(templateSettings.invoiceTitle, margin, currentY + 10, {
+        doc.text(templateSettings.invoiceTitle, margin, currentY + 12, {
           width: contentWidth,
-          align: 'center',
+          align: 'right',
         });
 
-        currentY = 90;
+        // Header text if available
+        if (templateSettings.headerText) {
+          doc.fontSize(10).font('Helvetica').fillColor(colors.textLight);
+          doc.text(templateSettings.headerText, margin, currentY + 38, {
+            width: contentWidth,
+            align: 'right',
+          });
+          currentY += 15;
+        }
+
+        currentY = 120;
 
         // ============================================================================
-        // SEPARATOR LINE
+        // SEPARATOR LINE (Premium 2px border with accent)
         // ============================================================================
-        doc.strokeColor(colors.border).lineWidth(0.5);
+        doc.strokeColor(colors.border).lineWidth(2);
         doc
           .moveTo(margin, currentY)
           .lineTo(pageWidth - margin, currentY)
           .stroke();
-        currentY += 20;
+
+        // Accent line below separator
+        doc.strokeColor(colors.primary).lineWidth(1);
+        doc
+          .moveTo(margin, currentY + 2)
+          .lineTo(margin + 120, currentY + 2)
+          .stroke();
+
+        currentY += 32;
 
         // ============================================================================
-        // COMPANY DETAILS SECTION
+        // COMPANY DETAILS SECTION (Premium styled with background)
         // ============================================================================
         if (templateSettings.showCompanyDetails) {
+          const companyBoxY = currentY;
+          const companyBoxHeight = 80;
+
+          // Draw background box with left border accent
+          doc
+            .fillColor(colors.backgroundLight)
+            .rect(margin, companyBoxY, contentWidth, companyBoxHeight)
+            .fill();
+          doc
+            .strokeColor(colors.border)
+            .lineWidth(0.5)
+            .rect(margin, companyBoxY, contentWidth, companyBoxHeight)
+            .stroke();
+
+          // Left border accent
+          doc
+            .fillColor(colors.primary)
+            .rect(margin, companyBoxY, 4, companyBoxHeight)
+            .fill();
+
           const orgName = organization?.name || metadata.organizationName || '';
           doc.fontSize(14).font('Helvetica-Bold').fillColor(colors.text);
-          doc.text(orgName, margin, currentY);
-          currentY += 20;
+          doc.text(orgName, margin + 20, companyBoxY + 12);
+          currentY = companyBoxY + 28;
 
-          doc.fontSize(10).font('Helvetica').fillColor(colors.textLight);
+          doc.fontSize(9).font('Helvetica').fillColor(colors.textLight);
+
+          const orgAddress = organization?.address || metadata.address || '';
+          if (orgAddress) {
+            doc.text(orgAddress, margin + 20, currentY);
+            currentY += 14;
+          }
 
           const orgEmail = organization?.contactEmail || metadata.email || '';
           if (orgEmail) {
-            doc.text(`Email: ${orgEmail}`, margin, currentY);
+            doc.text(`Email: ${orgEmail}`, margin + 20, currentY);
             currentY += 14;
           }
 
           if (templateSettings.showVatDetails) {
             const orgTrn = organization?.vatNumber || metadata.vatNumber || '';
             if (orgTrn) {
-              doc.text(`TRN: ${orgTrn}`, margin, currentY);
+              doc.text(`TRN: ${orgTrn}`, margin + 20, currentY);
               currentY += 14;
             }
           }
+
+          currentY = companyBoxY + companyBoxHeight + 24;
+        } else {
+          currentY += 20;
         }
 
-        currentY += 10;
-
         // ============================================================================
-        // SEPARATOR LINE
+        // INVOICE DETAILS BOX (Premium styled with gradient-like background)
         // ============================================================================
-        doc.strokeColor(colors.border).lineWidth(0.5);
-        doc
-          .moveTo(margin, currentY)
-          .lineTo(pageWidth - margin, currentY)
-          .stroke();
-        currentY += 15;
-
-        // ============================================================================
-        // INVOICE DETAILS BOX (Gray background)
-        // ============================================================================
-        const boxHeight = 80;
+        const boxHeight = 85; // Reduced from 100 to save space
         const boxY = currentY;
 
-        // Draw gray background box
+        // Draw premium background box with border
         doc
           .fillColor(colors.backgroundLight)
           .rect(margin, boxY, contentWidth, boxHeight)
           .fill();
         doc
           .strokeColor(colors.border)
-          .lineWidth(0.5)
+          .lineWidth(1)
           .rect(margin, boxY, contentWidth, boxHeight)
           .stroke();
 
         // Left side - Invoice details
-        const leftColX = margin + 15;
-        const leftLabelWidth = 100;
-        let detailY = boxY + 15;
+        const leftColX = margin + 20;
+        const leftLabelWidth = 120;
+        let detailY = boxY + 16;
 
-        doc.fontSize(10).font('Helvetica').fillColor(colors.textLight);
-        doc.text('Invoice Number:', leftColX, detailY);
+        doc.fontSize(9).font('Helvetica-Bold').fillColor(colors.textLight);
+        doc.text('INVOICE NUMBER:', leftColX, detailY);
         doc.font('Helvetica-Bold').fillColor(colors.text);
         doc.text(
           invoice.invoiceNumber || '',
           leftColX + leftLabelWidth,
           detailY,
         );
-        detailY += 18;
+        detailY += 16;
 
-        doc.font('Helvetica').fillColor(colors.textLight);
-        doc.text('Invoice Date:', leftColX, detailY);
+        doc.fontSize(9).font('Helvetica-Bold').fillColor(colors.textLight);
+        doc.text('INVOICE DATE:', leftColX, detailY);
         doc.font('Helvetica-Bold').fillColor(colors.text);
         doc.text(
           this.formatDateForInvoice(invoice.invoiceDate || ''),
           leftColX + leftLabelWidth,
           detailY,
         );
-        detailY += 18;
+        detailY += 16;
+
+        // Due Date
+        if (invoice.dueDate) {
+          doc.fontSize(9).font('Helvetica-Bold').fillColor(colors.textLight);
+          doc.text('DUE DATE:', leftColX, detailY);
+          doc.font('Helvetica-Bold').fillColor(colors.text);
+          doc.text(
+            this.formatDateForInvoice(invoice.dueDate),
+            leftColX + leftLabelWidth,
+            detailY,
+          );
+          detailY += 16;
+        }
 
         // Payment Terms
         if (templateSettings.showPaymentTerms) {
@@ -6128,32 +6619,42 @@ export class ReportGeneratorService {
             (customer?.paymentTerms
               ? `Net ${customer.paymentTerms}`
               : 'Net 30');
-          doc.font('Helvetica').fillColor(colors.textLight);
-          doc.text('Payment Terms:', leftColX, detailY);
+          doc.fontSize(9).font('Helvetica-Bold').fillColor(colors.textLight);
+          doc.text('PAYMENT TERMS:', leftColX, detailY);
           doc.font('Helvetica-Bold').fillColor(colors.text);
           doc.text(paymentTerms, leftColX + leftLabelWidth, detailY);
         }
 
-        // Right side - Bill To section
-        const rightColX = margin + contentWidth / 2 + 30;
-        let billToY = boxY + 15;
+        // Right side - Bill To section with border separator
+        const rightColX = margin + contentWidth / 2 + 32;
+        const separatorX = margin + contentWidth / 2;
 
-        doc.fontSize(10).font('Helvetica').fillColor(colors.primary);
-        doc.text('Bill To:', rightColX, billToY);
-        billToY += 18;
+        // Vertical separator line
+        doc.strokeColor(colors.border).lineWidth(1);
+        doc
+          .moveTo(separatorX, boxY + 10)
+          .lineTo(separatorX, boxY + boxHeight - 10)
+          .stroke();
+
+        let billToY = boxY + 16;
+
+        doc.fontSize(9).font('Helvetica-Bold').fillColor(colors.textLight);
+        doc.text('BILL TO:', rightColX, billToY);
+        billToY += 16;
 
         const customerName = customer?.name || invoice.customerName || '';
         doc.fontSize(12).font('Helvetica-Bold').fillColor(colors.text);
         doc.text(customerName, rightColX, billToY);
-        billToY += 18;
+        billToY += 16;
 
-        const customerTrn = customer?.vatNumber || customer?.trn || '';
-        if (customerTrn) {
-          doc.fontSize(10).font('Helvetica').fillColor(colors.textLight);
+        const customerTrn =
+          customer?.vatNumber || customer?.trn || invoice.customerTrn || '';
+        if (customerTrn && templateSettings.showVatDetails) {
+          doc.fontSize(9).font('Helvetica').fillColor(colors.textLight);
           doc.text(`TRN: ${customerTrn}`, rightColX, billToY);
         }
 
-        currentY = boxY + boxHeight + 25;
+        currentY = boxY + boxHeight + 32;
 
         // ============================================================================
         // LINE ITEMS TABLE - Clean modern design matching preview
@@ -6171,64 +6672,93 @@ export class ReportGeneratorService {
           total: 85,
         };
         const tableWidth = contentWidth;
-        const rowHeight = 35;
+        const rowHeight = 28; // Reduced from 35 to fit more rows
 
-        // Table Header row
+        // Table Header row - Premium dark background with white text
         let tableX = tableStartX;
         const headerY = tableTop;
 
-        doc.fontSize(10).font('Helvetica-Bold').fillColor(colors.text);
+        // Draw dark header background
+        doc
+          .fillColor(colors.backgroundDark)
+          .rect(tableStartX, headerY, tableWidth, rowHeight)
+          .fill();
 
-        // Draw header text
+        // Draw header text in white with right-aligned numeric columns
+        doc.fontSize(10).font('Helvetica-Bold').fillColor('#ffffff');
+
         doc.text('Item', tableX + 10, headerY + 10);
         tableX += colWidths.item;
         doc.text('Description', tableX + 10, headerY + 10);
         tableX += colWidths.description;
-        doc.text('Qty', tableX + 10, headerY + 10);
+        doc.text('Qty', tableX + 10, headerY + 10, {
+          align: 'right',
+          width: colWidths.quantity - 20,
+        });
         tableX += colWidths.quantity;
-        doc.text('Unit Price', tableX + 10, headerY + 10);
+        doc.text('Unit Price', tableX + 10, headerY + 10, {
+          align: 'right',
+          width: colWidths.unitPrice - 20,
+        });
         tableX += colWidths.unitPrice;
-        doc.text('Total', tableX + 10, headerY + 10);
-
-        // Header bottom border
-        doc.strokeColor(colors.border).lineWidth(1);
-        doc
-          .moveTo(tableStartX, headerY + rowHeight - 5)
-          .lineTo(tableStartX + tableWidth, headerY + rowHeight - 5)
-          .stroke();
+        doc.text('Total', tableX + 10, headerY + 10, {
+          align: 'right',
+          width: colWidths.total - 20,
+        });
 
         let rowY = headerY + rowHeight;
 
-        // Table Rows - Clean design matching preview
+        // Table Rows - Clean design matching preview with alternating row colors
         lineItems.forEach((item: any, index: number) => {
           // Check if we need a new page
           if (rowY + rowHeight > doc.page.height - 150) {
             doc.addPage();
             rowY = margin + 40;
 
-            // Redraw table header on new page
+            // Redraw table header on new page with dark background
             tableX = tableStartX;
-            doc.fontSize(10).font('Helvetica-Bold').fillColor(colors.text);
+
+            // Draw dark header background
+            doc
+              .fillColor(colors.backgroundDark)
+              .rect(tableStartX, rowY, tableWidth, rowHeight)
+              .fill();
+
+            doc.fontSize(10).font('Helvetica-Bold').fillColor('#ffffff');
             doc.text('Item', tableX + 10, rowY + 10);
             tableX += colWidths.item;
             doc.text('Description', tableX + 10, rowY + 10);
             tableX += colWidths.description;
-            doc.text('Qty', tableX + 10, rowY + 10);
+            doc.text('Qty', tableX + 10, rowY + 10, {
+              align: 'right',
+              width: colWidths.quantity - 20,
+            });
             tableX += colWidths.quantity;
-            doc.text('Unit Price', tableX + 10, rowY + 10);
+            doc.text('Unit Price', tableX + 10, rowY + 10, {
+              align: 'right',
+              width: colWidths.unitPrice - 20,
+            });
             tableX += colWidths.unitPrice;
-            doc.text('Total', tableX + 10, rowY + 10);
-
-            doc.strokeColor(colors.border).lineWidth(1);
-            doc
-              .moveTo(tableStartX, rowY + rowHeight - 5)
-              .lineTo(tableStartX + tableWidth, rowY + rowHeight - 5)
-              .stroke();
+            doc.text('Total', tableX + 10, rowY + 10, {
+              align: 'right',
+              width: colWidths.total - 20,
+            });
             rowY += rowHeight;
+          }
+
+          // Draw alternating row background for better readability
+          if (index % 2 === 0) {
+            doc
+              .fillColor(colors.backgroundLight)
+              .rect(tableStartX, rowY, tableWidth, rowHeight)
+              .fill();
           }
 
           // Draw row content
           tableX = tableStartX;
+
+          // Reset font color for row content
+          doc.fontSize(9).font('Helvetica').fillColor(colors.text);
 
           // Item name
           doc.text(item.itemName || '', tableX + 10, rowY + 12);
@@ -6240,26 +6770,34 @@ export class ReportGeneratorService {
           });
           tableX += colWidths.description;
 
-          // Quantity with unit
+          // Quantity with unit (right-aligned)
           const qty = parseFloat(item.quantity || '0');
           const unit = item.unitOfMeasure || 'unit';
           doc.text(
             `${formatAmount(qty).replace(/,/g, '')} ${unit}`,
             tableX + 10,
             rowY + 12,
+            {
+              align: 'right',
+              width: colWidths.quantity - 20,
+            },
           );
           tableX += colWidths.quantity;
 
-          // Unit Price
+          // Unit Price (right-aligned)
           const unitPrice = parseFloat(item.unitPrice || '0');
           doc.text(
             `${formatAmount(unitPrice)} ${currency}`,
             tableX + 10,
             rowY + 12,
+            {
+              align: 'right',
+              width: colWidths.unitPrice - 20,
+            },
           );
           tableX += colWidths.unitPrice;
 
-          // Total (including VAT)
+          // Total (including VAT, right-aligned)
           const lineTotal =
             parseFloat(item.totalAmount || item.amount || '0') +
             parseFloat(item.vatAmount || '0');
@@ -6267,7 +6805,18 @@ export class ReportGeneratorService {
             `${formatAmount(lineTotal)} ${currency}`,
             tableX + 10,
             rowY + 12,
+            {
+              align: 'right',
+              width: colWidths.total - 20,
+            },
           );
+
+          // Subtle row separator
+          doc.strokeColor(colors.borderLight).lineWidth(0.5);
+          doc
+            .moveTo(tableStartX, rowY + rowHeight)
+            .lineTo(tableStartX + tableWidth, rowY + rowHeight)
+            .stroke();
 
           rowY += rowHeight;
         });
@@ -6282,66 +6831,132 @@ export class ReportGeneratorService {
         currentY = rowY + 25;
 
         // ============================================================================
-        // TOTALS SECTION - Clean design matching preview
+        // TOTALS SECTION - Premium design matching preview
         // ============================================================================
-        const totalsX = pageWidth - margin - 200;
+        const totalsX = pageWidth - margin - 250;
         const totalVat = parseFloat(invoice.vatAmount || '0');
         const subtotal = parseFloat(invoice.amount || '0');
         const totalAmount = parseFloat(invoice.totalAmount || '0');
 
+        // Totals box background
+        const totalsBoxY = currentY;
+        const totalsBoxHeight = 100; // Reduced from 120
+
+        doc
+          .fillColor(colors.backgroundLight)
+          .rect(totalsX - 20, totalsBoxY, 270, totalsBoxHeight)
+          .fill();
+        doc
+          .strokeColor(colors.border)
+          .lineWidth(1)
+          .rect(totalsX - 20, totalsBoxY, 270, totalsBoxHeight)
+          .stroke();
+
+        let totalsY = totalsBoxY + 20;
+
         // Subtotal row
-        doc.fontSize(11).font('Helvetica').fillColor(colors.text);
-        doc.text('Subtotal:', margin, currentY);
-        doc.text(`${formatAmount(subtotal)} ${currency}`, totalsX, currentY, {
-          width: 200,
-          align: 'right',
-        });
-        currentY += 22;
+        doc.fontSize(10).font('Helvetica-Bold').fillColor(colors.textLight);
+        doc.text('Subtotal:', totalsX, totalsY);
+        doc.font('Helvetica-Bold').fillColor(colors.text);
+        doc.text(
+          `${formatAmount(subtotal)} ${currency}`,
+          totalsX + 150,
+          totalsY,
+          {
+            width: 100,
+            align: 'right',
+          },
+        );
+        totalsY += 18;
 
         // VAT row
-        doc.text('VAT:', margin, currentY);
-        doc.text(`${formatAmount(totalVat)} ${currency}`, totalsX, currentY, {
-          width: 200,
-          align: 'right',
-        });
-        currentY += 25;
+        doc.fontSize(10).font('Helvetica-Bold').fillColor(colors.textLight);
+        doc.text('VAT:', totalsX, totalsY);
+        doc.font('Helvetica-Bold').fillColor(colors.text);
+        doc.text(
+          `${formatAmount(totalVat)} ${currency}`,
+          totalsX + 150,
+          totalsY,
+          {
+            width: 100,
+            align: 'right',
+          },
+        );
+        totalsY += 22;
 
         // Separator line before total
-        doc.strokeColor(colors.border).lineWidth(0.5);
+        doc.strokeColor(colors.border).lineWidth(1);
         doc
-          .moveTo(margin, currentY)
-          .lineTo(pageWidth - margin, currentY)
+          .moveTo(totalsX - 10, totalsY)
+          .lineTo(totalsX + 250, totalsY)
           .stroke();
-        currentY += 15;
+        totalsY += 14;
 
-        // Total Amount row (larger, blue)
-        doc.fontSize(14).font('Helvetica-Bold').fillColor(colors.text);
-        doc.text('Total Amount:', margin, currentY);
-        doc.fillColor(colors.primary);
+        // Total Amount row (larger, primary color, more prominent)
+        doc.fontSize(13).font('Helvetica-Bold').fillColor(colors.textLight);
+        doc.text('Total Amount:', totalsX, totalsY);
+        doc.fontSize(15).fillColor(colors.primary);
         doc.text(
           `${formatAmount(totalAmount)} ${currency}`,
-          totalsX,
-          currentY,
-          { width: 200, align: 'right' },
+          totalsX + 150,
+          totalsY - 1,
+          { width: 100, align: 'right' },
         );
-        currentY += 35;
 
-        // Separator line after total
+        currentY = totalsBoxY + totalsBoxHeight + 30;
+
+        // ============================================================================
+        // FOOTER - Enhanced with payment info and terms
+        // ============================================================================
+        let footerY = doc.page.height - 60;
+
+        // Footer separator line
         doc.strokeColor(colors.border).lineWidth(0.5);
         doc
-          .moveTo(margin, currentY)
-          .lineTo(pageWidth - margin, currentY)
+          .moveTo(margin, footerY - 12)
+          .lineTo(pageWidth - margin, footerY - 12)
           .stroke();
 
-        // ============================================================================
-        // FOOTER - Clean centered text
-        // ============================================================================
-        const footerY = doc.page.height - 60;
-        doc.fontSize(9).font('Helvetica').fillColor(colors.textMuted);
+        // Payment methods if enabled
+        if (templateSettings.showPaymentMethods) {
+          doc.fontSize(8).font('Helvetica').fillColor(colors.textLight);
+          const paymentMethodsText =
+            'Payment Methods: Bank Transfer, Cash, Credit Card';
+          doc.text(paymentMethodsText, margin, footerY, {
+            align: 'center',
+            width: contentWidth,
+          });
+          footerY += 10;
+        }
+
+        // Terms and conditions if enabled
+        if (
+          templateSettings.showTermsAndConditions &&
+          templateSettings.termsAndConditions
+        ) {
+          doc.fontSize(7).font('Helvetica').fillColor(colors.textMuted);
+          doc.text(templateSettings.termsAndConditions, margin, footerY, {
+            align: 'center',
+            width: contentWidth,
+          });
+          footerY += 10;
+        }
+
+        // Computer generated notice
+        doc.fontSize(8).font('Helvetica').fillColor(colors.textMuted);
         doc.text('This is a Computer Generated Invoice', margin, footerY, {
           align: 'center',
           width: contentWidth,
         });
+
+        // Footer text if provided
+        if (templateSettings.showFooter && templateSettings.footerText) {
+          doc.fontSize(7).font('Helvetica').fillColor(colors.textMuted);
+          doc.text(templateSettings.footerText, margin, footerY + 10, {
+            align: 'center',
+            width: contentWidth,
+          });
+        }
 
         doc.end();
       } catch (error) {

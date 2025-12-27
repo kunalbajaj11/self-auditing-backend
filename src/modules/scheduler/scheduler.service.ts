@@ -508,15 +508,17 @@ export class SchedulerService {
   @Cron('0 2 * * *')
   async updateExchangeRatesDaily() {
     this.logger.log('Starting daily exchange rate update job');
-    
+
     const organizations = await this.organizationsRepository.find({
       where: { status: OrganizationStatus.ACTIVE },
     });
 
     for (const organization of organizations) {
       try {
-        const currencySettings = await this.settingsService.getCurrencySettings(organization.id);
-        
+        const currencySettings = await this.settingsService.getCurrencySettings(
+          organization.id,
+        );
+
         // Check if auto-update is enabled
         if (!currencySettings.currencyAutoUpdateRates) {
           continue;
@@ -525,14 +527,20 @@ export class SchedulerService {
         // Check update frequency
         if (currencySettings.currencyUpdateFrequency === 'daily') {
           // Check exchange rate source
-          if (currencySettings.currencyExchangeRateSource === 'api' || 
-              currencySettings.currencyExchangeRateSource === 'auto') {
+          if (
+            currencySettings.currencyExchangeRateSource === 'api' ||
+            currencySettings.currencyExchangeRateSource === 'auto'
+          ) {
             await this.forexRateService.updateRates(organization);
-            this.logger.log(`Updated exchange rates for organization: ${organization.name}`);
+            this.logger.log(
+              `Updated exchange rates for organization: ${organization.name}`,
+            );
           }
         }
       } catch (error) {
-        this.logger.error(`Failed to update exchange rates for organization ${organization.id}: ${error.message}`);
+        this.logger.error(
+          `Failed to update exchange rates for organization ${organization.id}: ${error.message}`,
+        );
       }
     }
   }
@@ -541,15 +549,17 @@ export class SchedulerService {
   @Cron('0 2 * * 1')
   async updateExchangeRatesWeekly() {
     this.logger.log('Starting weekly exchange rate update job');
-    
+
     const organizations = await this.organizationsRepository.find({
       where: { status: OrganizationStatus.ACTIVE },
     });
 
     for (const organization of organizations) {
       try {
-        const currencySettings = await this.settingsService.getCurrencySettings(organization.id);
-        
+        const currencySettings = await this.settingsService.getCurrencySettings(
+          organization.id,
+        );
+
         // Check if auto-update is enabled
         if (!currencySettings.currencyAutoUpdateRates) {
           continue;
@@ -558,14 +568,20 @@ export class SchedulerService {
         // Check update frequency
         if (currencySettings.currencyUpdateFrequency === 'weekly') {
           // Check exchange rate source
-          if (currencySettings.currencyExchangeRateSource === 'api' || 
-              currencySettings.currencyExchangeRateSource === 'auto') {
+          if (
+            currencySettings.currencyExchangeRateSource === 'api' ||
+            currencySettings.currencyExchangeRateSource === 'auto'
+          ) {
             await this.forexRateService.updateRates(organization);
-            this.logger.log(`Updated exchange rates for organization: ${organization.name}`);
+            this.logger.log(
+              `Updated exchange rates for organization: ${organization.name}`,
+            );
           }
         }
       } catch (error) {
-        this.logger.error(`Failed to update exchange rates for organization ${organization.id}: ${error.message}`);
+        this.logger.error(
+          `Failed to update exchange rates for organization ${organization.id}: ${error.message}`,
+        );
       }
     }
   }
@@ -574,15 +590,17 @@ export class SchedulerService {
   @Cron('0 2 1 * *')
   async updateExchangeRatesMonthly() {
     this.logger.log('Starting monthly exchange rate update job');
-    
+
     const organizations = await this.organizationsRepository.find({
       where: { status: OrganizationStatus.ACTIVE },
     });
 
     for (const organization of organizations) {
       try {
-        const currencySettings = await this.settingsService.getCurrencySettings(organization.id);
-        
+        const currencySettings = await this.settingsService.getCurrencySettings(
+          organization.id,
+        );
+
         // Check if auto-update is enabled
         if (!currencySettings.currencyAutoUpdateRates) {
           continue;
@@ -591,16 +609,21 @@ export class SchedulerService {
         // Check update frequency
         if (currencySettings.currencyUpdateFrequency === 'monthly') {
           // Check exchange rate source
-          if (currencySettings.currencyExchangeRateSource === 'api' || 
-              currencySettings.currencyExchangeRateSource === 'auto') {
+          if (
+            currencySettings.currencyExchangeRateSource === 'api' ||
+            currencySettings.currencyExchangeRateSource === 'auto'
+          ) {
             await this.forexRateService.updateRates(organization);
-            this.logger.log(`Updated exchange rates for organization: ${organization.name}`);
+            this.logger.log(
+              `Updated exchange rates for organization: ${organization.name}`,
+            );
           }
         }
       } catch (error) {
-        this.logger.error(`Failed to update exchange rates for organization ${organization.id}: ${error.message}`);
+        this.logger.error(
+          `Failed to update exchange rates for organization ${organization.id}: ${error.message}`,
+        );
       }
     }
   }
-
 }
