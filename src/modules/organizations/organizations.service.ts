@@ -16,8 +16,10 @@ import { LicenseKeysService } from '../license-keys/license-keys.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { AuditAction } from '../../common/enums/audit-action.enum';
 import { UpgradeLicenseDto } from './dto/upgrade-license.dto';
+import { ChangePlanTypeDto } from './dto/change-plan-type.dto';
 import { RegionConfigService } from '../region-config/region-config.service';
 import { Region } from '../../common/enums/region.enum';
+import { PlanType } from '../../common/enums/plan-type.enum';
 
 @Injectable()
 export class OrganizationsService {
@@ -233,6 +235,81 @@ export class OrganizationsService {
               to: newLicense.storageQuotaMb,
             }
           : undefined,
+      },
+    });
+
+    return updatedOrganization;
+  }
+
+  async changePlanType(
+    organizationId: string,
+    userId: string,
+    dto: ChangePlanTypeDto,
+  ): Promise<Organization> {
+    const organization = await this.findById(organizationId);
+
+    const oldPlanType = organization.planType;
+    const newPlanType = dto.planType;
+
+    // If plan type hasn't changed, no need to update
+    if (oldPlanType === newPlanType) {
+      return organization;
+    }
+
+    // Update organization with new plan type
+    organization.planType = newPlanType;
+
+    // Define plan hierarchy for storage quota updates
+    const planHierarchy: Record<PlanType, number> = {
+      [PlanType.FREE]: 0,
+      [PlanType.STANDARD]: 1,
+      [PlanType.PREMIUM]: 2,
+      [PlanType.ENTERPRISE]: 3,
+    };
+
+    const oldTier = planHierarchy[oldPlanType] ?? 0;
+    const newTier = planHierarchy[newPlanType] ?? 0;
+
+    // Update storage quota based on plan type
+    // If upgrading to a higher tier, increase quota if current quota is lower than new tier's default
+    // If downgrading, keep existing quota (don't reduce it automatically)
+    if (newPlanType === PlanType.ENTERPRISE) {
+      const enterpriseQuota = 10000; // 10GB
+      if (!organization.storageQuotaMb || organization.storageQuotaMb < enterpriseQuota) {
+        organization.storageQuotaMb = enterpriseQuota;
+      }
+    } else if (newPlanType === PlanType.PREMIUM) {
+      const premiumQuota = 5000; // 5GB
+      if (!organization.storageQuotaMb || (newTier > oldTier && organization.storageQuotaMb < premiumQuota)) {
+        organization.storageQuotaMb = premiumQuota;
+      }
+    } else if (newPlanType === PlanType.STANDARD) {
+      const standardQuota = 2000; // 2GB
+      if (!organization.storageQuotaMb || (newTier > oldTier && organization.storageQuotaMb < standardQuota)) {
+        organization.storageQuotaMb = standardQuota;
+      }
+    } else if (newPlanType === PlanType.FREE) {
+      // For free plan, don't set a quota (keep existing or null)
+      // Don't automatically reduce quota on downgrade
+    }
+
+    // Save organization
+    const updatedOrganization =
+      await this.organizationsRepository.save(organization);
+
+    // Record audit log for the plan type change
+    await this.auditLogsService.record({
+      organizationId,
+      userId,
+      entityType: 'Organization',
+      entityId: organizationId,
+      action: AuditAction.UPDATE,
+      changes: {
+        planType: {
+          from: oldPlanType,
+          to: newPlanType,
+        },
+        note: 'Plan type changed manually by super admin',
       },
     });
 

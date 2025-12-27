@@ -18,6 +18,7 @@ import { UpdateOrganizationDto } from './dto/update-organization.dto';
 import { ChangeOrganizationStatusDto } from './dto/change-status.dto';
 import { ActivateOrganizationWithExpiryDto } from './dto/activate-with-expiry.dto';
 import { UpgradeLicenseDto } from './dto/upgrade-license.dto';
+import { ChangePlanTypeDto } from './dto/change-plan-type.dto';
 import {
   AuthenticatedUser,
   CurrentUser,
@@ -122,6 +123,28 @@ export class OrganizationsController {
       status: updated.status,
       storageQuotaMb: updated.storageQuotaMb,
       message: 'License upgraded successfully',
+    };
+  }
+
+  @Patch(':id/plan-type')
+  @Roles(UserRole.SUPERADMIN)
+  async changePlanType(
+    @Param('id', new ParseUUIDPipe()) organizationId: string,
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: ChangePlanTypeDto,
+  ) {
+    const updated = await this.organizationsService.changePlanType(
+      organizationId,
+      user?.userId as string,
+      dto,
+    );
+    return {
+      id: updated.id,
+      name: updated.name,
+      planType: updated.planType,
+      status: updated.status,
+      storageQuotaMb: updated.storageQuotaMb,
+      message: 'Plan type changed successfully',
     };
   }
 
