@@ -298,7 +298,8 @@ export class LicenseKeysService {
     const planHierarchy: Record<PlanType, number> = {
       [PlanType.FREE]: 0,
       [PlanType.STANDARD]: 1,
-      [PlanType.ENTERPRISE]: 2,
+      [PlanType.PREMIUM]: 2,
+      [PlanType.ENTERPRISE]: 3,
     };
 
     const newPlanType = license.planType ?? PlanType.FREE;
