@@ -104,6 +104,95 @@ export class SalesInvoicesService {
   }
 
   /**
+   * Get previously used invoice items for suggestions
+   * Returns unique item names with their most recent details (unit price, VAT rate, etc.)
+   */
+  async getItemSuggestions(
+    organizationId: string,
+    searchTerm?: string,
+  ): Promise<
+    Array<{
+      itemName: string;
+      description?: string;
+      unitPrice: number;
+      vatRate: number;
+      vatTaxType: string;
+      unitOfMeasure?: string;
+      usageCount: number;
+    }>
+  > {
+    const query = this.lineItemsRepository
+      .createQueryBuilder('item')
+      .innerJoin('item.invoice', 'invoice')
+      .where('invoice.organization_id = :organizationId', { organizationId })
+      .andWhere('invoice.is_deleted = false')
+      .andWhere('item.is_deleted = false');
+
+    if (searchTerm && searchTerm.trim().length > 0) {
+      query.andWhere('item.item_name ILIKE :searchTerm', {
+        searchTerm: `%${searchTerm.trim()}%`,
+      });
+    }
+
+    // Get all matching items ordered by most recent first
+    const items = await query
+      .orderBy('invoice.invoice_date', 'DESC')
+      .addOrderBy('item.created_at', 'DESC')
+      .getMany();
+
+    // Group by itemName and get the most recent details for each
+    const itemMap = new Map<
+      string,
+      {
+        itemName: string;
+        description?: string;
+        unitPrice: number;
+        vatRate: number;
+        vatTaxType: string;
+        unitOfMeasure?: string;
+        usageCount: number;
+        lastUsed: Date;
+      }
+    >();
+
+    for (const item of items) {
+      const itemName = item.itemName.trim();
+      const existing = itemMap.get(itemName);
+
+      if (!existing || new Date(item.createdAt) > existing.lastUsed) {
+        itemMap.set(itemName, {
+          itemName,
+          description: item.description || undefined,
+          unitPrice: parseFloat(item.unitPrice),
+          vatRate: parseFloat(item.vatRate),
+          vatTaxType: item.vatTaxType || 'STANDARD',
+          unitOfMeasure: item.unitOfMeasure || undefined,
+          usageCount: (existing?.usageCount || 0) + 1,
+          lastUsed: new Date(item.createdAt),
+        });
+      } else {
+        // Increment usage count
+        existing.usageCount++;
+      }
+    }
+
+    // Convert to array and sort by usage count (most used first), then by last used
+    const suggestions = Array.from(itemMap.values())
+      .sort((a, b) => {
+        // First sort by usage count (descending)
+        if (b.usageCount !== a.usageCount) {
+          return b.usageCount - a.usageCount;
+        }
+        // Then by last used (most recent first)
+        return b.lastUsed.getTime() - a.lastUsed.getTime();
+      })
+      .map(({ lastUsed, ...rest }) => rest) // Remove lastUsed from result
+      .slice(0, 20); // Limit to top 20 suggestions
+
+    return suggestions;
+  }
+
+  /**
    * Find invoice by public token (for public viewing)
    */
   async findByPublicToken(token: string): Promise<SalesInvoice> {

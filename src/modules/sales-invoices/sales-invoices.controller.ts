@@ -57,6 +57,19 @@ export class SalesInvoicesController {
     return { invoiceNumber };
   }
 
+  @Get('item-suggestions')
+  @UseGuards(JwtAuthGuard, RolesGuard, TenantGuard)
+  @Roles(UserRole.ADMIN, UserRole.ACCOUNTANT)
+  async getItemSuggestions(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query('search') searchTerm?: string,
+  ) {
+    return this.salesInvoicesService.getItemSuggestions(
+      user?.organizationId as string,
+      searchTerm,
+    );
+  }
+
   @Get('payments')
   @UseGuards(JwtAuthGuard, RolesGuard, TenantGuard)
   @Roles(UserRole.ADMIN, UserRole.ACCOUNTANT, UserRole.EMPLOYEE)

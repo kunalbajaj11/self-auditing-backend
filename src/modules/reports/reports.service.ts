@@ -355,13 +355,13 @@ export class ReportsService {
 
     // Always add AP account if there's any balance (opening or closing)
     if (accrualsAtStart > 0 || accrualsAtEnd > 0 || accrualsPeriodDebit > 0 || accrualsPeriodCredit > 0) {
-      accounts.push({
-        accountName: 'Accounts Payable',
-        accountType: 'Liability',
-        debit: accrualsPeriodDebit,
+    accounts.push({
+      accountName: 'Accounts Payable',
+      accountType: 'Liability',
+      debit: accrualsPeriodDebit,
         credit: accrualsPeriodCredit + (accrualsAtStart > 0 ? accrualsAtStart : 0), // Include opening balance in credit
         balance: apClosingBalance, // Closing balance (positive = credit for liability)
-      });
+    });
     }
 
     const creditNoteApplicationsSubqueryEnd =
@@ -454,13 +454,13 @@ export class ReportsService {
 
     // Always add AR account if there's any balance (opening or closing)
     if (arAtStart > 0 || arAtEnd > 0 || arPeriodDebit > 0 || arPeriodCredit > 0) {
-      accounts.push({
-        accountName: 'Accounts Receivable',
-        accountType: 'Asset',
+    accounts.push({
+      accountName: 'Accounts Receivable',
+      accountType: 'Asset',
         debit: arPeriodDebit + (arAtStart > 0 ? arAtStart : 0), // Include opening balance in debit
-        credit: arPeriodCredit,
+      credit: arPeriodCredit,
         balance: arClosingBalance, // Closing balance (positive = debit for asset)
-      });
+    });
     }
 
     const vatReceivableQuery = this.expensesRepository
