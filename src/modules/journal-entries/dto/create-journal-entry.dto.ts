@@ -49,6 +49,23 @@ export class CreateJournalEntryDto {
 
   @IsOptional()
   @IsString()
+  vendorTrn?: string;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  vatAmount?: number;
+
+  @IsOptional()
+  @IsString()
+  vatTaxType?: string; // 'standard', 'zero_rated', 'exempt', 'reverse_charge'
+
+  @IsOptional()
+  @IsString()
+  subAccount?: string; // For sub-heads like "Prepaid Rent" under "Prepaid Expenses"
+
+  @IsOptional()
+  @IsString()
   attachmentId?: string;
 
   @IsOptional()

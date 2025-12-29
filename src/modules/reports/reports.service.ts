@@ -350,14 +350,19 @@ export class ReportsService {
       accrualsPeriodMovement < 0 ? Math.abs(accrualsPeriodMovement) : 0;
     const accrualsPeriodCredit =
       accrualsPeriodMovement > 0 ? accrualsPeriodMovement : 0;
+    // Closing balance should be the total outstanding (accrualsAtEnd) as credit
+    const apClosingBalance = accrualsAtEnd;
 
-    accounts.push({
-      accountName: 'Accounts Payable',
-      accountType: 'Liability',
-      debit: accrualsPeriodDebit,
-      credit: accrualsPeriodCredit,
-      balance: accrualsPeriodCredit - accrualsPeriodDebit,
-    });
+    // Always add AP account if there's any balance (opening or closing)
+    if (accrualsAtStart > 0 || accrualsAtEnd > 0 || accrualsPeriodDebit > 0 || accrualsPeriodCredit > 0) {
+      accounts.push({
+        accountName: 'Accounts Payable',
+        accountType: 'Liability',
+        debit: accrualsPeriodDebit,
+        credit: accrualsPeriodCredit + (accrualsAtStart > 0 ? accrualsAtStart : 0), // Include opening balance in credit
+        balance: apClosingBalance, // Closing balance (positive = credit for liability)
+      });
+    }
 
     const creditNoteApplicationsSubqueryEnd =
       this.creditNoteApplicationsRepository
@@ -440,18 +445,23 @@ export class ReportsService {
     const arAtStart = receivablesAtStart + debitNotesAtStart;
     const arPeriodMovement = arAtEnd - arAtStart;
 
+    // For Trial Balance: AR should show closing balance as DEBIT
+    // Period movement: positive = increase (debit), negative = decrease (credit)
     const arPeriodDebit = arPeriodMovement > 0 ? arPeriodMovement : 0;
-    const arPeriodCredit =
-      arPeriodMovement < 0 ? Math.abs(arPeriodMovement) : 0;
-    const arPeriodBalance = arPeriodDebit - arPeriodCredit;
+    const arPeriodCredit = arPeriodMovement < 0 ? Math.abs(arPeriodMovement) : 0;
+    // Closing balance is the total outstanding (arAtEnd) - should be positive debit
+    const arClosingBalance = arAtEnd;
 
-    accounts.push({
-      accountName: 'Accounts Receivable',
-      accountType: 'Asset',
-      debit: arPeriodDebit,
-      credit: arPeriodCredit,
-      balance: arPeriodBalance,
-    });
+    // Always add AR account if there's any balance (opening or closing)
+    if (arAtStart > 0 || arAtEnd > 0 || arPeriodDebit > 0 || arPeriodCredit > 0) {
+      accounts.push({
+        accountName: 'Accounts Receivable',
+        accountType: 'Asset',
+        debit: arPeriodDebit + (arAtStart > 0 ? arAtStart : 0), // Include opening balance in debit
+        credit: arPeriodCredit,
+        balance: arClosingBalance, // Closing balance (positive = debit for asset)
+      });
+    }
 
     const vatReceivableQuery = this.expensesRepository
       .createQueryBuilder('expense')
@@ -735,6 +745,79 @@ export class ReportsService {
         });
       }
     });
+
+    // Explicitly add Capital accounts if they exist (even with zero period movement)
+    // Get opening balances for Capital accounts
+    const openingCapitalQuery = this.journalEntriesRepository
+      .createQueryBuilder('entry')
+      .select([
+        'entry.credit_account AS creditAccount',
+        'SUM(entry.amount) AS amount',
+      ])
+      .where('entry.organization_id = :organizationId', { organizationId })
+      .andWhere('entry.entry_date < :startDate', { startDate })
+      .andWhere("entry.credit_account IN ('share_capital', 'owner_shareholder_account')")
+      .groupBy('entry.credit_account');
+
+    const openingCapitalRows = await openingCapitalQuery.getRawMany();
+    const openingCapitalMap = new Map<string, number>();
+    openingCapitalRows.forEach((row) => {
+      const accountCode = row.creditaccount || row.creditAccount;
+      openingCapitalMap.set(accountCode, Number(row.amount || 0));
+    });
+
+    // Get period movements for Capital accounts
+    const periodCapitalQuery = this.journalEntriesRepository
+      .createQueryBuilder('entry')
+      .select([
+        'entry.credit_account AS creditAccount',
+        'SUM(entry.amount) AS amount',
+      ])
+      .where('entry.organization_id = :organizationId', { organizationId })
+      .andWhere('entry.entry_date >= :startDate', { startDate })
+      .andWhere('entry.entry_date <= :endDate', { endDate })
+      .andWhere("entry.credit_account IN ('share_capital', 'owner_shareholder_account')")
+      .groupBy('entry.credit_account');
+
+    const periodCapitalRows = await periodCapitalQuery.getRawMany();
+    
+    // Add Share Capital if it exists (always show if there's any balance)
+    const shareCapitalOpening = openingCapitalMap.get('share_capital') || 0;
+    const shareCapitalPeriod = periodCapitalRows.find(
+      (r) => (r.creditaccount || r.creditAccount) === 'share_capital'
+    );
+    const shareCapitalPeriodAmount = shareCapitalPeriod ? Number(shareCapitalPeriod.amount || 0) : 0;
+    const shareCapitalClosing = shareCapitalOpening + shareCapitalPeriodAmount;
+    
+    // Always add Share Capital if there's any balance
+    if (shareCapitalOpening > 0 || shareCapitalPeriodAmount > 0 || shareCapitalClosing > 0) {
+      accounts.push({
+        accountName: 'Share Capital',
+        accountType: 'Equity',
+        debit: 0,
+        credit: shareCapitalPeriodAmount + (shareCapitalOpening > 0 ? shareCapitalOpening : 0),
+        balance: shareCapitalClosing, // Closing balance (positive = credit for equity)
+      });
+    }
+
+    // Add Owner/Shareholder Account if it exists (always show if there's any balance)
+    const ownerAccountOpening = openingCapitalMap.get('owner_shareholder_account') || 0;
+    const ownerAccountPeriod = periodCapitalRows.find(
+      (r) => (r.creditaccount || r.creditAccount) === 'owner_shareholder_account'
+    );
+    const ownerAccountPeriodAmount = ownerAccountPeriod ? Number(ownerAccountPeriod.amount || 0) : 0;
+    const ownerAccountClosing = ownerAccountOpening + ownerAccountPeriodAmount;
+    
+    // Always add Owner/Shareholder Account if there's any balance
+    if (ownerAccountOpening > 0 || ownerAccountPeriodAmount > 0 || ownerAccountClosing > 0) {
+      accounts.push({
+        accountName: 'Owner/Shareholder Account',
+        accountType: 'Equity',
+        debit: 0,
+        credit: ownerAccountPeriodAmount + (ownerAccountOpening > 0 ? ownerAccountOpening : 0),
+        balance: ownerAccountClosing, // Closing balance (positive = credit for equity)
+      });
+    }
 
     const openingBalances = new Map<
       string,
@@ -2421,6 +2504,52 @@ export class ReportsService {
 
     const closingBalance = openingBalance + periodAmount;
 
+    // Group by supplier to calculate pending balance per supplier
+    const supplierBalances = new Map<string, {
+      vendor: string;
+      totalAmount: number;
+      itemCount: number;
+      overdueAmount: number;
+      overdueCount: number;
+    }>();
+
+    rows.forEach((row) => {
+      const vendor = row.vendor || 'N/A';
+      const amount = Number(row.amount || 0);
+      const isOverdue =
+        row.status === AccrualStatus.PENDING_SETTLEMENT &&
+        (row.expecteddate || row.expectedDate) &&
+        new Date(row.expecteddate || row.expectedDate) < new Date(asOfDate);
+
+      const existing = supplierBalances.get(vendor) || {
+        vendor,
+        totalAmount: 0,
+        itemCount: 0,
+        overdueAmount: 0,
+        overdueCount: 0,
+      };
+
+      existing.totalAmount += amount;
+      existing.itemCount += 1;
+      if (isOverdue) {
+        existing.overdueAmount += amount;
+        existing.overdueCount += 1;
+      }
+
+      supplierBalances.set(vendor, existing);
+    });
+
+    // Convert supplier balances to array
+    const supplierSummary = Array.from(supplierBalances.values())
+      .map((s) => ({
+        vendor: s.vendor,
+        pendingBalance: Number(s.totalAmount.toFixed(2)),
+        itemCount: s.itemCount,
+        overdueAmount: Number(s.overdueAmount.toFixed(2)),
+        overdueCount: s.overdueCount,
+      }))
+      .sort((a, b) => b.pendingBalance - a.pendingBalance); // Sort by balance descending
+
     return {
       asOfDate,
       period: startDate ? { startDate, endDate: asOfDate } : undefined,
@@ -2438,6 +2567,7 @@ export class ReportsService {
           (row.expecteddate || row.expectedDate) &&
           new Date(row.expecteddate || row.expectedDate) < new Date(asOfDate),
       })),
+      supplierSummary, // Add supplier-level summary with pending balances
       summary: {
         openingBalance: Number(openingBalance.toFixed(2)),
         periodAmount: Number(periodAmount.toFixed(2)),
@@ -2451,6 +2581,7 @@ export class ReportsService {
         pendingItems: rows.filter(
           (r) => r.status === AccrualStatus.PENDING_SETTLEMENT,
         ).length,
+        totalSuppliers: supplierSummary.length,
       },
     };
   }

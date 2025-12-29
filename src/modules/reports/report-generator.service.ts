@@ -3375,6 +3375,32 @@ export class ReportGeneratorService {
         currency,
       );
     }
+
+    // Supplier Summary Section
+    if (data.supplierSummary && Array.isArray(data.supplierSummary) && data.supplierSummary.length > 0) {
+      doc.moveDown(0.5);
+      doc
+        .fontSize(12)
+        .font('Helvetica-Bold')
+        .fillColor(primaryColor)
+        .text('Supplier Summary (Pending Balances)', margin);
+      doc.moveDown(0.3);
+      
+      const supplierTableData = data.supplierSummary.map((s: any) => ({
+        vendor: s.vendor || 'N/A',
+        pendingBalance: s.pendingBalance || 0,
+        itemCount: s.itemCount || 0,
+        overdueAmount: s.overdueAmount || 0,
+        overdueCount: s.overdueCount || 0,
+      }));
+
+      this.addPDFTable(
+        doc,
+        supplierTableData,
+        ['vendor', 'pendingBalance', 'itemCount', 'overdueAmount', 'overdueCount'],
+        currency,
+      );
+    }
   }
 
   /**
@@ -5066,11 +5092,84 @@ export class ReportGeneratorService {
       summarySheet.addRow(['Total Items', data.summary.totalItems || 0]);
       summarySheet.addRow(['Overdue Items', data.summary.overdueItems || 0]);
       summarySheet.addRow(['Overdue Amount', data.summary.overdueAmount || 0]);
+      summarySheet.addRow(['Total Suppliers', data.summary.totalSuppliers || 0]);
 
       [3, 4, 5, 7, 9].forEach((rowNum) => {
         const cell = summarySheet.getCell(`B${rowNum}`);
         cell.numFmt = `"${currency}" #,##0.00`;
       });
+    }
+
+    // Supplier Summary Sheet
+    if (data.supplierSummary && Array.isArray(data.supplierSummary) && data.supplierSummary.length > 0) {
+      const supplierSheet = workbook.addWorksheet('Supplier Summary');
+      supplierSheet.addRow([
+        'Supplier',
+        'Pending Balance',
+        'Item Count',
+        'Overdue Amount',
+        'Overdue Count',
+      ]);
+      const supplierHeaderRow = supplierSheet.getRow(1);
+      supplierHeaderRow.font = {
+        bold: true,
+        size: 11,
+        color: { argb: 'FFFFFFFF' },
+      };
+      supplierHeaderRow.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FF0077C8' },
+      };
+      supplierHeaderRow.border = {
+        top: { style: 'medium', color: { argb: 'FF005A9A' } },
+        bottom: { style: 'medium', color: { argb: 'FF005A9A' } },
+        left: { style: 'thin', color: { argb: 'FF005A9A' } },
+        right: { style: 'thin', color: { argb: 'FF005A9A' } },
+      };
+      supplierHeaderRow.height = 22;
+      supplierHeaderRow.alignment = { horizontal: 'center', vertical: 'middle' };
+
+      data.supplierSummary.forEach((supplier: any) => {
+        supplierSheet.addRow([
+          supplier.vendor || 'N/A',
+          supplier.pendingBalance || 0,
+          supplier.itemCount || 0,
+          supplier.overdueAmount || 0,
+          supplier.overdueCount || 0,
+        ]);
+      });
+
+      // Add total row
+      const totalPendingBalance = data.supplierSummary.reduce(
+        (sum: number, s: any) => sum + (s.pendingBalance || 0),
+        0,
+      );
+      const totalOverdueAmount = data.supplierSummary.reduce(
+        (sum: number, s: any) => sum + (s.overdueAmount || 0),
+        0,
+      );
+      supplierSheet.addRow([
+        'Total',
+        totalPendingBalance,
+        data.summary?.totalItems || 0,
+        totalOverdueAmount,
+        data.summary?.overdueItems || 0,
+      ]);
+      const totalRow = supplierSheet.getRow(supplierSheet.rowCount);
+      totalRow.font = { bold: true };
+      totalRow.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FFE8EEF5' },
+      };
+
+      supplierSheet.getColumn('B').numFmt = `"${currency}" #,##0.00`;
+      supplierSheet.getColumn('B').alignment = { horizontal: 'right' };
+      supplierSheet.getColumn('D').numFmt = `"${currency}" #,##0.00`;
+      supplierSheet.getColumn('D').alignment = { horizontal: 'right' };
+      supplierSheet.getColumn('C').alignment = { horizontal: 'center' };
+      supplierSheet.getColumn('E').alignment = { horizontal: 'center' };
     }
 
     // Items sheet
@@ -6130,6 +6229,9 @@ export class ReportGeneratorService {
       } else if (reportData.type === 'payables') {
         lines.push('Payables (Accruals) Report');
         lines.push('');
+        if (data.asOfDate) {
+          lines.push(`As of Date,${data.asOfDate}`);
+        }
         if (data.startDate || data.endDate) {
           lines.push(
             `Report Period,${data.startDate || 'N/A'} to ${data.endDate || 'N/A'}`,
@@ -6159,6 +6261,9 @@ export class ReportGeneratorService {
           lines.push(
             `Overdue Amount,${this.formatCurrency(data.summary.overdueAmount || 0, currency)}`,
           );
+          if (data.summary.totalSuppliers !== undefined) {
+            lines.push(`Total Suppliers,${data.summary.totalSuppliers || 0}`);
+          }
         }
         lines.push('');
         lines.push('-'.repeat(80));
@@ -6195,6 +6300,44 @@ export class ReportGeneratorService {
               ].join(','),
             );
           });
+        }
+
+        // Supplier Summary Section
+        if (data.supplierSummary && Array.isArray(data.supplierSummary) && data.supplierSummary.length > 0) {
+          lines.push('');
+          lines.push('-'.repeat(80));
+          lines.push('Supplier Summary (Pending Balances)');
+          lines.push(
+            'Supplier,Pending Balance,Item Count,Overdue Amount,Overdue Count',
+          );
+          data.supplierSummary.forEach((supplier: any) => {
+            lines.push(
+              [
+                supplier.vendor || 'N/A',
+                this.formatCurrency(supplier.pendingBalance || 0, currency),
+                supplier.itemCount || 0,
+                this.formatCurrency(supplier.overdueAmount || 0, currency),
+                supplier.overdueCount || 0,
+              ].join(','),
+            );
+          });
+          const totalPendingBalance = data.supplierSummary.reduce(
+            (sum: number, s: any) => sum + (s.pendingBalance || 0),
+            0,
+          );
+          const totalOverdueAmount = data.supplierSummary.reduce(
+            (sum: number, s: any) => sum + (s.overdueAmount || 0),
+            0,
+          );
+          lines.push(
+            [
+              'Total',
+              this.formatCurrency(totalPendingBalance, currency),
+              data.summary?.totalItems || 0,
+              this.formatCurrency(totalOverdueAmount, currency),
+              data.summary?.overdueItems || 0,
+            ].join(','),
+          );
         }
       } else if (reportData.type === 'receivables') {
         lines.push('Receivables Report');

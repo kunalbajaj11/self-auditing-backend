@@ -52,6 +52,30 @@ export class JournalEntry extends AbstractEntity {
   @Column({ name: 'customer_vendor_name', length: 200, nullable: true })
   customerVendorName?: string | null;
 
+  @Column({ name: 'vendor_trn', length: 50, nullable: true })
+  vendorTrn?: string | null;
+
+  @Column({
+    name: 'vat_amount',
+    type: 'decimal',
+    precision: 12,
+    scale: 2,
+    nullable: true,
+    default: 0,
+  })
+  vatAmount?: string | null;
+
+  @Column({
+    name: 'vat_tax_type',
+    type: 'varchar',
+    length: 50,
+    nullable: true,
+  })
+  vatTaxType?: string | null; // 'standard', 'zero_rated', 'exempt', 'reverse_charge'
+
+  @Column({ name: 'sub_account', length: 200, nullable: true })
+  subAccount?: string | null; // For sub-heads like "Prepaid Rent" under "Prepaid Expenses"
+
   @Column({ name: 'attachment_id', length: 100, nullable: true })
   attachmentId?: string | null;
 

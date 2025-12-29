@@ -81,5 +81,17 @@ export class ExpensePaymentsController {
     );
     return { message: 'Payment deleted successfully' };
   }
+
+  @Get('pending-invoices/:vendorName')
+  @Roles(UserRole.ADMIN, UserRole.ACCOUNTANT)
+  async getPendingInvoicesByVendor(
+    @Param('vendorName') vendorName: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.expensePaymentsService.getPendingInvoicesByVendor(
+      user?.organizationId as string,
+      decodeURIComponent(vendorName),
+    );
+  }
 }
 

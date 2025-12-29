@@ -135,6 +135,10 @@ export class JournalEntriesService {
       referenceNumber: dto.referenceNumber,
       customerVendorId: dto.customerVendorId,
       customerVendorName: dto.customerVendorName,
+      vendorTrn: dto.vendorTrn,
+      vatAmount: dto.vatAmount ? dto.vatAmount.toFixed(2) : null,
+      vatTaxType: dto.vatTaxType,
+      subAccount: dto.subAccount,
       attachmentId: dto.attachmentId,
       notes: dto.notes,
     });
@@ -191,6 +195,14 @@ export class JournalEntriesService {
       journalEntry.customerVendorId = dto.customerVendorId;
     if (dto.customerVendorName !== undefined)
       journalEntry.customerVendorName = dto.customerVendorName;
+    if (dto.vendorTrn !== undefined)
+      journalEntry.vendorTrn = dto.vendorTrn;
+    if (dto.vatAmount !== undefined)
+      journalEntry.vatAmount = dto.vatAmount.toFixed(2);
+    if (dto.vatTaxType !== undefined)
+      journalEntry.vatTaxType = dto.vatTaxType;
+    if (dto.subAccount !== undefined)
+      journalEntry.subAccount = dto.subAccount;
     if (dto.attachmentId !== undefined)
       journalEntry.attachmentId = dto.attachmentId;
     if (dto.notes !== undefined) journalEntry.notes = dto.notes;

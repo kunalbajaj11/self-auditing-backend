@@ -6,10 +6,11 @@ import { ExpensePayment } from '../../entities/expense-payment.entity';
 import { Expense } from '../../entities/expense.entity';
 import { Organization } from '../../entities/organization.entity';
 import { Accrual } from '../../entities/accrual.entity';
+import { PaymentAllocation } from '../../entities/payment-allocation.entity';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([ExpensePayment, Expense, Organization, Accrual]),
+    TypeOrmModule.forFeature([ExpensePayment, Expense, Organization, Accrual, PaymentAllocation]),
   ],
   providers: [ExpensePaymentsService],
   controllers: [ExpensePaymentsController],
