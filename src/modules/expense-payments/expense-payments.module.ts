@@ -10,11 +10,16 @@ import { PaymentAllocation } from '../../entities/payment-allocation.entity';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([ExpensePayment, Expense, Organization, Accrual, PaymentAllocation]),
+    TypeOrmModule.forFeature([
+      ExpensePayment,
+      Expense,
+      Organization,
+      Accrual,
+      PaymentAllocation,
+    ]),
   ],
   providers: [ExpensePaymentsService],
   controllers: [ExpensePaymentsController],
   exports: [ExpensePaymentsService],
 })
 export class ExpensePaymentsModule {}
-

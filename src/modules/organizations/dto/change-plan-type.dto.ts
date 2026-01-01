@@ -6,4 +6,3 @@ export class ChangePlanTypeDto {
   @IsNotEmpty()
   planType: PlanType;
 }
-

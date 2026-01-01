@@ -4,4 +4,3 @@ export enum DebitNoteStatus {
   APPLIED = 'applied',
   CANCELLED = 'cancelled',
 }
-

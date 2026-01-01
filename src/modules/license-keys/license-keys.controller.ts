@@ -71,8 +71,13 @@ export class LicenseKeysController {
     @CurrentUser() user: AuthenticatedUser,
   ) {
     // Superadmin can access any organization, others can only access their own
-    if (user.role !== UserRole.SUPERADMIN && user.organizationId !== organizationId) {
-      throw new ForbiddenException('You can only access your own organization\'s upload usage');
+    if (
+      user.role !== UserRole.SUPERADMIN &&
+      user.organizationId !== organizationId
+    ) {
+      throw new ForbiddenException(
+        "You can only access your own organization's upload usage",
+      );
     }
     return this.licenseKeysService.getUploadUsage(organizationId);
   }
@@ -81,9 +86,8 @@ export class LicenseKeysController {
   async getByOrganizationId(
     @Param('organizationId', new ParseUUIDPipe()) organizationId: string,
   ) {
-    const license = await this.licenseKeysService.findByOrganizationId(
-      organizationId,
-    );
+    const license =
+      await this.licenseKeysService.findByOrganizationId(organizationId);
     if (!license) {
       return null;
     }

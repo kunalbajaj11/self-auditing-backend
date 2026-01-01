@@ -16,6 +16,8 @@ import { VendorsModule } from '../vendors/vendors.module';
 import { LicenseKeysModule } from '../license-keys/license-keys.module';
 import { SettingsModule } from '../settings/settings.module';
 import { Vendor } from '../vendors/vendor.entity';
+import { Product } from '../products/product.entity';
+import { InventoryModule } from '../inventory/inventory.module';
 
 @Module({
   imports: [
@@ -27,6 +29,7 @@ import { Vendor } from '../vendors/vendor.entity';
       Attachment,
       Accrual,
       Vendor,
+      Product,
     ]),
     NotificationsModule,
     AttachmentsModule,
@@ -35,6 +38,7 @@ import { Vendor } from '../vendors/vendor.entity';
     VendorsModule,
     LicenseKeysModule,
     SettingsModule,
+    InventoryModule,
   ],
   providers: [ExpensesService],
   controllers: [ExpensesController],

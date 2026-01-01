@@ -45,4 +45,3 @@ export class ExpensePayment extends AbstractEntity {
   @Column({ type: 'text', nullable: true })
   notes?: string | null;
 }
-

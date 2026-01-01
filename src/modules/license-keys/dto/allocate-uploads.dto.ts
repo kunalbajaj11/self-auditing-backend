@@ -6,4 +6,3 @@ export class AllocateUploadsDto {
   @Min(0)
   additionalUploads: number;
 }
-

@@ -64,4 +64,3 @@ export class RegionConfigService {
     return this.getConfig(region).emailBrandName;
   }
 }
-

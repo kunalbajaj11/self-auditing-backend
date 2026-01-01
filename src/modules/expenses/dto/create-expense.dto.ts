@@ -85,6 +85,18 @@ export class CreateExpenseDto {
   linkedAccrualExpenseId?: string;
 
   @IsOptional()
+  @IsString()
+  productId?: string; // For inventory purchases
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  quantity?: number; // For inventory purchases
+
+  @IsOptional()
+  isInventoryPurchase?: boolean; // Flag to indicate this is a stock purchase
+
+  @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => AttachmentInputDto)

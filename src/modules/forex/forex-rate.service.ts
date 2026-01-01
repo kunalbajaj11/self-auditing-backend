@@ -68,18 +68,26 @@ export class ForexRateService {
     // If not found, check exchange rate source setting
     if (this.settingsService) {
       try {
-        const currencySettings = await this.settingsService.getCurrencySettings(organization.id);
+        const currencySettings = await this.settingsService.getCurrencySettings(
+          organization.id,
+        );
         const source = currencySettings.currencyExchangeRateSource || 'api';
-        
+
         // If source is manual, don't auto-fetch - return 1 and log warning
         if (source === 'manual') {
-          this.logger.warn(`Exchange rate source is set to manual for ${organization.name}. Please add exchange rate manually.`);
+          this.logger.warn(
+            `Exchange rate source is set to manual for ${organization.name}. Please add exchange rate manually.`,
+          );
           return 1;
         }
-        
+
         // If source is api or auto, fetch from API
         if (source === 'api' || source === 'auto') {
-          const rate = await this.fetchRateFromAPI(fromCurrency, toCurrency, date);
+          const rate = await this.fetchRateFromAPI(
+            fromCurrency,
+            toCurrency,
+            date,
+          );
           await this.saveRate(
             organization,
             fromCurrency,
@@ -95,7 +103,7 @@ export class ForexRateService {
         this.logger.error(`Failed to get currency settings: ${error.message}`);
       }
     }
-    
+
     // Fallback: try to fetch from API if settings service not available
     try {
       const rate = await this.fetchRateFromAPI(fromCurrency, toCurrency, date);
@@ -255,7 +263,9 @@ export class ForexRateService {
     const apiKey = process.env.FIXER_API_KEY;
     if (!apiKey) {
       // Only log once instead of for each currency
-      this.logger.debug('FIXER_API_KEY not set, skipping exchange rate updates');
+      this.logger.debug(
+        'FIXER_API_KEY not set, skipping exchange rate updates',
+      );
       return;
     }
 

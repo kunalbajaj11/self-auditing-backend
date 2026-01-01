@@ -27,10 +27,9 @@ export class DebitNotesController {
   @Get('next-debit-note-number')
   @Roles(UserRole.ADMIN, UserRole.ACCOUNTANT)
   async getNextDebitNoteNumber(@CurrentUser() user: AuthenticatedUser) {
-    const debitNoteNumber =
-      await this.debitNotesService.getNextDebitNoteNumber(
-        user?.organizationId as string,
-      );
+    const debitNoteNumber = await this.debitNotesService.getNextDebitNoteNumber(
+      user?.organizationId as string,
+    );
     return { debitNoteNumber };
   }
 
@@ -118,4 +117,3 @@ export class DebitNotesController {
     );
   }
 }
-

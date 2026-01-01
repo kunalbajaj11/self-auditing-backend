@@ -1,4 +1,15 @@
-import { IsNotEmpty, IsNumber, IsString, IsDateString, IsOptional, IsEnum, Min, IsArray, ValidateNested, ArrayMinSize } from 'class-validator';
+import {
+  IsNotEmpty,
+  IsNumber,
+  IsString,
+  IsDateString,
+  IsOptional,
+  IsEnum,
+  Min,
+  IsArray,
+  ValidateNested,
+  ArrayMinSize,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 import { PaymentMethod } from '../../../common/enums/payment-method.enum';
 
@@ -44,7 +55,9 @@ export class CreateExpensePaymentDto {
   // New: invoice-wise allocations
   @IsOptional()
   @IsArray()
-  @ArrayMinSize(1, { message: 'At least one allocation is required when using allocations' })
+  @ArrayMinSize(1, {
+    message: 'At least one allocation is required when using allocations',
+  })
   @ValidateNested({ each: true })
   @Type(() => PaymentAllocationDto)
   allocations?: PaymentAllocationDto[];
@@ -54,4 +67,3 @@ export class CreateExpensePaymentDto {
   @IsString()
   vendorName?: string;
 }
-

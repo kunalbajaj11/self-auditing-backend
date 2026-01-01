@@ -34,7 +34,9 @@ export class JournalEntriesService {
     const query = this.journalEntriesRepository
       .createQueryBuilder('journalEntry')
       .leftJoinAndSelect('journalEntry.user', 'user')
-      .where('journalEntry.organization_id = :organizationId', { organizationId })
+      .where('journalEntry.organization_id = :organizationId', {
+        organizationId,
+      })
       .andWhere('journalEntry.is_deleted = false');
 
     if (filters.debitAccount) {
@@ -72,10 +74,7 @@ export class JournalEntriesService {
     return query.getMany();
   }
 
-  async findById(
-    organizationId: string,
-    id: string,
-  ): Promise<JournalEntry> {
+  async findById(organizationId: string, id: string): Promise<JournalEntry> {
     const journalEntry = await this.journalEntriesRepository.findOne({
       where: { id, organization: { id: organizationId } },
       relations: ['user'],
@@ -167,7 +166,7 @@ export class JournalEntriesService {
     // Validate: Debit and Credit accounts must be different
     const debitAccount = dto.debitAccount ?? journalEntry.debitAccount;
     const creditAccount = dto.creditAccount ?? journalEntry.creditAccount;
-    
+
     if (debitAccount === creditAccount) {
       throw new BadRequestException(
         'Debit account and credit account cannot be the same',
@@ -184,25 +183,25 @@ export class JournalEntriesService {
       );
     }
 
-    if (dto.debitAccount !== undefined) journalEntry.debitAccount = dto.debitAccount;
-    if (dto.creditAccount !== undefined) journalEntry.creditAccount = dto.creditAccount;
+    if (dto.debitAccount !== undefined)
+      journalEntry.debitAccount = dto.debitAccount;
+    if (dto.creditAccount !== undefined)
+      journalEntry.creditAccount = dto.creditAccount;
     if (dto.amount !== undefined) journalEntry.amount = dto.amount.toFixed(2);
     if (dto.entryDate !== undefined) journalEntry.entryDate = dto.entryDate;
-    if (dto.description !== undefined) journalEntry.description = dto.description;
+    if (dto.description !== undefined)
+      journalEntry.description = dto.description;
     if (dto.referenceNumber !== undefined)
       journalEntry.referenceNumber = dto.referenceNumber;
     if (dto.customerVendorId !== undefined)
       journalEntry.customerVendorId = dto.customerVendorId;
     if (dto.customerVendorName !== undefined)
       journalEntry.customerVendorName = dto.customerVendorName;
-    if (dto.vendorTrn !== undefined)
-      journalEntry.vendorTrn = dto.vendorTrn;
+    if (dto.vendorTrn !== undefined) journalEntry.vendorTrn = dto.vendorTrn;
     if (dto.vatAmount !== undefined)
       journalEntry.vatAmount = dto.vatAmount.toFixed(2);
-    if (dto.vatTaxType !== undefined)
-      journalEntry.vatTaxType = dto.vatTaxType;
-    if (dto.subAccount !== undefined)
-      journalEntry.subAccount = dto.subAccount;
+    if (dto.vatTaxType !== undefined) journalEntry.vatTaxType = dto.vatTaxType;
+    if (dto.subAccount !== undefined) journalEntry.subAccount = dto.subAccount;
     if (dto.attachmentId !== undefined)
       journalEntry.attachmentId = dto.attachmentId;
     if (dto.notes !== undefined) journalEntry.notes = dto.notes;
@@ -237,4 +236,3 @@ export class JournalEntriesService {
     });
   }
 }
-

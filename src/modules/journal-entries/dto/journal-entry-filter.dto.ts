@@ -26,4 +26,3 @@ export class JournalEntryFilterDto {
   @IsString()
   referenceNumber?: string;
 }
-

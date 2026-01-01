@@ -1,19 +1,19 @@
 /**
  * Migration Script: Convert old journal entry structure to new structure
- * 
+ *
  * This script migrates existing journal entries from:
  * - type/category/status → debitAccount/creditAccount
- * 
+ *
  * Migration Rules:
  * 1. Cash/Bank entries (status: cash_paid, bank_paid, cash_received, bank_received)
  *    - Debit: Cash/Bank (for received) or Credit: Cash/Bank (for paid)
  *    - Opposite side based on type/category
- * 
+ *
  * 2. Equity entries (category: equity)
  *    - share_capital → Credit: Share Capital, Debit: Cash/Bank or other
  *    - retained_earnings → Credit: Retained Earnings, Debit: other
  *    - shareholder_account → Debit: Owner/Shareholder Account, Credit: Cash/Bank or other
- * 
+ *
  * 3. Other entries
  *    - prepaid → Debit: Prepaid Expenses, Credit: Cash/Bank or Accounts Payable
  *    - accrued_income → Debit: Accrued Income, Credit: Sales Revenue
@@ -25,9 +25,11 @@ import { DataSource } from 'typeorm';
 import { JournalEntry } from '../../../entities/journal-entry.entity';
 import { JournalEntryAccount } from '../../../common/enums/journal-entry-account.enum';
 
-export async function migrateJournalEntries(dataSource: DataSource): Promise<void> {
+export async function migrateJournalEntries(
+  dataSource: DataSource,
+): Promise<void> {
   const journalEntryRepository = dataSource.getRepository(JournalEntry);
-  
+
   // Get all entries that haven't been migrated (still have legacy fields)
   const entries = await journalEntryRepository.find({
     where: {
@@ -51,7 +53,8 @@ export async function migrateJournalEntries(dataSource: DataSource): Promise<voi
 
       // Get legacy fields
       const legacyType = (entry as any).type || (entry as any).legacyType;
-      const legacyCategory = (entry as any).category || (entry as any).legacyCategory;
+      const legacyCategory =
+        (entry as any).category || (entry as any).legacyCategory;
       const legacyStatus = (entry as any).status || (entry as any).legacyStatus;
 
       if (!legacyType || !legacyCategory || !legacyStatus) {
@@ -70,7 +73,7 @@ export async function migrateJournalEntries(dataSource: DataSource): Promise<voi
       ) {
         // Cash/Bank received - debit Cash/Bank
         debitAccount = JournalEntryAccount.CASH_BANK;
-        
+
         // Credit side based on type
         if (legacyType === 'share_capital') {
           creditAccount = JournalEntryAccount.SHARE_CAPITAL;
@@ -79,13 +82,10 @@ export async function migrateJournalEntries(dataSource: DataSource): Promise<voi
         } else {
           creditAccount = JournalEntryAccount.SALES_REVENUE; // Default
         }
-      } else if (
-        legacyStatus === 'cash_paid' ||
-        legacyStatus === 'bank_paid'
-      ) {
+      } else if (legacyStatus === 'cash_paid' || legacyStatus === 'bank_paid') {
         // Cash/Bank paid - credit Cash/Bank
         creditAccount = JournalEntryAccount.CASH_BANK;
-        
+
         // Debit side based on type
         if (legacyType === 'shareholder_account') {
           debitAccount = JournalEntryAccount.OWNER_SHAREHOLDER_ACCOUNT;
@@ -134,7 +134,7 @@ export async function migrateJournalEntries(dataSource: DataSource): Promise<voi
       // Update entry
       (entry as any).debitAccount = debitAccount;
       (entry as any).creditAccount = creditAccount;
-      
+
       // Preserve legacy fields for reference
       (entry as any).legacyType = legacyType;
       (entry as any).legacyCategory = legacyCategory;
@@ -157,4 +157,3 @@ export async function migrateJournalEntries(dataSource: DataSource): Promise<voi
   console.log(`- Skipped: ${skipped}`);
   console.log(`- Errors: ${errors}`);
 }
-

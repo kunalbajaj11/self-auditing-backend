@@ -23,6 +23,10 @@ import { ReportGeneratorService } from '../reports/report-generator.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { SettingsService } from '../settings/settings.service';
 import { VatTaxType } from '../../common/enums/vat-tax-type.enum';
+import { InventoryService } from '../inventory/inventory.service';
+import { Product } from '../products/product.entity';
+import { StockMovementType } from '../../common/enums/stock-movement-type.enum';
+import { PlanType } from '../../common/enums/plan-type.enum';
 import * as crypto from 'crypto';
 
 @Injectable()
@@ -42,10 +46,13 @@ export class SalesInvoicesService {
     private readonly usersRepository: Repository<User>,
     @InjectRepository(Customer)
     private readonly customersRepository: Repository<Customer>,
+    @InjectRepository(Product)
+    private readonly productsRepository: Repository<Product>,
     private readonly emailService: EmailService,
     private readonly reportGeneratorService: ReportGeneratorService,
     private readonly auditLogsService: AuditLogsService,
     private readonly settingsService: SettingsService,
+    private readonly inventoryService: InventoryService,
     private readonly dataSource: DataSource,
   ) {}
 
@@ -568,7 +575,7 @@ export class SalesInvoicesService {
         
         const vatAmount = amount * (itemVatRate / 100);
 
-        return this.lineItemsRepository.create({
+        const lineItem = this.lineItemsRepository.create({
           invoice: savedInvoice,
           organization,
           itemName: item.itemName,
@@ -582,9 +589,83 @@ export class SalesInvoicesService {
           vatAmount: vatAmount.toString(),
           lineNumber: index + 1,
         });
+
+        // Link product if productId is provided
+        if (item.productId) {
+          lineItem.product = { id: item.productId } as Product;
+        }
+
+        return lineItem;
       });
 
-      await this.lineItemsRepository.save(lineItems);
+      const savedLineItems = await this.lineItemsRepository.save(lineItems);
+
+      // Record stock movements for line items with products
+      // Only for Premium and Enterprise plans (inventory feature)
+      const org = await this.organizationsRepository.findOne({
+        where: { id: organizationId },
+        select: ['id', 'planType'],
+      });
+
+      const hasInventoryAccess =
+        org?.planType === PlanType.PREMIUM ||
+        org?.planType === PlanType.ENTERPRISE;
+
+      if (hasInventoryAccess) {
+        for (const lineItem of savedLineItems) {
+          if (lineItem.product?.id && lineItem.quantity) {
+            try {
+              // Get default location or first location
+              const locations = await this.inventoryService.findAllLocations(
+                organizationId,
+              );
+
+              if (locations.length === 0) {
+                console.warn(
+                  `No inventory locations found for organization ${organizationId}. Skipping stock movement for invoice ${savedInvoice.id}.`,
+                );
+                continue;
+              }
+
+              const location = locations.find((l) => l.isDefault) || locations[0];
+
+              if (location) {
+              // Get product to get cost price
+              const product = await this.productsRepository.findOne({
+                where: { id: lineItem.product.id },
+              });
+
+              const unitCost = product?.costPrice
+                ? parseFloat(product.costPrice)
+                : product?.averageCost
+                  ? parseFloat(product.averageCost)
+                  : parseFloat(lineItem.unitPrice || '0');
+
+              await this.inventoryService.recordStockMovement(
+                organizationId,
+                userId,
+                {
+                  productId: lineItem.product.id,
+                  locationId: location.id,
+                  movementType: StockMovementType.SALE,
+                  quantity: -parseFloat(lineItem.quantity), // Negative for sales
+                  unitCost,
+                  referenceType: 'sales_invoice',
+                  referenceId: savedInvoice.id,
+                  notes: `Sale via invoice ${savedInvoice.invoiceNumber}`,
+                },
+              );
+              }
+            } catch (error) {
+              // Log error but don't fail invoice creation
+              console.error(
+                `Failed to record stock movement for line item ${lineItem.id}:`,
+                error,
+              );
+            }
+          }
+        }
+      }
     }
 
     return this.findById(organizationId, savedInvoice.id);

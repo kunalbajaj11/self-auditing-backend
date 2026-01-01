@@ -42,10 +42,7 @@ export class JournalEntriesController {
 
   @Get(':id')
   @Roles(UserRole.ADMIN, UserRole.ACCOUNTANT)
-  async get(
-    @Param('id') id: string,
-    @CurrentUser() user: AuthenticatedUser,
-  ) {
+  async get(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {
     return this.journalEntriesService.findById(
       user?.organizationId as string,
       id,
@@ -85,11 +82,7 @@ export class JournalEntriesController {
     @Param('id') id: string,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    await this.journalEntriesService.delete(
-      user?.organizationId as string,
-      id,
-    );
+    await this.journalEntriesService.delete(user?.organizationId as string, id);
     return { message: 'Journal entry deleted successfully' };
   }
 }
-

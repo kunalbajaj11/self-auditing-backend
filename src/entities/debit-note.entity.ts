@@ -133,10 +133,6 @@ export class DebitNote extends AbstractEntity {
   })
   appliedAmount?: string | null;
 
-  @OneToMany(
-    () => DebitNoteApplication,
-    (application) => application.debitNote,
-  )
+  @OneToMany(() => DebitNoteApplication, (application) => application.debitNote)
   applications: DebitNoteApplication[];
 }
-

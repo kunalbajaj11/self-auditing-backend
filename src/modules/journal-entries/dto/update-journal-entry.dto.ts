@@ -16,9 +16,13 @@ export class UpdateJournalEntryDto {
 
   @IsOptional()
   @IsEnum(JournalEntryAccount)
-  @ValidateIf((o) => o.debitAccount && o.creditAccount && o.debitAccount !== o.creditAccount, {
-    message: 'Debit account and credit account cannot be the same',
-  })
+  @ValidateIf(
+    (o) =>
+      o.debitAccount && o.creditAccount && o.debitAccount !== o.creditAccount,
+    {
+      message: 'Debit account and credit account cannot be the same',
+    },
+  )
   creditAccount?: JournalEntryAccount;
 
   @IsOptional()
@@ -71,4 +75,3 @@ export class UpdateJournalEntryDto {
   @IsString()
   notes?: string;
 }
-

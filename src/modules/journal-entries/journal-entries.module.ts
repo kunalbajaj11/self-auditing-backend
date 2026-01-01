@@ -17,4 +17,3 @@ import { AuditLogsModule } from '../audit-logs/audit-logs.module';
   exports: [JournalEntriesService],
 })
 export class JournalEntriesModule {}
-

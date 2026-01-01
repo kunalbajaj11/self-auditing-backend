@@ -46,7 +46,7 @@ export class SettingsController {
     const settings = await this.settingsService.getInvoiceTemplate(
       user?.organizationId as string,
     );
-    
+
     // Return proxy URL for logo if configured (to serve from private bucket)
     return {
       ...settings,

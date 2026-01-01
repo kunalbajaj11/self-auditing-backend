@@ -108,4 +108,3 @@ export class JournalEntry extends AbstractEntity {
   })
   legacyStatus?: string | null;
 }
-

@@ -342,7 +342,7 @@ export class ReportGeneratorService {
         const useLandscape = this.shouldUseLandscape(reportData.type);
         // A4 dimensions in points: 595.28 x 841.89 (210mm x 297mm)
         // For landscape, swap width and height: 841.89 x 595.28
-        const pageSize = useLandscape 
+        const pageSize = useLandscape
           ? [841.89, 595.28] // Landscape A4: width 841.89, height 595.28
           : [595.28, 841.89]; // Portrait A4: width 595.28, height 841.89
         const doc = new PDFDocument({
@@ -3377,7 +3377,11 @@ export class ReportGeneratorService {
     }
 
     // Supplier Summary Section
-    if (data.supplierSummary && Array.isArray(data.supplierSummary) && data.supplierSummary.length > 0) {
+    if (
+      data.supplierSummary &&
+      Array.isArray(data.supplierSummary) &&
+      data.supplierSummary.length > 0
+    ) {
       doc.moveDown(0.5);
       doc
         .fontSize(12)
@@ -3385,7 +3389,7 @@ export class ReportGeneratorService {
         .fillColor(primaryColor)
         .text('Supplier Summary (Pending Balances)', margin);
       doc.moveDown(0.3);
-      
+
       const supplierTableData = data.supplierSummary.map((s: any) => ({
         vendor: s.vendor || 'N/A',
         pendingBalance: s.pendingBalance || 0,
@@ -3397,7 +3401,13 @@ export class ReportGeneratorService {
       this.addPDFTable(
         doc,
         supplierTableData,
-        ['vendor', 'pendingBalance', 'itemCount', 'overdueAmount', 'overdueCount'],
+        [
+          'vendor',
+          'pendingBalance',
+          'itemCount',
+          'overdueAmount',
+          'overdueCount',
+        ],
         currency,
       );
     }
@@ -4081,7 +4091,10 @@ export class ReportGeneratorService {
 
       // Row background (alternating)
       if (index % 2 === 0) {
-        doc.rect(margin, rowY, contentWidth, rowHeight).fillColor('#f8fafc').fill();
+        doc
+          .rect(margin, rowY, contentWidth, rowHeight)
+          .fillColor('#f8fafc')
+          .fill();
       }
 
       // Row border
@@ -5092,7 +5105,10 @@ export class ReportGeneratorService {
       summarySheet.addRow(['Total Items', data.summary.totalItems || 0]);
       summarySheet.addRow(['Overdue Items', data.summary.overdueItems || 0]);
       summarySheet.addRow(['Overdue Amount', data.summary.overdueAmount || 0]);
-      summarySheet.addRow(['Total Suppliers', data.summary.totalSuppliers || 0]);
+      summarySheet.addRow([
+        'Total Suppliers',
+        data.summary.totalSuppliers || 0,
+      ]);
 
       [3, 4, 5, 7, 9].forEach((rowNum) => {
         const cell = summarySheet.getCell(`B${rowNum}`);
@@ -5101,7 +5117,11 @@ export class ReportGeneratorService {
     }
 
     // Supplier Summary Sheet
-    if (data.supplierSummary && Array.isArray(data.supplierSummary) && data.supplierSummary.length > 0) {
+    if (
+      data.supplierSummary &&
+      Array.isArray(data.supplierSummary) &&
+      data.supplierSummary.length > 0
+    ) {
       const supplierSheet = workbook.addWorksheet('Supplier Summary');
       supplierSheet.addRow([
         'Supplier',
@@ -5128,7 +5148,10 @@ export class ReportGeneratorService {
         right: { style: 'thin', color: { argb: 'FF005A9A' } },
       };
       supplierHeaderRow.height = 22;
-      supplierHeaderRow.alignment = { horizontal: 'center', vertical: 'middle' };
+      supplierHeaderRow.alignment = {
+        horizontal: 'center',
+        vertical: 'middle',
+      };
 
       data.supplierSummary.forEach((supplier: any) => {
         supplierSheet.addRow([
@@ -6303,7 +6326,11 @@ export class ReportGeneratorService {
         }
 
         // Supplier Summary Section
-        if (data.supplierSummary && Array.isArray(data.supplierSummary) && data.supplierSummary.length > 0) {
+        if (
+          data.supplierSummary &&
+          Array.isArray(data.supplierSummary) &&
+          data.supplierSummary.length > 0
+        ) {
           lines.push('');
           lines.push('-'.repeat(80));
           lines.push('Supplier Summary (Pending Balances)');

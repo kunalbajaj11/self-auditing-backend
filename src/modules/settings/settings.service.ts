@@ -1,4 +1,9 @@
-import { Injectable, NotFoundException, Optional, Inject } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  Optional,
+  Inject,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { OrganizationSettings } from '../../entities/organization-settings.entity';
@@ -40,7 +45,9 @@ export class SettingsService {
     private readonly fileStorageService: FileStorageService,
     private readonly regionConfigService: RegionConfigService,
     private readonly dataSource: DataSource,
-    @Optional() @Inject(ForexRateService) private readonly forexRateService?: ForexRateService,
+    @Optional()
+    @Inject(ForexRateService)
+    private readonly forexRateService?: ForexRateService,
   ) {}
 
   // Organization Settings
@@ -83,7 +90,8 @@ export class SettingsService {
         invoiceShowItemUnitPrice: true,
         invoiceShowItemTotal: true,
         invoiceEmailSubject: 'Invoice {{invoiceNumber}} from {{companyName}}',
-        invoiceEmailMessage: 'Please find attached invoice {{invoiceNumber}} for {{totalAmount}} {{currency}}.',
+        invoiceEmailMessage:
+          'Please find attached invoice {{invoiceNumber}} for {{totalAmount}} {{currency}}.',
         // Tax Settings Defaults from region config
         taxAuthority: regionConfig.taxAuthority,
         taxCalculationMethod: 'inclusive',
@@ -122,7 +130,7 @@ export class SettingsService {
     organizationId: string,
   ): Promise<OrganizationSettings> {
     const settings = await this.getOrCreateSettings(organizationId);
-    
+
     // Apply defaults for null/undefined values
     return {
       ...settings,
@@ -134,14 +142,19 @@ export class SettingsService {
       invoiceShowPaymentMethods: settings.invoiceShowPaymentMethods ?? true,
       invoiceShowBankDetails: settings.invoiceShowBankDetails ?? false,
       invoiceShowTermsConditions: settings.invoiceShowTermsConditions ?? true,
-      invoiceDefaultPaymentTerms: settings.invoiceDefaultPaymentTerms || 'Net 30',
+      invoiceDefaultPaymentTerms:
+        settings.invoiceDefaultPaymentTerms || 'Net 30',
       invoiceShowFooter: settings.invoiceShowFooter ?? true,
       invoiceShowItemDescription: settings.invoiceShowItemDescription ?? true,
       invoiceShowItemQuantity: settings.invoiceShowItemQuantity ?? true,
       invoiceShowItemUnitPrice: settings.invoiceShowItemUnitPrice ?? true,
       invoiceShowItemTotal: settings.invoiceShowItemTotal ?? true,
-      invoiceEmailSubject: settings.invoiceEmailSubject || 'Invoice {{invoiceNumber}} from {{companyName}}',
-      invoiceEmailMessage: settings.invoiceEmailMessage || 'Please find attached invoice {{invoiceNumber}} for {{totalAmount}} {{currency}}.',
+      invoiceEmailSubject:
+        settings.invoiceEmailSubject ||
+        'Invoice {{invoiceNumber}} from {{companyName}}',
+      invoiceEmailMessage:
+        settings.invoiceEmailMessage ||
+        'Please find attached invoice {{invoiceNumber}} for {{totalAmount}} {{currency}}.',
       taxAuthority: settings.taxAuthority || 'Federal Tax Authority',
       taxCalculationMethod: settings.taxCalculationMethod || 'inclusive',
       taxDefaultRate: settings.taxDefaultRate ?? 5.0,
@@ -172,10 +185,10 @@ export class SettingsService {
     dto: UpdateInvoiceTemplateDto,
   ): Promise<OrganizationSettings> {
     const settings = await this.getOrCreateSettings(organizationId);
-    
+
     // Create a copy of dto to avoid modifying the original
     const updateData = { ...dto };
-    
+
     // Ignore invoiceLogoUrl if it's the proxy URL (logo is only updated via upload endpoint)
     // Also ignore if it's null/undefined/empty to preserve existing logo unless explicitly removed
     if (
@@ -184,12 +197,15 @@ export class SettingsService {
       updateData.invoiceLogoUrl?.includes('settings/invoice-template/logo')
     ) {
       delete updateData.invoiceLogoUrl;
-    } else if (updateData.invoiceLogoUrl === '' || updateData.invoiceLogoUrl === null) {
+    } else if (
+      updateData.invoiceLogoUrl === '' ||
+      updateData.invoiceLogoUrl === null
+    ) {
       // Explicitly remove logo
       settings.invoiceLogoUrl = null;
       delete updateData.invoiceLogoUrl;
     }
-    
+
     Object.assign(settings, updateData);
     return this.settingsRepository.save(settings);
   }
@@ -209,9 +225,16 @@ export class SettingsService {
     }
 
     // Validate file type
-    const allowedMimeTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/svg+xml'];
+    const allowedMimeTypes = [
+      'image/jpeg',
+      'image/jpg',
+      'image/png',
+      'image/svg+xml',
+    ];
     if (!allowedMimeTypes.includes(file.mimetype)) {
-      throw new Error('Invalid file type. Only JPEG, PNG, and SVG images are allowed.');
+      throw new Error(
+        'Invalid file type. Only JPEG, PNG, and SVG images are allowed.',
+      );
     }
 
     // Validate file size (max 5MB)
@@ -242,19 +265,24 @@ export class SettingsService {
    */
   async getInvoiceLogoStream(
     organizationId: string,
-  ): Promise<{ stream: any; contentType?: string; contentLength?: number } | null> {
+  ): Promise<{
+    stream: any;
+    contentType?: string;
+    contentLength?: number;
+  } | null> {
     const settings = await this.getOrCreateSettings(organizationId);
-    
+
     if (!settings.invoiceLogoUrl) {
       return null;
     }
 
     // The invoiceLogoUrl now stores the file key
     let fileKey = settings.invoiceLogoUrl;
-    
+
     // Handle legacy URLs - extract file key from full URL if needed
     if (fileKey.startsWith('http')) {
-      fileKey = this.fileStorageService.extractFileKeyFromUrl(fileKey) || fileKey;
+      fileKey =
+        this.fileStorageService.extractFileKeyFromUrl(fileKey) || fileKey;
     }
 
     try {
@@ -273,11 +301,9 @@ export class SettingsService {
   /**
    * Get the invoice logo as a buffer for PDF generation
    */
-  async getInvoiceLogoBuffer(
-    organizationId: string,
-  ): Promise<Buffer | null> {
+  async getInvoiceLogoBuffer(organizationId: string): Promise<Buffer | null> {
     const logoStream = await this.getInvoiceLogoStream(organizationId);
-    
+
     if (!logoStream || !logoStream.stream) {
       return null;
     }
@@ -612,11 +638,11 @@ export class SettingsService {
   ): Promise<string> {
     return await this.dataSource.transaction(async (manager) => {
       const sequenceRepo = manager.getRepository(NumberingSequence);
-      
+
       // Get settings to check if sequential numbering is enabled
       const settings = await this.getOrCreateSettings(organizationId);
       const useSequential = settings.numberingUseSequential ?? true;
-      
+
       // If sequential numbering is disabled, generate a non-sequential number
       if (!useSequential) {
         // Generate date-based number: TYPE-YYYYMMDD-HHMMSS
@@ -627,10 +653,12 @@ export class SettingsService {
         const hours = String(now.getHours()).padStart(2, '0');
         const minutes = String(now.getMinutes()).padStart(2, '0');
         const seconds = String(now.getSeconds()).padStart(2, '0');
-        const prefix = this.getDefaultSequence(type).prefix || type.toUpperCase().substring(0, 3);
+        const prefix =
+          this.getDefaultSequence(type).prefix ||
+          type.toUpperCase().substring(0, 3);
         return `${prefix}-${year}${month}${day}-${hours}${minutes}${seconds}`;
       }
-      
+
       // Get sequence with pessimistic lock to prevent race conditions
       const sequence = await sequenceRepo.findOne({
         where: { organization: { id: organizationId }, type },
@@ -668,7 +696,8 @@ export class SettingsService {
 
         let shouldReset = false;
         if (sequence.resetPeriod === ResetPeriod.YEARLY) {
-          shouldReset = !lastReset || now.getFullYear() > lastReset.getFullYear();
+          shouldReset =
+            !lastReset || now.getFullYear() > lastReset.getFullYear();
         } else if (sequence.resetPeriod === ResetPeriod.QUARTERLY) {
           const currentQuarter = Math.floor(now.getMonth() / 3);
           const lastQuarter = lastReset
@@ -727,9 +756,7 @@ export class SettingsService {
     const day = String(now.getDate()).padStart(2, '0');
     const yearShort = String(year).slice(-2);
 
-    const paddedNumber = number
-      .toString()
-      .padStart(sequence.numberLength, '0');
+    const paddedNumber = number.toString().padStart(sequence.numberLength, '0');
 
     let formatted = sequence.format || `${sequence.prefix}-{YYYY}-{NNNNN}`;
 

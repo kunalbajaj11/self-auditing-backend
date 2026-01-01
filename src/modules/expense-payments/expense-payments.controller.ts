@@ -27,9 +27,7 @@ export class ExpensePaymentsController {
   @Get()
   @Roles(UserRole.ADMIN, UserRole.ACCOUNTANT)
   async list(@CurrentUser() user: AuthenticatedUser) {
-    return this.expensePaymentsService.findAll(
-      user?.organizationId as string,
-    );
+    return this.expensePaymentsService.findAll(user?.organizationId as string);
   }
 
   @Get('expense/:expenseId')
@@ -46,10 +44,7 @@ export class ExpensePaymentsController {
 
   @Get(':id')
   @Roles(UserRole.ADMIN, UserRole.ACCOUNTANT)
-  async get(
-    @Param('id') id: string,
-    @CurrentUser() user: AuthenticatedUser,
-  ) {
+  async get(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {
     return this.expensePaymentsService.findById(
       user?.organizationId as string,
       id,
@@ -94,4 +89,3 @@ export class ExpensePaymentsController {
     );
   }
 }
-

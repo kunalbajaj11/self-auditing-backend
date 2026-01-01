@@ -10,10 +10,12 @@ import { CreditNoteApplication } from '../../entities/credit-note-application.en
 import { Organization } from '../../entities/organization.entity';
 import { User } from '../../entities/user.entity';
 import { Customer } from '../customers/customer.entity';
+import { Product } from '../products/product.entity';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { ReportsModule } from '../reports/reports.module';
 import { AuditLogsModule } from '../audit-logs/audit-logs.module';
 import { SettingsModule } from '../settings/settings.module';
+import { InventoryModule } from '../inventory/inventory.module';
 
 @Module({
   imports: [
@@ -25,12 +27,14 @@ import { SettingsModule } from '../settings/settings.module';
       Organization,
       User,
       Customer,
+      Product,
     ]),
     ScheduleModule.forRoot(),
     NotificationsModule,
     ReportsModule,
     AuditLogsModule,
     SettingsModule,
+    InventoryModule,
   ],
   providers: [SalesInvoicesService],
   controllers: [SalesInvoicesController],

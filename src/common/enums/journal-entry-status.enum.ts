@@ -4,4 +4,3 @@ export enum JournalEntryStatus {
   CASH_RECEIVED = 'cash_received',
   BANK_RECEIVED = 'bank_received',
 }
-

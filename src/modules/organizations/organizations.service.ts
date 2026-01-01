@@ -275,17 +275,26 @@ export class OrganizationsService {
     // If downgrading, keep existing quota (don't reduce it automatically)
     if (newPlanType === PlanType.ENTERPRISE) {
       const enterpriseQuota = 10000; // 10GB
-      if (!organization.storageQuotaMb || organization.storageQuotaMb < enterpriseQuota) {
+      if (
+        !organization.storageQuotaMb ||
+        organization.storageQuotaMb < enterpriseQuota
+      ) {
         organization.storageQuotaMb = enterpriseQuota;
       }
     } else if (newPlanType === PlanType.PREMIUM) {
       const premiumQuota = 5000; // 5GB
-      if (!organization.storageQuotaMb || (newTier > oldTier && organization.storageQuotaMb < premiumQuota)) {
+      if (
+        !organization.storageQuotaMb ||
+        (newTier > oldTier && organization.storageQuotaMb < premiumQuota)
+      ) {
         organization.storageQuotaMb = premiumQuota;
       }
     } else if (newPlanType === PlanType.STANDARD) {
       const standardQuota = 2000; // 2GB
-      if (!organization.storageQuotaMb || (newTier > oldTier && organization.storageQuotaMb < standardQuota)) {
+      if (
+        !organization.storageQuotaMb ||
+        (newTier > oldTier && organization.storageQuotaMb < standardQuota)
+      ) {
         organization.storageQuotaMb = standardQuota;
       }
     } else if (newPlanType === PlanType.FREE) {

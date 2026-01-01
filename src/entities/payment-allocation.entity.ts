@@ -28,4 +28,3 @@ export class PaymentAllocation extends AbstractEntity {
   })
   allocatedAmount: string; // Amount allocated to this specific expense/invoice
 }
-

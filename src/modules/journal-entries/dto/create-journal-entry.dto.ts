@@ -72,4 +72,3 @@ export class CreateJournalEntryDto {
   @IsString()
   notes?: string;
 }
-

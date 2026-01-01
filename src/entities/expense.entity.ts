@@ -18,6 +18,7 @@ import { ExpenseSource } from '../common/enums/expense-source.enum';
 import { ExpenseType } from './expense-type.entity';
 import { Vendor } from '../modules/vendors/vendor.entity';
 import { VatTaxType } from '../common/enums/vat-tax-type.enum';
+import { Product } from '../modules/products/product.entity';
 
 @Entity({ name: 'expenses' })
 export class Expense extends AbstractEntity {
@@ -64,6 +65,25 @@ export class Expense extends AbstractEntity {
 
   @Column({ name: 'invoice_number', length: 100, nullable: true })
   invoiceNumber?: string | null;
+
+  @ManyToOne(() => Product, { nullable: true })
+  @JoinColumn({ name: 'product_id' })
+  product?: Product | null;
+
+  @Column({ name: 'product_id', type: 'uuid', nullable: true })
+  productId?: string | null;
+
+  @Column({
+    name: 'quantity',
+    type: 'decimal',
+    precision: 12,
+    scale: 2,
+    nullable: true,
+  })
+  quantity?: string | null; // For inventory purchases
+
+  @Column({ name: 'is_inventory_purchase', default: false })
+  isInventoryPurchase: boolean; // Flag to indicate this is a stock purchase
 
   @Column({ type: 'text', nullable: true })
   description?: string | null;

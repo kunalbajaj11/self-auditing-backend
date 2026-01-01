@@ -11,4 +11,3 @@ export interface RegionConfig {
   complianceBody: string;
   emailBrandName: string;
 }
-

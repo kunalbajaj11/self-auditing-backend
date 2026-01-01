@@ -139,7 +139,9 @@ export class LicenseKeysService {
     return savedLicense;
   }
 
-  async findAll(): Promise<(LicenseKey & { organizationName?: string | null })[]> {
+  async findAll(): Promise<
+    (LicenseKey & { organizationName?: string | null })[]
+  > {
     const licenses = await this.licenseKeysRepository.find({
       order: { createdAt: 'DESC' },
     });

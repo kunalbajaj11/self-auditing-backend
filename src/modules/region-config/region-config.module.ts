@@ -7,4 +7,3 @@ import { RegionConfigService } from './region-config.service';
   exports: [RegionConfigService],
 })
 export class RegionConfigModule {}
-

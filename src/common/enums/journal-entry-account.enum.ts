@@ -8,20 +8,20 @@ export enum JournalEntryAccount {
   ACCOUNTS_RECEIVABLE = 'accounts_receivable',
   VAT_RECEIVABLE = 'vat_receivable',
   PREPAID_EXPENSES = 'prepaid_expenses',
-  
+
   // Liabilities
   ACCOUNTS_PAYABLE = 'accounts_payable',
   VAT_PAYABLE = 'vat_payable',
   CUSTOMER_ADVANCES = 'customer_advances',
-  
+
   // Equity
   SHARE_CAPITAL = 'share_capital',
   OWNER_SHAREHOLDER_ACCOUNT = 'owner_shareholder_account',
   RETAINED_EARNINGS = 'retained_earnings', // System calculated, read-only
-  
+
   // Revenue
   SALES_REVENUE = 'sales_revenue',
-  
+
   // Expense
   GENERAL_EXPENSE = 'general_expense',
 }
@@ -132,4 +132,3 @@ export function getAccountName(code: JournalEntryAccount): string {
 export function getAccountCategory(code: JournalEntryAccount): string {
   return ACCOUNT_METADATA[code]?.category || 'asset';
 }
-

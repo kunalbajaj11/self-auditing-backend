@@ -7,4 +7,3 @@ export enum JournalEntryType {
   ACCRUED_INCOME = 'accrued_income',
   DEPRECIATION = 'depreciation',
 }
-

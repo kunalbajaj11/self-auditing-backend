@@ -7,4 +7,3 @@ export enum Region {
   QATAR = 'QATAR',
   INDIA = 'INDIA',
 }
-

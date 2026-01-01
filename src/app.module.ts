@@ -34,6 +34,9 @@ import { ExpensePaymentsModule } from './modules/expense-payments/expense-paymen
 import { SettingsModule } from './modules/settings/settings.module';
 import { JournalEntriesModule } from './modules/journal-entries/journal-entries.module';
 import { RegionConfigModule } from './modules/region-config/region-config.module';
+import { PayrollModule } from './modules/payroll/payroll.module';
+import { InventoryModule } from './modules/inventory/inventory.module';
+import { ProductsModule } from './modules/products/products.module';
 import { AppBootstrapService } from './bootstrap/app-bootstrap.service';
 import { SanitizeAttachmentsInterceptor } from './common/interceptors/sanitize-attachments.interceptor';
 
@@ -80,6 +83,9 @@ import { SanitizeAttachmentsInterceptor } from './common/interceptors/sanitize-a
     SettingsModule,
     JournalEntriesModule,
     RegionConfigModule,
+    PayrollModule,
+    InventoryModule,
+    ProductsModule,
   ],
   controllers: [AppController],
   providers: [

@@ -27,6 +27,10 @@ import { ForexRateService } from '../forex/forex-rate.service';
 import { LicenseKeysService } from '../license-keys/license-keys.service';
 import { SettingsService } from '../settings/settings.service';
 import { Vendor } from '../vendors/vendor.entity';
+import { Product } from '../products/product.entity';
+import { InventoryService } from '../inventory/inventory.service';
+import { StockMovementType } from '../../common/enums/stock-movement-type.enum';
+import { PlanType } from '../../common/enums/plan-type.enum';
 import { Repository as TypeOrmRepository } from 'typeorm';
 import { ConflictException } from '@nestjs/common';
 
@@ -51,12 +55,15 @@ export class ExpensesService {
     private readonly accrualsRepository: Repository<Accrual>,
     @InjectRepository(Vendor)
     private readonly vendorsRepository: TypeOrmRepository<Vendor>,
+    @InjectRepository(Product)
+    private readonly productsRepository: Repository<Product>,
     private readonly notificationsService: NotificationsService,
     private readonly fileStorageService: FileStorageService,
     private readonly duplicateDetectionService: DuplicateDetectionService,
     private readonly forexRateService: ForexRateService,
     private readonly licenseKeysService: LicenseKeysService,
     private readonly settingsService: SettingsService,
+    private readonly inventoryService: InventoryService,
   ) {}
 
   /**
@@ -426,6 +433,10 @@ export class ExpensesService {
       ocrConfidence:
         dto.ocrConfidence !== undefined ? dto.ocrConfidence.toFixed(2) : null,
       linkedAccrual: linkedAccrualExpense ?? null,
+      product: dto.productId ? { id: dto.productId } : null,
+      productId: dto.productId ?? null,
+      quantity: dto.quantity ? dto.quantity.toString() : null,
+      isInventoryPurchase: dto.isInventoryPurchase ?? false,
       // Note: totalAmount is a generated column (amount + vat_amount) and cannot be set manually
       // For reverse charge, we'll update it after saving (see below)
     });
@@ -473,7 +484,18 @@ export class ExpensesService {
       await this.attachmentsRepository.save(attachments);
     }
 
-    if (dto.type === ExpenseType.ACCRUAL) {
+    // Create accrual if type is ACCRUAL OR purchaseStatus is "Purchase - Accruals"
+    if (
+      dto.type === ExpenseType.ACCRUAL ||
+      dto.purchaseStatus === 'Purchase - Accruals'
+    ) {
+      // Ensure expected payment date is provided for accruals
+      if (!dto.expectedPaymentDate) {
+        throw new BadRequestException(
+          'Expected payment date is required for accrual expenses',
+        );
+      }
+
       const accrual = this.accrualsRepository.create({
         expense: saved,
         organization,
@@ -516,6 +538,84 @@ export class ExpensesService {
     if (vendor) {
       vendor.lastUsedAt = new Date();
       await this.vendorsRepository.save(vendor);
+    }
+
+    // Record stock movement if this is an inventory purchase
+    // Only for Premium and Enterprise plans (inventory feature)
+    if (
+      dto.isInventoryPurchase &&
+      dto.productId &&
+      dto.quantity &&
+      dto.quantity > 0
+    ) {
+      // Check if organization has inventory access
+      const org = await this.organizationsRepository.findOne({
+        where: { id: organizationId },
+        select: ['id', 'planType'],
+      });
+
+      const hasInventoryAccess =
+        org?.planType === PlanType.PREMIUM ||
+        org?.planType === PlanType.ENTERPRISE;
+
+      if (hasInventoryAccess) {
+        try {
+          const locations = await this.inventoryService.findAllLocations(
+            organizationId,
+          );
+
+          if (locations.length === 0) {
+            console.warn(
+              `No inventory locations found for organization ${organizationId}. Skipping stock movement for expense ${saved.id}.`,
+            );
+            return this.findById(saved.id, organizationId);
+          }
+
+          const location = locations.find((l) => l.isDefault) || locations[0];
+
+          if (location) {
+            // Calculate unit cost from expense amount
+            const unitCost =
+              dto.quantity > 0 ? expenseAmount / dto.quantity : expenseAmount;
+
+            await this.inventoryService.recordStockMovement(
+              organizationId,
+              userId,
+              {
+                productId: dto.productId,
+                locationId: location.id,
+                movementType: StockMovementType.PURCHASE,
+                quantity: dto.quantity,
+                unitCost,
+                referenceType: 'expense',
+                referenceId: saved.id,
+                notes: `Purchase via expense ${saved.invoiceNumber || saved.id}`,
+              },
+            );
+
+            // Update product cost price
+            const product = await this.productsRepository.findOne({
+              where: { id: dto.productId },
+            });
+            if (product) {
+              // Update cost price (simple average for now)
+              await this.productsRepository.update(
+                { id: dto.productId },
+                {
+                  costPrice: unitCost.toString(),
+                  averageCost: unitCost.toString(),
+                },
+              );
+            }
+          }
+        } catch (error) {
+          // Log error but don't fail expense creation
+          console.error(
+            `Failed to record stock movement for expense ${saved.id}:`,
+            error,
+          );
+        }
+      }
     }
 
     return this.findById(saved.id, organizationId);

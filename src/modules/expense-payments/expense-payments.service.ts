@@ -79,10 +79,7 @@ export class ExpensePaymentsService {
     return paymentsWithAllocations;
   }
 
-  async findById(
-    organizationId: string,
-    id: string,
-  ): Promise<ExpensePayment> {
+  async findById(organizationId: string, id: string): Promise<ExpensePayment> {
     const payment = await this.expensePaymentsRepository.findOne({
       where: { id, organization: { id: organizationId } },
       relations: ['expense'],
@@ -107,7 +104,9 @@ export class ExpensePaymentsService {
   async getPendingInvoicesByVendor(
     organizationId: string,
     vendorName: string,
-  ): Promise<Array<Expense & { outstandingAmount: number; totalAmount: number }>> {
+  ): Promise<
+    Array<Expense & { outstandingAmount: number; totalAmount: number }>
+  > {
     // Find all expenses for this vendor
     const expenses = await this.expensesRepository.find({
       where: {
@@ -139,12 +138,14 @@ export class ExpensePaymentsService {
 
         // Filter allocations to only those from payments in this organization
         const validAllocations = allocations.filter((alloc) => {
-          return alloc.payment && 
-                 (alloc.payment as any).organization?.id === organizationId;
+          return (
+            alloc.payment &&
+            (alloc.payment as any).organization?.id === organizationId
+          );
         });
 
         const totalAmountNum = parseFloat(expense.totalAmount || '0');
-        
+
         // Calculate paid amount from direct payments
         const directPaidAmount = directPayments.reduce(
           (sum, p) => sum + parseFloat(p.amount),
@@ -170,7 +171,9 @@ export class ExpensePaymentsService {
     );
 
     // Filter to only include expenses with outstanding balance > 0.01
-    return expensesWithOutstanding.filter((exp) => exp.outstandingAmount > 0.01);
+    return expensesWithOutstanding.filter(
+      (exp) => exp.outstandingAmount > 0.01,
+    );
   }
 
   async create(
@@ -248,7 +251,7 @@ export class ExpensePaymentsService {
       if (!expense) continue;
 
       const totalAmount = parseFloat(expense.totalAmount || '0');
-      
+
       // Get direct payments for this expense
       const existingPayments = await manager.find(ExpensePayment, {
         where: {
@@ -265,8 +268,10 @@ export class ExpensePaymentsService {
 
       // Filter allocations to only those from payments in this organization
       const validAllocations = existingAllocations.filter((alloc) => {
-        return alloc.payment && 
-               (alloc.payment as any).organization?.id === organizationId;
+        return (
+          alloc.payment &&
+          (alloc.payment as any).organization?.id === organizationId
+        );
       });
 
       const directPaidAmount = existingPayments.reduce(
@@ -330,24 +335,24 @@ export class ExpensePaymentsService {
     dto: CreateExpensePaymentDto,
     paymentAmount: number,
   ): Promise<ExpensePayment> {
-      const expense = await manager.findOne(Expense, {
-        where: { id: dto.expenseId, organization: { id: organizationId } },
-        relations: ['payments'],
-      });
+    const expense = await manager.findOne(Expense, {
+      where: { id: dto.expenseId, organization: { id: organizationId } },
+      relations: ['payments'],
+    });
 
-      if (!expense) {
-        throw new NotFoundException('Expense not found');
-      }
+    if (!expense) {
+      throw new NotFoundException('Expense not found');
+    }
 
-      const totalAmount = parseFloat(expense.totalAmount || '0');
+    const totalAmount = parseFloat(expense.totalAmount || '0');
 
     // Get direct payments for this expense
-      const existingPayments = await manager.find(ExpensePayment, {
-        where: {
-          expense: { id: dto.expenseId },
-          organization: { id: organizationId },
-        },
-      });
+    const existingPayments = await manager.find(ExpensePayment, {
+      where: {
+        expense: { id: dto.expenseId },
+        organization: { id: organizationId },
+      },
+    });
 
     // Get existing allocations for this expense
     const existingAllocations = await manager.find(PaymentAllocation, {
@@ -357,14 +362,16 @@ export class ExpensePaymentsService {
 
     // Filter allocations to only those from payments in this organization
     const validAllocations = existingAllocations.filter((alloc) => {
-      return alloc.payment && 
-             (alloc.payment as any).organization?.id === organizationId;
+      return (
+        alloc.payment &&
+        (alloc.payment as any).organization?.id === organizationId
+      );
     });
 
     const directPaidAmount = existingPayments.reduce(
-        (sum, p) => sum + parseFloat(p.amount),
-        0,
-      );
+      (sum, p) => sum + parseFloat(p.amount),
+      0,
+    );
 
     const allocatedAmount = validAllocations.reduce(
       (sum, alloc) => sum + parseFloat(alloc.allocatedAmount),
@@ -375,23 +382,23 @@ export class ExpensePaymentsService {
     const outstandingBalance = totalAmount - totalPaid;
 
     if (paymentAmount > outstandingBalance + 0.01) {
-        throw new BadRequestException(
+      throw new BadRequestException(
         `Payment amount (${paymentAmount.toFixed(2)}) exceeds outstanding balance (${outstandingBalance.toFixed(2)})`,
-        );
-      }
+      );
+    }
 
-      // Create payment record
-      const payment = manager.create(ExpensePayment, {
-        expense: { id: dto.expenseId },
-        organization: { id: organizationId },
-        paymentDate: dto.paymentDate,
-        amount: paymentAmount.toString(),
-        paymentMethod: dto.paymentMethod || PaymentMethod.OTHER,
-        referenceNumber: dto.referenceNumber,
-        notes: dto.notes,
-      });
+    // Create payment record
+    const payment = manager.create(ExpensePayment, {
+      expense: { id: dto.expenseId },
+      organization: { id: organizationId },
+      paymentDate: dto.paymentDate,
+      amount: paymentAmount.toString(),
+      paymentMethod: dto.paymentMethod || PaymentMethod.OTHER,
+      referenceNumber: dto.referenceNumber,
+      notes: dto.notes,
+    });
 
-      const savedPayment = await manager.save(payment);
+    const savedPayment = await manager.save(payment);
 
     // Create allocation for single expense (for consistency)
     const allocation = manager.create(PaymentAllocation, {
@@ -418,67 +425,66 @@ export class ExpensePaymentsService {
     expenseId: string,
     paymentDate: string,
   ): Promise<void> {
-      const expenseWithAccrual = await manager.findOne(Expense, {
+    const expenseWithAccrual = await manager.findOne(Expense, {
       where: { id: expenseId, organization: { id: organizationId } },
-        relations: ['linkedAccrual'],
+      relations: ['linkedAccrual'],
+    });
+
+    if (expenseWithAccrual?.linkedAccrual) {
+      const accrual = await manager.findOne(Accrual, {
+        where: {
+          expense: { id: expenseWithAccrual.linkedAccrual.id },
+          organization: { id: organizationId },
+        },
       });
 
-      if (expenseWithAccrual?.linkedAccrual) {
-        const accrual = await manager.findOne(Accrual, {
+      if (accrual && accrual.status === AccrualStatus.PENDING_SETTLEMENT) {
+        // Get direct payments
+        const allPayments = await manager.find(ExpensePayment, {
           where: {
-            expense: { id: expenseWithAccrual.linkedAccrual.id },
+            expense: { id: expenseId },
             organization: { id: organizationId },
           },
         });
 
-        if (accrual && accrual.status === AccrualStatus.PENDING_SETTLEMENT) {
-          // Get direct payments
-          const allPayments = await manager.find(ExpensePayment, {
-            where: {
-              expense: { id: expenseId },
-              organization: { id: organizationId },
-            },
-          });
+        // Get allocations
+        const allAllocations = await manager.find(PaymentAllocation, {
+          where: { expense: { id: expenseId } },
+          relations: ['payment'],
+        });
 
-          // Get allocations
-          const allAllocations = await manager.find(PaymentAllocation, {
-            where: { expense: { id: expenseId } },
-            relations: ['payment'],
-          });
-
-          // Filter allocations to only those from payments in this organization
-          const validAllocations = allAllocations.filter((alloc) => {
-            return alloc.payment && 
-                   (alloc.payment as any).organization?.id === organizationId;
-          });
-
-          const directPaid = allPayments.reduce(
-            (sum, p) => sum + parseFloat(p.amount),
-            0,
+        // Filter allocations to only those from payments in this organization
+        const validAllocations = allAllocations.filter((alloc) => {
+          return (
+            alloc.payment &&
+            (alloc.payment as any).organization?.id === organizationId
           );
+        });
 
-          const allocatedPaid = validAllocations.reduce(
-            (sum, alloc) => sum + parseFloat(alloc.allocatedAmount),
-            0,
-          );
+        const directPaid = allPayments.reduce(
+          (sum, p) => sum + parseFloat(p.amount),
+          0,
+        );
 
-          const totalPaid = directPaid + allocatedPaid;
-          const expenseTotal = parseFloat(expenseWithAccrual.totalAmount || '0');
+        const allocatedPaid = validAllocations.reduce(
+          (sum, alloc) => sum + parseFloat(alloc.allocatedAmount),
+          0,
+        );
 
-          if (totalPaid >= expenseTotal - 0.01) {
-            accrual.status = AccrualStatus.SETTLED;
-            accrual.settlementDate = paymentDate;
-            accrual.settlementExpense = expenseWithAccrual;
-            await manager.save(accrual);
-          }
+        const totalPaid = directPaid + allocatedPaid;
+        const expenseTotal = parseFloat(expenseWithAccrual.totalAmount || '0');
+
+        if (totalPaid >= expenseTotal - 0.01) {
+          accrual.status = AccrualStatus.SETTLED;
+          accrual.settlementDate = paymentDate;
+          accrual.settlementExpense = expenseWithAccrual;
+          await manager.save(accrual);
         }
       }
+    }
   }
 
-  async delete(
-    organizationId: string,
-    id: string,
-  ): Promise<void> {
+  async delete(organizationId: string, id: string): Promise<void> {
     return await this.dataSource.transaction(async (manager) => {
       const payment = await manager.findOne(ExpensePayment, {
         where: { id, organization: { id: organizationId } },
@@ -515,29 +521,32 @@ export class ExpensePaymentsService {
 
       // Check if any affected expense is linked to an accrual
       for (const affectedExpenseId of affectedExpenseIds) {
-      const expense = await manager.findOne(Expense, {
-          where: { id: affectedExpenseId, organization: { id: organizationId } },
-        relations: ['linkedAccrual'],
-      });
-
-      if (expense?.linkedAccrual) {
-        // This expense is settling an accrual - find the accrual record
-        const accrual = await manager.findOne(Accrual, {
+        const expense = await manager.findOne(Expense, {
           where: {
-            expense: { id: expense.linkedAccrual.id },
+            id: affectedExpenseId,
             organization: { id: organizationId },
           },
+          relations: ['linkedAccrual'],
         });
 
-        if (accrual && accrual.status === AccrualStatus.SETTLED) {
-          // Recalculate total paid amount after payment deletion
-            // Consider both direct payments and allocations
-          const remainingPayments = await manager.find(ExpensePayment, {
+        if (expense?.linkedAccrual) {
+          // This expense is settling an accrual - find the accrual record
+          const accrual = await manager.findOne(Accrual, {
             where: {
-                expense: { id: affectedExpenseId },
+              expense: { id: expense.linkedAccrual.id },
               organization: { id: organizationId },
             },
           });
+
+          if (accrual && accrual.status === AccrualStatus.SETTLED) {
+            // Recalculate total paid amount after payment deletion
+            // Consider both direct payments and allocations
+            const remainingPayments = await manager.find(ExpensePayment, {
+              where: {
+                expense: { id: affectedExpenseId },
+                organization: { id: organizationId },
+              },
+            });
 
             const remainingAllocations = await manager.find(PaymentAllocation, {
               where: { expense: { id: affectedExpenseId } },
@@ -546,14 +555,16 @@ export class ExpensePaymentsService {
 
             // Filter allocations to only those from payments in this organization
             const validAllocations = remainingAllocations.filter((alloc) => {
-              return alloc.payment && 
-                     (alloc.payment as any).organization?.id === organizationId;
+              return (
+                alloc.payment &&
+                (alloc.payment as any).organization?.id === organizationId
+              );
             });
 
             const directPaid = remainingPayments.reduce(
-            (sum, p) => sum + parseFloat(p.amount),
-            0,
-          );
+              (sum, p) => sum + parseFloat(p.amount),
+              0,
+            );
 
             const allocatedPaid = validAllocations.reduce(
               (sum, alloc) => sum + parseFloat(alloc.allocatedAmount),
@@ -561,14 +572,14 @@ export class ExpensePaymentsService {
             );
 
             const totalPaid = directPaid + allocatedPaid;
-          const expenseTotal = parseFloat(expense.totalAmount || '0');
+            const expenseTotal = parseFloat(expense.totalAmount || '0');
 
-          // If no longer fully paid, revert accrual status to pending
-          if (totalPaid < expenseTotal - 0.01) {
-            accrual.status = AccrualStatus.PENDING_SETTLEMENT;
-            accrual.settlementDate = null;
-            accrual.settlementExpense = null;
-            await manager.save(accrual);
+            // If no longer fully paid, revert accrual status to pending
+            if (totalPaid < expenseTotal - 0.01) {
+              accrual.status = AccrualStatus.PENDING_SETTLEMENT;
+              accrual.settlementDate = null;
+              accrual.settlementExpense = null;
+              await manager.save(accrual);
             }
           }
         }
@@ -576,4 +587,3 @@ export class ExpensePaymentsService {
     });
   }
 }
-
