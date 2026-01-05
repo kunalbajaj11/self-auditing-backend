@@ -62,6 +62,12 @@ export class LicenseKey extends AbstractEntity {
   })
   region?: Region | null;
 
+  @Column({ type: 'boolean', default: false })
+  enablePayroll: boolean;
+
+  @Column({ type: 'boolean', default: false })
+  enableInventory: boolean;
+
   @ManyToOne(() => User, { nullable: true })
   createdBy?: User | null;
 

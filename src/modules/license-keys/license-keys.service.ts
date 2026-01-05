@@ -12,6 +12,7 @@ import { Attachment } from '../../entities/attachment.entity';
 import { Organization } from '../../entities/organization.entity';
 import { CreateLicenseKeyDto } from './dto/create-license-key.dto';
 import { RenewLicenseKeyDto } from './dto/renew-license-key.dto';
+import { UpdateLicenseFeaturesDto } from './dto/update-license-features.dto';
 import { LicenseKeyStatus } from '../../common/enums/license-key-status.enum';
 import { PlanType } from '../../common/enums/plan-type.enum';
 import { EmailService } from '../notifications/email.service';
@@ -51,6 +52,8 @@ export class LicenseKeysService {
       notes: dto.notes ?? null,
       email: dto.email ?? null,
       region: dto.region ?? null,
+      enablePayroll: false, // Default to disabled
+      enableInventory: false, // Default to disabled
       createdById,
     });
     const savedLicense = await this.licenseKeysRepository.save(license);
@@ -379,6 +382,44 @@ export class LicenseKeysService {
       remaining: usage.remainingUploads,
       totalAllowed: usage.totalAllowed,
     };
+  }
+
+  async updateFeatures(
+    id: string,
+    dto: { enablePayroll?: boolean; enableInventory?: boolean },
+  ): Promise<LicenseKey> {
+    const license = await this.licenseKeysRepository.findOne({ where: { id } });
+    if (!license) {
+      throw new NotFoundException('License key not found');
+    }
+
+    if (dto.enablePayroll !== undefined) {
+      license.enablePayroll = dto.enablePayroll;
+    }
+    if (dto.enableInventory !== undefined) {
+      license.enableInventory = dto.enableInventory;
+    }
+
+    return this.licenseKeysRepository.save(license);
+  }
+
+  async isFeatureEnabled(
+    organizationId: string,
+    feature: 'payroll' | 'inventory',
+  ): Promise<boolean> {
+    const license = await this.findByOrganizationId(organizationId);
+    if (!license) {
+      return false;
+    }
+
+    if (feature === 'payroll') {
+      return license.enablePayroll ?? false;
+    }
+    if (feature === 'inventory') {
+      return license.enableInventory ?? false;
+    }
+
+    return false;
   }
 
   private generateUniqueKey(): string {

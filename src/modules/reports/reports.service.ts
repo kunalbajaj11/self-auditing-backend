@@ -2708,7 +2708,8 @@ export class ReportsService {
           'expense.description AS description',
         ])
         .where('accrual.organization_id = :organizationId', { organizationId })
-        .andWhere('accrual.is_deleted = false');
+        .andWhere('accrual.is_deleted = false')
+        .andWhere('expense.is_deleted = false');
 
       if (filters?.['status']) {
         const statuses = Array.isArray(filters.status)
@@ -2722,12 +2723,15 @@ export class ReportsService {
       }
 
       if (filters?.['endDate']) {
-        query.andWhere('accrual.created_at::date <= :asOfDate', {
+        query.andWhere('expense.expense_date <= :asOfDate', {
           asOfDate: filters.endDate,
         });
       }
 
       if (filters?.['startDate']) {
+        query.andWhere('expense.expense_date >= :startDate', {
+          startDate: filters.startDate,
+        });
       }
 
       if (filters?.['vendorName']) {

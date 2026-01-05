@@ -50,9 +50,18 @@ export class CreateSalaryProfileDto {
   @IsString()
   userId?: string; // Optional - for employees with portal access
 
+  // Also accept user_id (snake_case) for compatibility
+  @IsOptional()
+  @IsString()
+  user_id?: string; // Alias for userId (snake_case)
+
   @IsOptional()
   @IsString()
   employeeName?: string; // For employees without portal access (required if userId not provided)
+
+  @IsOptional()
+  @IsString()
+  email?: string; // Email address for sending payslips
 
   @IsNotEmpty()
   @IsNumber()

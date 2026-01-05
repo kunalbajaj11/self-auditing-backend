@@ -13,7 +13,15 @@ import { SalaryComponentDto } from './create-salary-profile.dto';
 export class UpdateSalaryProfileDto {
   @IsOptional()
   @IsString()
+  userId?: string; // Link to a user (for employees with portal access)
+
+  @IsOptional()
+  @IsString()
   employeeName?: string;
+
+  @IsOptional()
+  @IsString()
+  email?: string; // Email address for sending payslips
 
   @IsOptional()
   @IsNumber()

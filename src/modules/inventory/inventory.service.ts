@@ -89,6 +89,23 @@ export class InventoryService {
     return location;
   }
 
+  async updateLocation(
+    organizationId: string,
+    id: string,
+    updates: { name?: string; address?: string },
+  ): Promise<InventoryLocation> {
+    const location = await this.findLocationById(organizationId, id);
+    
+    if (updates.name !== undefined) {
+      location.name = updates.name;
+    }
+    if (updates.address !== undefined) {
+      location.address = updates.address;
+    }
+    
+    return this.locationsRepository.save(location);
+  }
+
   // Stock methods
   async getStockQuantity(
     organizationId: string,

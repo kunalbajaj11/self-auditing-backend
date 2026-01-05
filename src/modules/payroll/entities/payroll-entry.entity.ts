@@ -12,7 +12,6 @@ import { User } from '../../../entities/user.entity';
 import { PayrollEntryDetail } from './payroll-entry-detail.entity';
 
 @Entity({ name: 'payroll_entries' })
-@Index(['payrollRun', 'user', 'isDeleted'])
 export class PayrollEntry extends AbstractEntity {
   @ManyToOne(() => PayrollRun, (run) => run.payrollEntries, {
     nullable: false,
@@ -22,10 +21,13 @@ export class PayrollEntry extends AbstractEntity {
   payrollRun: PayrollRun;
 
   @ManyToOne(() => User, {
-    nullable: false,
+    nullable: true, // Allow null for employees without portal access
   })
   @JoinColumn({ name: 'user_id' })
-  user: User;
+  user: User | null;
+
+  @Column({ name: 'employee_name', length: 255, nullable: true })
+  employeeName?: string | null; // Employee name for external employees (without portal access)
 
   @Column({
     name: 'basic_salary',
@@ -98,6 +100,9 @@ export class PayrollEntry extends AbstractEntity {
 
   @Column({ length: 10, default: 'AED' })
   currency: string;
+
+  @Column({ name: 'email', length: 255, nullable: true })
+  email?: string | null; // Email from salary profile for sending payslips
 
   @Column({ name: 'payslip_generated', default: false })
   payslipGenerated: boolean;

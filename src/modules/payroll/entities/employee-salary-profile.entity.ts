@@ -29,6 +29,9 @@ export class EmployeeSalaryProfile extends AbstractEntity {
   @Column({ name: 'employee_name', length: 255, nullable: true })
   employeeName?: string | null; // For employees without portal access
 
+  @Column({ name: 'email', length: 255, nullable: true })
+  email?: string | null; // Email address for sending payslips
+
   @Column({
     name: 'basic_salary',
     type: 'decimal',

@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Post,
+  Patch,
   Param,
   Body,
   Query,
@@ -12,8 +13,10 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { TenantGuard } from '../../common/guards/tenant.guard';
 import { PlanTypeGuard } from '../../common/guards/plan-type.guard';
+import { LicenseFeatureGuard } from '../../common/guards/license-feature.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { PlanTypes } from '../../common/decorators/plan-types.decorator';
+import { RequireLicenseFeature } from '../../common/decorators/license-feature.decorator';
 import { UserRole } from '../../common/enums/user-role.enum';
 import { PlanType } from '../../common/enums/plan-type.enum';
 import {
@@ -26,8 +29,8 @@ import { StockMovementType } from '../../common/enums/stock-movement-type.enum';
 import { StockAdjustmentStatus } from '../../common/enums/stock-adjustment-status.enum';
 
 @Controller('inventory')
-@UseGuards(JwtAuthGuard, RolesGuard, TenantGuard, PlanTypeGuard)
-@PlanTypes(PlanType.PREMIUM, PlanType.ENTERPRISE) // Only Premium and Enterprise plans can access inventory
+@UseGuards(JwtAuthGuard, RolesGuard, TenantGuard, LicenseFeatureGuard)
+@RequireLicenseFeature('inventory') // Requires inventory feature to be enabled in license
 export class InventoryController {
   constructor(private readonly inventoryService: InventoryService) {}
 
@@ -62,6 +65,20 @@ export class InventoryController {
     return this.inventoryService.findLocationById(
       user?.organizationId as string,
       id,
+    );
+  }
+
+  @Patch('locations/:id')
+  @Roles(UserRole.ADMIN, UserRole.ACCOUNTANT)
+  async updateLocation(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() body: { name?: string; address?: string },
+  ) {
+    return this.inventoryService.updateLocation(
+      user?.organizationId as string,
+      id,
+      body,
     );
   }
 

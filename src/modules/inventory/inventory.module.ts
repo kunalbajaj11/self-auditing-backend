@@ -11,6 +11,8 @@ import { Organization } from '../../entities/organization.entity';
 import { User } from '../../entities/user.entity';
 import { AuditLogsModule } from '../audit-logs/audit-logs.module';
 import { PlanTypeGuard } from '../../common/guards/plan-type.guard';
+import { LicenseKeysModule } from '../license-keys/license-keys.module';
+import { LicenseFeatureGuard } from '../../common/guards/license-feature.guard';
 
 @Module({
   imports: [
@@ -24,8 +26,9 @@ import { PlanTypeGuard } from '../../common/guards/plan-type.guard';
       User,
     ]),
     AuditLogsModule,
+    LicenseKeysModule,
   ],
-  providers: [InventoryService],
+  providers: [InventoryService, LicenseFeatureGuard],
   controllers: [InventoryController],
   exports: [InventoryService],
 })

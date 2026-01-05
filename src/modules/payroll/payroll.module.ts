@@ -17,6 +17,9 @@ import { AuditLogsModule } from '../audit-logs/audit-logs.module';
 import { JournalEntriesModule } from '../journal-entries/journal-entries.module';
 import { ExpensesModule } from '../expenses/expenses.module';
 import { PlanTypeGuard } from '../../common/guards/plan-type.guard';
+import { LicenseKeysModule } from '../license-keys/license-keys.module';
+import { LicenseFeatureGuard } from '../../common/guards/license-feature.guard';
+import { SettingsModule } from '../settings/settings.module';
 
 @Module({
   imports: [
@@ -34,8 +37,10 @@ import { PlanTypeGuard } from '../../common/guards/plan-type.guard';
     AuditLogsModule,
     JournalEntriesModule,
     ExpensesModule,
+    LicenseKeysModule,
+    SettingsModule,
   ],
-  providers: [PayrollService, PayslipGeneratorService, TaxCalculationService],
+  providers: [PayrollService, PayslipGeneratorService, TaxCalculationService, LicenseFeatureGuard],
   controllers: [PayrollController],
   exports: [PayrollService],
 })

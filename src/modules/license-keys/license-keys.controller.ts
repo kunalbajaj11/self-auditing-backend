@@ -13,6 +13,7 @@ import { LicenseKeysService } from './license-keys.service';
 import { CreateLicenseKeyDto } from './dto/create-license-key.dto';
 import { RenewLicenseKeyDto } from './dto/renew-license-key.dto';
 import { AllocateUploadsDto } from './dto/allocate-uploads.dto';
+import { UpdateLicenseFeaturesDto } from './dto/update-license-features.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { TenantGuard } from '../../common/guards/tenant.guard';
@@ -83,14 +84,36 @@ export class LicenseKeysController {
   }
 
   @Get('organization/:organizationId')
+  @UseGuards(TenantGuard)
+  @Roles(UserRole.SUPERADMIN, UserRole.ADMIN, UserRole.ACCOUNTANT)
   async getByOrganizationId(
     @Param('organizationId', new ParseUUIDPipe()) organizationId: string,
+    @CurrentUser() user: AuthenticatedUser,
   ) {
+    // Super admins can access any organization's license
+    // Regular users can only access their own organization's license
+    if (
+      user.role !== UserRole.SUPERADMIN &&
+      user.organizationId !== organizationId
+    ) {
+      throw new ForbiddenException(
+        "You can only access your own organization's license information",
+      );
+    }
+
     const license =
       await this.licenseKeysService.findByOrganizationId(organizationId);
     if (!license) {
       return null;
     }
     return license;
+  }
+
+  @Patch(':id/features')
+  async updateFeatures(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() dto: UpdateLicenseFeaturesDto,
+  ) {
+    return this.licenseKeysService.updateFeatures(id, dto);
   }
 }
