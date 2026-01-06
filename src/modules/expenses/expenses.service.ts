@@ -32,7 +32,10 @@ import { InventoryService } from '../inventory/inventory.service';
 import { StockMovementType } from '../../common/enums/stock-movement-type.enum';
 import { PlanType } from '../../common/enums/plan-type.enum';
 import { Repository as TypeOrmRepository } from 'typeorm';
-import { ConflictException } from '@nestjs/common';
+import { ConflictException, Optional, Inject } from '@nestjs/common';
+import { PurchaseLineItem } from '../../entities/purchase-line-item.entity';
+import { PurchaseLineItemDto } from './dto/purchase-line-item.dto';
+import { TaxRulesService } from '../tax-rules/tax-rules.service';
 
 const DEFAULT_ACCRUAL_TOLERANCE = Number(
   process.env.ACCRUAL_AMOUNT_TOLERANCE ?? 5,
@@ -57,6 +60,8 @@ export class ExpensesService {
     private readonly vendorsRepository: TypeOrmRepository<Vendor>,
     @InjectRepository(Product)
     private readonly productsRepository: Repository<Product>,
+    @InjectRepository(PurchaseLineItem)
+    private readonly lineItemsRepository: Repository<PurchaseLineItem>,
     private readonly notificationsService: NotificationsService,
     private readonly fileStorageService: FileStorageService,
     private readonly duplicateDetectionService: DuplicateDetectionService,
@@ -64,23 +69,64 @@ export class ExpensesService {
     private readonly licenseKeysService: LicenseKeysService,
     private readonly settingsService: SettingsService,
     private readonly inventoryService: InventoryService,
+    @Optional()
+    @Inject(TaxRulesService)
+    private readonly taxRulesService?: TaxRulesService,
   ) {}
 
   /**
    * Calculate VAT amount based on tax settings
    * Supports both inclusive and exclusive tax calculation methods
    * For reverse charge: VAT is calculated but NOT added to total (customer self-accounts)
+   * 
+   * Enhanced: Uses TaxRulesService if available, falls back to standard calculation
    */
   private async calculateVatAmount(
     organizationId: string,
     amount: number,
     taxRate?: number,
     vatTaxType?: string,
+    categoryId?: string,
+    categoryName?: string,
   ): Promise<{
     vatAmount: number;
     baseAmount: number;
     isReverseCharge: boolean;
   }> {
+    // Try enhanced tax calculation if tax rules service is available
+    if (this.taxRulesService) {
+      try {
+        const organization = await this.organizationsRepository.findOne({
+          where: { id: organizationId },
+          select: ['region'],
+        });
+
+        const taxSettings = await this.settingsService.getTaxSettings(organizationId);
+        const calculationMethod = taxSettings.taxCalculationMethod || 'inclusive';
+
+        const result = await this.taxRulesService.calculateTax({
+          amount,
+          organizationId,
+          region: organization?.region as any,
+          categoryId,
+          categoryName,
+          taxRate,
+          vatTaxType,
+          calculationMethod: calculationMethod as 'inclusive' | 'exclusive',
+        });
+
+        return {
+          vatAmount: result.vatAmount,
+          baseAmount: result.baseAmount,
+          isReverseCharge: result.isReverseCharge,
+        };
+      } catch (error) {
+        // If tax rules service fails, fall back to standard calculation
+        console.warn('Tax rules service error, falling back to standard calculation:', error);
+      }
+    }
+
+    // Standard calculation (backward compatible)
     // Get tax settings
     const taxSettings =
       await this.settingsService.getTaxSettings(organizationId);
@@ -185,6 +231,8 @@ export class ExpensesService {
       .leftJoinAndSelect('expense.vendor', 'vendor')
       .leftJoinAndSelect('expense.attachments', 'attachments')
       .leftJoinAndSelect('expense.accrualDetail', 'accrualDetail')
+      .leftJoinAndSelect('expense.lineItems', 'lineItems')
+      .leftJoinAndSelect('lineItems.product', 'lineItemProduct')
       .where('expense.organization_id = :organizationId', { organizationId })
       .andWhere('expense.is_deleted = false');
 
@@ -235,7 +283,15 @@ export class ExpensesService {
   async findById(id: string, organizationId: string): Promise<Expense> {
     const expense = await this.expensesRepository.findOne({
       where: { id, organization: { id: organizationId }, isDeleted: false },
-      relations: ['category', 'user', 'attachments', 'accrualDetail', 'vendor'],
+      relations: [
+        'category',
+        'user',
+        'attachments',
+        'accrualDetail',
+        'vendor',
+        'lineItems',
+        'lineItems.product',
+      ],
     });
     if (!expense) {
       throw new NotFoundException('Expense not found');
@@ -340,26 +396,80 @@ export class ExpensesService {
       }
     }
 
-    // Calculate VAT if not provided, using tax settings
-    // Note: For reverse charge, totalAmount needs manual override (DB generated column adds VAT)
+    // Handle line items if provided (item-wise purchase entry)
+    let lineItems: PurchaseLineItemDto[] | undefined = dto.lineItems;
     let vatAmount = dto.vatAmount;
     let expenseAmount = dto.amount;
 
-    // Auto-calculate VAT if not provided or explicitly set to 0
-    // This handles cases where user sets vatAmount = 0 but wants auto-calculation
-    if (vatAmount === undefined || vatAmount === null || vatAmount === 0) {
-      // Auto-calculate VAT from tax settings
+    // If line items are provided, calculate totals from line items
+    if (lineItems && lineItems.length > 0) {
+      let totalAmount = 0;
+      let totalVatAmount = 0;
       const defaultTaxRate = await this.getDefaultTaxRate(organizationId);
-      const taxCalculation = await this.calculateVatAmount(
-        organizationId,
-        dto.amount,
-        defaultTaxRate,
-        vatTaxType,
-      );
-      vatAmount = taxCalculation.vatAmount;
-      // For inclusive tax, amount should be base amount (without VAT)
-      // For exclusive tax, amount stays as entered (base amount)
-      expenseAmount = taxCalculation.baseAmount;
+      const taxSettings = await this.settingsService.getTaxSettings(organizationId);
+      const calculationMethod = taxSettings.taxCalculationMethod || 'inclusive';
+
+      // Process each line item
+      for (let i = 0; i < lineItems.length; i++) {
+        const lineItem = lineItems[i];
+        const lineAmount = lineItem.quantity * lineItem.unitPrice;
+        
+        // Get VAT rate for this line item
+        let lineVatRate = lineItem.vatRate;
+        if (!lineVatRate && lineItem.productId) {
+          // Try to get VAT rate from product
+          const product = await this.productsRepository.findOne({
+            where: { id: lineItem.productId },
+          });
+          lineVatRate = product?.vatRate ? parseFloat(product.vatRate) : defaultTaxRate;
+        } else if (!lineVatRate) {
+          lineVatRate = defaultTaxRate;
+        }
+
+        // Calculate VAT for this line item
+        const lineVatTaxType = lineItem.vatTaxType || vatTaxType;
+        let lineVatAmount = 0;
+        
+        if (lineVatTaxType === 'zero_rated' || lineVatTaxType === 'exempt') {
+          lineVatAmount = 0;
+        } else if (lineVatTaxType === 'reverse_charge') {
+          // Reverse charge: VAT is calculated but not added to total
+          lineVatAmount = (lineAmount * lineVatRate) / 100;
+        } else {
+          // Standard VAT calculation
+          if (calculationMethod === 'inclusive') {
+            lineVatAmount = (lineAmount * lineVatRate) / (100 + lineVatRate);
+          } else {
+            lineVatAmount = (lineAmount * lineVatRate) / 100;
+          }
+        }
+
+        totalAmount += lineAmount;
+        totalVatAmount += lineVatAmount;
+      }
+
+      // Set calculated totals
+      expenseAmount = totalAmount;
+      vatAmount = totalVatAmount;
+    } else {
+      // Auto-calculate VAT if not provided or explicitly set to 0
+      // This handles cases where user sets vatAmount = 0 but wants auto-calculation
+      if (vatAmount === undefined || vatAmount === null || vatAmount === 0) {
+        // Auto-calculate VAT from tax settings
+        const defaultTaxRate = await this.getDefaultTaxRate(organizationId);
+        const taxCalculation = await this.calculateVatAmount(
+          organizationId,
+          dto.amount,
+          defaultTaxRate,
+          vatTaxType,
+          category?.id,
+          category?.name,
+        );
+        vatAmount = taxCalculation.vatAmount;
+        // For inclusive tax, amount should be base amount (without VAT)
+        // For exclusive tax, amount stays as entered (base amount)
+        expenseAmount = taxCalculation.baseAmount;
+      }
     }
 
     // Handle currency and conversion (use final expense amount after tax calculation)
@@ -484,6 +594,84 @@ export class ExpensesService {
       await this.attachmentsRepository.save(attachments);
     }
 
+    // Create line items if provided
+    if (lineItems && lineItems.length > 0) {
+      const defaultTaxRate = await this.getDefaultTaxRate(organizationId);
+      const taxSettings = await this.settingsService.getTaxSettings(organizationId);
+      const calculationMethod = taxSettings.taxCalculationMethod || 'inclusive';
+
+      const lineItemEntities = await Promise.all(
+        lineItems.map(async (lineItemDto, index) => {
+          // Get product if productId is provided
+          let product: Product | null = null;
+          if (lineItemDto.productId) {
+            product = await this.productsRepository.findOne({
+              where: {
+                id: lineItemDto.productId,
+                organization: { id: organizationId },
+              },
+            });
+          }
+
+          // Calculate line item amounts
+          const lineAmount = lineItemDto.quantity * lineItemDto.unitPrice;
+          
+          // Get VAT rate
+          let lineVatRate = lineItemDto.vatRate;
+          if (!lineVatRate && product) {
+            lineVatRate = product.vatRate ? parseFloat(product.vatRate) : defaultTaxRate;
+          } else if (!lineVatRate) {
+            lineVatRate = defaultTaxRate;
+          }
+
+          // Calculate VAT for this line item
+          const lineVatTaxType = lineItemDto.vatTaxType || vatTaxType;
+          let lineVatAmount = 0;
+          
+          if (lineVatTaxType === 'zero_rated' || lineVatTaxType === 'exempt') {
+            lineVatAmount = 0;
+          } else if (lineVatTaxType === 'reverse_charge') {
+            lineVatAmount = (lineAmount * lineVatRate) / 100;
+          } else {
+            if (calculationMethod === 'inclusive') {
+              lineVatAmount = (lineAmount * lineVatRate) / (100 + lineVatRate);
+            } else {
+              lineVatAmount = (lineAmount * lineVatRate) / 100;
+            }
+          }
+
+          // Round VAT amount
+          const roundingMethod = taxSettings.taxRoundingMethod || 'standard';
+          if (roundingMethod === 'up') {
+            lineVatAmount = Math.ceil(lineVatAmount * 100) / 100;
+          } else if (roundingMethod === 'down') {
+            lineVatAmount = Math.floor(lineVatAmount * 100) / 100;
+          } else {
+            lineVatAmount = Math.round(lineVatAmount * 100) / 100;
+          }
+
+          return this.lineItemsRepository.create({
+            expense: saved,
+            product: product || null,
+            productId: lineItemDto.productId || null,
+            itemName: lineItemDto.itemName,
+            sku: product?.sku || lineItemDto.sku || null,
+            quantity: lineItemDto.quantity.toString(),
+            unitOfMeasure: lineItemDto.unitOfMeasure || product?.unitOfMeasure || 'unit',
+            unitPrice: lineItemDto.unitPrice.toString(),
+            amount: lineAmount.toString(),
+            vatRate: lineVatRate.toString(),
+            vatAmount: lineVatAmount.toString(),
+            vatTaxType: lineVatTaxType as any,
+            description: lineItemDto.description || null,
+            lineNumber: index + 1,
+          });
+        }),
+      );
+
+      await this.lineItemsRepository.save(lineItemEntities);
+    }
+
     // Create accrual if type is ACCRUAL OR purchaseStatus is "Purchase - Accruals"
     if (
       dto.type === ExpenseType.ACCRUAL ||
@@ -540,81 +728,111 @@ export class ExpensesService {
       await this.vendorsRepository.save(vendor);
     }
 
-    // Record stock movement if this is an inventory purchase
-    // Only for Premium and Enterprise plans (inventory feature)
-    if (
-      dto.isInventoryPurchase &&
-      dto.productId &&
-      dto.quantity &&
-      dto.quantity > 0
-    ) {
-      // Check if organization has inventory access
-      const org = await this.organizationsRepository.findOne({
-        where: { id: organizationId },
-        select: ['id', 'planType'],
-      });
+    // Record stock movements for inventory purchases
+    // Handle both single product (legacy) and line items
+    const org = await this.organizationsRepository.findOne({
+      where: { id: organizationId },
+      select: ['id', 'planType'],
+    });
 
-      const hasInventoryAccess =
-        org?.planType === PlanType.PREMIUM ||
-        org?.planType === PlanType.ENTERPRISE;
+    const hasInventoryAccess =
+      org?.planType === PlanType.PREMIUM ||
+      org?.planType === PlanType.ENTERPRISE;
 
-      if (hasInventoryAccess) {
-        try {
-          const locations = await this.inventoryService.findAllLocations(
-            organizationId,
-          );
+    if (hasInventoryAccess) {
+      try {
+        const locations = await this.inventoryService.findAllLocations(
+          organizationId,
+        );
 
-          if (locations.length === 0) {
-            console.warn(
-              `No inventory locations found for organization ${organizationId}. Skipping stock movement for expense ${saved.id}.`,
-            );
-            return this.findById(saved.id, organizationId);
-          }
-
+        if (locations.length > 0) {
           const location = locations.find((l) => l.isDefault) || locations[0];
 
           if (location) {
-            // Calculate unit cost from expense amount
-            const unitCost =
-              dto.quantity > 0 ? expenseAmount / dto.quantity : expenseAmount;
+            // Handle line items with products
+            if (lineItems && lineItems.length > 0) {
+              for (const lineItemDto of lineItems) {
+                if (lineItemDto.productId && lineItemDto.quantity > 0) {
+                  const unitCost = lineItemDto.unitPrice;
 
-            await this.inventoryService.recordStockMovement(
-              organizationId,
-              userId,
-              {
-                productId: dto.productId,
-                locationId: location.id,
-                movementType: StockMovementType.PURCHASE,
-                quantity: dto.quantity,
-                unitCost,
-                referenceType: 'expense',
-                referenceId: saved.id,
-                notes: `Purchase via expense ${saved.invoiceNumber || saved.id}`,
-              },
-            );
+                  await this.inventoryService.recordStockMovement(
+                    organizationId,
+                    userId,
+                    {
+                      productId: lineItemDto.productId,
+                      locationId: location.id,
+                      movementType: StockMovementType.PURCHASE,
+                      quantity: lineItemDto.quantity,
+                      unitCost,
+                      referenceType: 'expense',
+                      referenceId: saved.id,
+                      notes: `Purchase via expense ${saved.invoiceNumber || saved.id} - ${lineItemDto.itemName}`,
+                    },
+                  );
 
-            // Update product cost price
-            const product = await this.productsRepository.findOne({
-              where: { id: dto.productId },
-            });
-            if (product) {
-              // Update cost price (simple average for now)
-              await this.productsRepository.update(
-                { id: dto.productId },
+                  // Update product cost price
+                  const product = await this.productsRepository.findOne({
+                    where: { id: lineItemDto.productId },
+                  });
+                  if (product) {
+                    // Update cost price (simple average for now)
+                    await this.productsRepository.update(
+                      { id: lineItemDto.productId },
+                      {
+                        costPrice: unitCost.toString(),
+                        averageCost: unitCost.toString(),
+                      },
+                    );
+                  }
+                }
+              }
+            } else if (
+              // Legacy: single product purchase
+              dto.isInventoryPurchase &&
+              dto.productId &&
+              dto.quantity &&
+              dto.quantity > 0
+            ) {
+              const unitCost =
+                dto.quantity > 0 ? expenseAmount / dto.quantity : expenseAmount;
+
+              await this.inventoryService.recordStockMovement(
+                organizationId,
+                userId,
                 {
-                  costPrice: unitCost.toString(),
-                  averageCost: unitCost.toString(),
+                  productId: dto.productId,
+                  locationId: location.id,
+                  movementType: StockMovementType.PURCHASE,
+                  quantity: dto.quantity,
+                  unitCost,
+                  referenceType: 'expense',
+                  referenceId: saved.id,
+                  notes: `Purchase via expense ${saved.invoiceNumber || saved.id}`,
                 },
               );
+
+              // Update product cost price
+              const product = await this.productsRepository.findOne({
+                where: { id: dto.productId },
+              });
+              if (product) {
+                await this.productsRepository.update(
+                  { id: dto.productId },
+                  {
+                    costPrice: unitCost.toString(),
+                    averageCost: unitCost.toString(),
+                  },
+                );
+              }
             }
           }
-        } catch (error) {
-          // Log error but don't fail expense creation
-          console.error(
-            `Failed to record stock movement for expense ${saved.id}:`,
-            error,
-          );
         }
+      } catch (error) {
+        // Log error but don't fail expense creation
+        console.error(
+          `Failed to record stock movement for expense ${saved.id}:`,
+          error,
+        );
       }
     }
 
@@ -923,11 +1141,28 @@ export class ExpensesService {
       // If VAT amount not explicitly provided or set to 0, recalculate from tax settings
       if (dto.vatAmount === undefined || dto.vatAmount === 0) {
         const defaultTaxRate = await this.getDefaultTaxRate(organizationId);
+        // Load category if not already loaded
+        if (!expense.category && expense.category) {
+          expense.category = await this.categoriesRepository.findOne({
+            where: { id: expense.category.id },
+          });
+        } else if (!expense.category) {
+          // Try to load by relation
+          const expenseWithCategory = await this.expensesRepository.findOne({
+            where: { id: expense.id },
+            relations: ['category'],
+          });
+          if (expenseWithCategory?.category) {
+            expense.category = expenseWithCategory.category;
+          }
+        }
         const taxCalculation = await this.calculateVatAmount(
           organizationId,
           newAmount,
           defaultTaxRate,
           currentVatTaxType,
+          expense.category?.id,
+          expense.category?.name,
         );
         expense.vatAmount = this.formatMoney(taxCalculation.vatAmount);
         // Update amount to base amount for inclusive tax
@@ -941,11 +1176,24 @@ export class ExpensesService {
       // Also recalculate if vatAmount is explicitly set to 0
       const currentAmount = parseFloat(expense.amount);
       const defaultTaxRate = await this.getDefaultTaxRate(organizationId);
+      // Load category if not already loaded
+      if (!expense.category) {
+        // Try to load by relation
+        const expenseWithCategory = await this.expensesRepository.findOne({
+          where: { id: expense.id },
+          relations: ['category'],
+        });
+        if (expenseWithCategory?.category) {
+          expense.category = expenseWithCategory.category;
+        }
+      }
       const taxCalculation = await this.calculateVatAmount(
         organizationId,
         currentAmount,
         defaultTaxRate,
         currentVatTaxType,
+        expense.category?.id,
+        expense.category?.name,
       );
       expense.vatAmount = this.formatMoney(taxCalculation.vatAmount);
       expense.amount = this.formatMoney(taxCalculation.baseAmount);

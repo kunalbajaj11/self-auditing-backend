@@ -18,6 +18,8 @@ import { SettingsModule } from '../settings/settings.module';
 import { Vendor } from '../vendors/vendor.entity';
 import { Product } from '../products/product.entity';
 import { InventoryModule } from '../inventory/inventory.module';
+import { TaxRulesModule } from '../tax-rules/tax-rules.module';
+import { PurchaseLineItem } from '../../entities/purchase-line-item.entity';
 
 @Module({
   imports: [
@@ -30,6 +32,7 @@ import { InventoryModule } from '../inventory/inventory.module';
       Accrual,
       Vendor,
       Product,
+      PurchaseLineItem,
     ]),
     NotificationsModule,
     AttachmentsModule,
@@ -39,6 +42,7 @@ import { InventoryModule } from '../inventory/inventory.module';
     LicenseKeysModule,
     SettingsModule,
     InventoryModule,
+    TaxRulesModule,
   ],
   providers: [ExpensesService],
   controllers: [ExpensesController],

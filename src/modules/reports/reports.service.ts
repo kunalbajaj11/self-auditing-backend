@@ -24,6 +24,9 @@ import {
   JournalEntryAccount,
   ACCOUNT_METADATA,
 } from '../../common/enums/journal-entry-account.enum';
+import { Product } from '../products/product.entity';
+import { StockMovement } from '../inventory/entities/stock-movement.entity';
+import { StockMovementType } from '../../common/enums/stock-movement-type.enum';
 
 @Injectable()
 export class ReportsService {
@@ -52,6 +55,10 @@ export class ReportsService {
     private readonly debitNotesRepository: Repository<DebitNote>,
     @InjectRepository(CreditNoteApplication)
     private readonly creditNoteApplicationsRepository: Repository<CreditNoteApplication>,
+    @InjectRepository(Product)
+    private readonly productsRepository: Repository<Product>,
+    @InjectRepository(StockMovement)
+    private readonly stockMovementsRepository: Repository<StockMovement>,
     private readonly settingsService: SettingsService,
   ) {}
 
@@ -1684,6 +1691,22 @@ export class ReportsService {
           amount: vatReceivableAmount,
         });
         totalAssets += vatReceivableAmount;
+      }
+
+      // Calculate Closing Stock (Inventory)
+      const closingStockValue = await this.calculateClosingStock(
+        organizationId,
+        asOfDate,
+      );
+      if (closingStockValue > 0) {
+        assets.push({
+          category: 'Closing Stock (Inventory)',
+          amount: closingStockValue,
+        });
+        totalAssets += closingStockValue;
+        this.logger.debug(
+          `Closing stock added to Balance Sheet: ${closingStockValue}, organizationId=${organizationId}`,
+        );
       }
 
       const liabilities: Array<{
@@ -3627,5 +3650,95 @@ export class ReportsService {
         debitNoteTransactions: vatDebitNoteItems.length,
       },
     };
+  }
+
+  /**
+   * Calculate closing stock value as of a specific date
+   * Uses average cost method for valuation
+   */
+  private async calculateClosingStock(
+    organizationId: string,
+    asOfDate: string,
+  ): Promise<number> {
+    try {
+      // Get all products for this organization
+      const products = await this.productsRepository.find({
+        where: {
+          organization: { id: organizationId },
+          isDeleted: false,
+        },
+      });
+
+      if (products.length === 0) {
+        return 0;
+      }
+
+      let totalStockValue = 0;
+
+      // Calculate stock value for each product
+      for (const product of products) {
+        // Get stock quantity from movements up to asOfDate
+        const stockQuery = this.stockMovementsRepository
+          .createQueryBuilder('movement')
+          .select('COALESCE(SUM(CAST(movement.quantity AS DECIMAL)), 0)', 'total')
+          .where('movement.product_id = :productId', { productId: product.id })
+          .andWhere('movement.organization_id = :organizationId', {
+            organizationId,
+          })
+          .andWhere('movement.is_deleted = false')
+          .andWhere('movement.created_at::date <= :asOfDate', { asOfDate });
+
+        const stockResult = await stockQuery.getRawOne();
+        const stockQuantity = parseFloat(stockResult?.total || '0');
+
+        if (stockQuantity > 0) {
+          // Use average cost for valuation (FIFO/LIFO can be added later)
+          let costPerUnit = 0;
+
+          if (product.averageCost) {
+            costPerUnit = parseFloat(product.averageCost);
+          } else if (product.costPrice) {
+            costPerUnit = parseFloat(product.costPrice);
+          } else {
+            // Calculate average cost from purchase movements
+            const purchaseMovementsQuery = this.stockMovementsRepository
+              .createQueryBuilder('movement')
+              .select([
+                'SUM(CAST(movement.quantity AS DECIMAL)) AS totalQty',
+                'SUM(CAST(movement.total_cost AS DECIMAL)) AS totalCost',
+              ])
+              .where('movement.product_id = :productId', { productId: product.id })
+              .andWhere('movement.organization_id = :organizationId', {
+                organizationId,
+              })
+              .andWhere('movement.movement_type = :type', {
+                type: StockMovementType.PURCHASE,
+              })
+              .andWhere('movement.is_deleted = false')
+              .andWhere('movement.created_at::date <= :asOfDate', { asOfDate });
+
+            const purchaseResult = await purchaseMovementsQuery.getRawOne();
+            const totalQty = parseFloat(purchaseResult?.totalQty || '0');
+            const totalCost = parseFloat(purchaseResult?.totalCost || '0');
+
+            if (totalQty > 0) {
+              costPerUnit = totalCost / totalQty;
+            }
+          }
+
+          const productStockValue = stockQuantity * costPerUnit;
+          totalStockValue += productStockValue;
+        }
+      }
+
+      return Math.round(totalStockValue * 100) / 100;
+    } catch (error) {
+      this.logger.error(
+        `Error calculating closing stock: organizationId=${organizationId}, error=${error.message}`,
+        error.stack,
+      );
+      // Return 0 on error to not break the Balance Sheet
+      return 0;
+    }
   }
 }

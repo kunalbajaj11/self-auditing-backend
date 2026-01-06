@@ -37,6 +37,7 @@ import { RegionConfigModule } from './modules/region-config/region-config.module
 import { PayrollModule } from './modules/payroll/payroll.module';
 import { InventoryModule } from './modules/inventory/inventory.module';
 import { ProductsModule } from './modules/products/products.module';
+import { TaxRulesModule } from './modules/tax-rules/tax-rules.module';
 import { AppBootstrapService } from './bootstrap/app-bootstrap.service';
 import { SanitizeAttachmentsInterceptor } from './common/interceptors/sanitize-attachments.interceptor';
 
@@ -86,6 +87,7 @@ import { SanitizeAttachmentsInterceptor } from './common/interceptors/sanitize-a
     PayrollModule,
     InventoryModule,
     ProductsModule,
+    TaxRulesModule,
   ],
   controllers: [AppController],
   providers: [

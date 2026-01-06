@@ -14,6 +14,7 @@ import { ExpenseType } from '../../../common/enums/expense-type.enum';
 import { ExpenseSource } from '../../../common/enums/expense-source.enum';
 import { VatTaxType } from '../../../common/enums/vat-tax-type.enum';
 import { AttachmentInputDto } from './attachment-input.dto';
+import { PurchaseLineItemDto } from './purchase-line-item.dto';
 
 export class CreateExpenseDto {
   @IsEnum(ExpenseType)
@@ -101,4 +102,10 @@ export class CreateExpenseDto {
   @ValidateNested({ each: true })
   @Type(() => AttachmentInputDto)
   attachments?: AttachmentInputDto[];
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => PurchaseLineItemDto)
+  lineItems?: PurchaseLineItemDto[]; // For item-wise purchase entry
 }

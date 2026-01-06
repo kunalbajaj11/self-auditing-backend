@@ -19,6 +19,7 @@ import { ExpenseType } from './expense-type.entity';
 import { Vendor } from '../modules/vendors/vendor.entity';
 import { VatTaxType } from '../common/enums/vat-tax-type.enum';
 import { Product } from '../modules/products/product.entity';
+import { PurchaseLineItem } from './purchase-line-item.entity';
 
 @Entity({ name: 'expenses' })
 export class Expense extends AbstractEntity {
@@ -195,4 +196,9 @@ export class Expense extends AbstractEntity {
 
   @OneToMany(() => ExpensePayment, (payment) => payment.expense)
   payments: ExpensePayment[];
+
+  @OneToMany(() => PurchaseLineItem, (lineItem) => lineItem.expense, {
+    cascade: true,
+  })
+  lineItems: PurchaseLineItem[];
 }
