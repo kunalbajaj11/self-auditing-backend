@@ -38,6 +38,8 @@ import { PayrollModule } from './modules/payroll/payroll.module';
 import { InventoryModule } from './modules/inventory/inventory.module';
 import { ProductsModule } from './modules/products/products.module';
 import { TaxRulesModule } from './modules/tax-rules/tax-rules.module';
+import { TaxFormsModule } from './modules/tax-forms/tax-forms.module';
+import { ComplianceModule } from './modules/compliance/compliance.module';
 import { AppBootstrapService } from './bootstrap/app-bootstrap.service';
 import { SanitizeAttachmentsInterceptor } from './common/interceptors/sanitize-attachments.interceptor';
 
@@ -88,6 +90,8 @@ import { SanitizeAttachmentsInterceptor } from './common/interceptors/sanitize-a
     InventoryModule,
     ProductsModule,
     TaxRulesModule,
+    TaxFormsModule,
+    ComplianceModule,
   ],
   controllers: [AppController],
   providers: [
