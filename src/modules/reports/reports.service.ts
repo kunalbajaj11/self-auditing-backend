@@ -951,9 +951,9 @@ export class ReportsService {
           accountName: 'Share Capital',
           accountType: 'Equity',
           debit: 0,
-          credit:
-            shareCapitalPeriodAmount +
-            (shareCapitalOpening > 0 ? shareCapitalOpening : 0),
+          // Credit column should only show period transactions, not opening balance
+          // Opening balance is tracked separately in openingBalances map
+          credit: shareCapitalPeriodAmount,
           balance: shareCapitalClosing, // Closing balance (positive = credit for equity)
         });
       }
@@ -981,9 +981,9 @@ export class ReportsService {
           accountName: 'Owner/Shareholder Account',
           accountType: 'Equity',
           debit: 0,
-          credit:
-            ownerAccountPeriodAmount +
-            (ownerAccountOpening > 0 ? ownerAccountOpening : 0),
+          // Credit column should only show period transactions, not opening balance
+          // Opening balance is tracked separately in openingBalances map
+          credit: ownerAccountPeriodAmount,
           balance: ownerAccountClosing, // Closing balance (positive = credit for equity)
         });
       }
@@ -2996,6 +2996,11 @@ export class ReportsService {
           statuses,
         });
       } else {
+        // Default: Only include unpaid/partial invoices to match trial balance logic
+        // This ensures consistency between receivables report and trial balance
+        query.andWhere('invoice.payment_status IN (:...statuses)', {
+          statuses: [PaymentStatus.UNPAID, PaymentStatus.PARTIAL],
+        });
       }
 
       if (filters?.['status']) {
@@ -3228,7 +3233,21 @@ export class ReportsService {
       ];
 
       const overdueItems = allItems.filter((item) => item.isOverdue);
+      
+      // Calculate totalOutstanding: sum of all items' outstanding amounts
+      // This includes invoices (positive), unapplied credit notes (negative), and debit notes (positive)
       const totalOutstanding = allItems.reduce(
+        (sum, item) => sum + item.outstanding,
+        0,
+      );
+      
+      // Calculate receivables balance to match trial balance:
+      // Trial balance includes: invoices (unpaid/partial) + debit notes
+      // It does NOT include unapplied credit notes in receivables (they are separate)
+      const receivablesBalanceForTrialBalance = filteredInvoiceItems.reduce(
+        (sum, item) => sum + item.outstanding,
+        0,
+      ) + debitNoteItems.reduce(
         (sum, item) => sum + item.outstanding,
         0,
       );
@@ -3238,7 +3257,9 @@ export class ReportsService {
     );
 
     let openingBalance = 0;
-      let periodOutstanding = totalOutstanding;
+      // When no startDate, periodOutstanding should match receivablesBalanceForTrialBalance
+      // (invoices + debit notes only, excluding unapplied credit notes)
+      let periodOutstanding = receivablesBalanceForTrialBalance;
 
       if (startDate) {
         const openingCreditNoteApplicationsSubquery =
@@ -3347,12 +3368,18 @@ export class ReportsService {
           periodDebitNotesQuery.getRawOne(),
         ]);
 
-      const periodInvoices = Number(periodInvoicesRow?.outstanding || 0);
-      const periodDebitNotes = Number(periodDebitNotesRow?.total || 0);
-      periodOutstanding = periodInvoices + periodDebitNotes;
-    }
+        const periodInvoices = Number(periodInvoicesRow?.outstanding || 0);
+        const periodDebitNotes = Number(periodDebitNotesRow?.total || 0);
+        // Period outstanding should match trial balance: invoices + debit notes only
+        // (excludes unapplied credit notes to match trial balance calculation)
+        periodOutstanding = periodInvoices + periodDebitNotes;
+      }
 
-    const closingBalance = openingBalance + periodOutstanding;
+    // Closing balance should match trial balance calculation:
+    // Trial balance shows receivables as: invoices (unpaid/partial) + debit notes
+    // It does NOT include unapplied credit notes in receivables balance
+    // This ensures consistency between receivables report and trial balance
+    const closingBalance = receivablesBalanceForTrialBalance;
 
     return {
         asOfDate,
