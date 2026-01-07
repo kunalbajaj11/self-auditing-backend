@@ -27,6 +27,8 @@ import { InventoryService } from '../inventory/inventory.service';
 import { Product } from '../products/product.entity';
 import { StockMovementType } from '../../common/enums/stock-movement-type.enum';
 import { PlanType } from '../../common/enums/plan-type.enum';
+import { PurchaseLineItem } from '../../entities/purchase-line-item.entity';
+import { Expense } from '../../entities/expense.entity';
 import * as crypto from 'crypto';
 
 @Injectable()
@@ -48,6 +50,10 @@ export class SalesInvoicesService {
     private readonly customersRepository: Repository<Customer>,
     @InjectRepository(Product)
     private readonly productsRepository: Repository<Product>,
+    @InjectRepository(PurchaseLineItem)
+    private readonly purchaseLineItemsRepository: Repository<PurchaseLineItem>,
+    @InjectRepository(Expense)
+    private readonly expensesRepository: Repository<Expense>,
     private readonly emailService: EmailService,
     private readonly reportGeneratorService: ReportGeneratorService,
     private readonly auditLogsService: AuditLogsService,
@@ -113,6 +119,7 @@ export class SalesInvoicesService {
   /**
    * Get previously used invoice items for suggestions
    * Returns unique item names with their most recent details (unit price, VAT rate, etc.)
+   * Includes items from both sales invoices and purchase invoices (expenses)
    */
   async getItemSuggestions(
     organizationId: string,
@@ -128,7 +135,8 @@ export class SalesInvoicesService {
       usageCount: number;
     }>
   > {
-    const query = this.lineItemsRepository
+    // Query sales invoice line items
+    const salesQuery = this.lineItemsRepository
       .createQueryBuilder('item')
       .innerJoin('item.invoice', 'invoice')
       .where('invoice.organization_id = :organizationId', { organizationId })
@@ -136,14 +144,32 @@ export class SalesInvoicesService {
       .andWhere('item.is_deleted = false');
 
     if (searchTerm && searchTerm.trim().length > 0) {
-      query.andWhere('item.item_name ILIKE :searchTerm', {
+      salesQuery.andWhere('item.item_name ILIKE :searchTerm', {
         searchTerm: `%${searchTerm.trim()}%`,
       });
     }
 
-    // Get all matching items ordered by most recent first
-    const items = await query
+    const salesItems = await salesQuery
       .orderBy('invoice.invoice_date', 'DESC')
+      .addOrderBy('item.created_at', 'DESC')
+      .getMany();
+
+    // Query purchase invoice (expense) line items
+    const purchaseQuery = this.purchaseLineItemsRepository
+      .createQueryBuilder('item')
+      .innerJoin('item.expense', 'expense')
+      .where('expense.organization_id = :organizationId', { organizationId })
+      .andWhere('expense.is_deleted = false')
+      .andWhere('item.is_deleted = false');
+
+    if (searchTerm && searchTerm.trim().length > 0) {
+      purchaseQuery.andWhere('item.item_name ILIKE :searchTerm', {
+        searchTerm: `%${searchTerm.trim()}%`,
+      });
+    }
+
+    const purchaseItems = await purchaseQuery
+      .orderBy('expense.expense_date', 'DESC')
       .addOrderBy('item.created_at', 'DESC')
       .getMany();
 
@@ -162,7 +188,8 @@ export class SalesInvoicesService {
       }
     >();
 
-    for (const item of items) {
+    // Process sales invoice items
+    for (const item of salesItems) {
       const itemName = item.itemName.trim();
       const existing = itemMap.get(itemName);
 
@@ -173,6 +200,35 @@ export class SalesInvoicesService {
           unitPrice: parseFloat(item.unitPrice),
           vatRate: parseFloat(item.vatRate),
           vatTaxType: item.vatTaxType || 'STANDARD',
+          unitOfMeasure: item.unitOfMeasure || undefined,
+          usageCount: (existing?.usageCount || 0) + 1,
+          lastUsed: new Date(item.createdAt),
+        });
+      } else {
+        // Increment usage count
+        existing.usageCount++;
+      }
+    }
+
+    // Process purchase invoice items
+    for (const item of purchaseItems) {
+      const itemName = item.itemName.trim();
+      const existing = itemMap.get(itemName);
+
+      // Convert purchase invoice vatTaxType to uppercase to match sales invoice format
+      // Purchase invoices use: 'standard', 'zero_rated', 'exempt', 'reverse_charge'
+      // Sales invoices use: 'STANDARD', 'ZERO_RATED', 'EXEMPT', 'REVERSE_CHARGE'
+      const vatTaxType = item.vatTaxType 
+        ? item.vatTaxType.toUpperCase()
+        : 'STANDARD';
+
+      if (!existing || new Date(item.createdAt) > existing.lastUsed) {
+        itemMap.set(itemName, {
+          itemName,
+          description: item.description || undefined,
+          unitPrice: parseFloat(item.unitPrice),
+          vatRate: parseFloat(item.vatRate),
+          vatTaxType: vatTaxType,
           unitOfMeasure: item.unitOfMeasure || undefined,
           usageCount: (existing?.usageCount || 0) + 1,
           lastUsed: new Date(item.createdAt),

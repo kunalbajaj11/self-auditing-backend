@@ -11,6 +11,8 @@ import { Organization } from '../../entities/organization.entity';
 import { User } from '../../entities/user.entity';
 import { Customer } from '../customers/customer.entity';
 import { Product } from '../products/product.entity';
+import { PurchaseLineItem } from '../../entities/purchase-line-item.entity';
+import { Expense } from '../../entities/expense.entity';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { ReportsModule } from '../reports/reports.module';
 import { AuditLogsModule } from '../audit-logs/audit-logs.module';
@@ -28,6 +30,8 @@ import { InventoryModule } from '../inventory/inventory.module';
       User,
       Customer,
       Product,
+      PurchaseLineItem,
+      Expense,
     ]),
     ScheduleModule.forRoot(),
     NotificationsModule,

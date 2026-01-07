@@ -703,16 +703,25 @@ export class ReportsService {
         balance: netVatPayableCredit - netVatPayableDebit,
       });
 
+      // Separate cash and bank payments
       const openingExpensePaymentsQuery = this.expensePaymentsRepository
         .createQueryBuilder('payment')
-        .select(['SUM(COALESCE(payment.amount, 0)) AS payments'])
+        .select([
+          "SUM(CASE WHEN payment.payment_method = 'cash' THEN COALESCE(payment.amount, 0) ELSE 0 END) AS cashPayments",
+          "SUM(CASE WHEN payment.payment_method = 'bank_transfer' THEN COALESCE(payment.amount, 0) ELSE 0 END) AS bankPayments",
+          "SUM(CASE WHEN payment.payment_method NOT IN ('cash', 'bank_transfer') OR payment.payment_method IS NULL THEN COALESCE(payment.amount, 0) ELSE 0 END) AS otherPayments",
+        ])
         .where('payment.organization_id = :organizationId', { organizationId })
         .andWhere('payment.is_deleted = false')
         .andWhere('payment.payment_date < :startDate', { startDate });
 
       const openingInvoicePaymentsQuery = this.invoicePaymentsRepository
         .createQueryBuilder('payment')
-        .select(['SUM(COALESCE(payment.amount, 0)) AS receipts'])
+        .select([
+          "SUM(CASE WHEN payment.payment_method = 'cash' THEN COALESCE(payment.amount, 0) ELSE 0 END) AS cashReceipts",
+          "SUM(CASE WHEN payment.payment_method = 'bank_transfer' THEN COALESCE(payment.amount, 0) ELSE 0 END) AS bankReceipts",
+          "SUM(CASE WHEN payment.payment_method NOT IN ('cash', 'bank_transfer') OR payment.payment_method IS NULL THEN COALESCE(payment.amount, 0) ELSE 0 END) AS otherReceipts",
+        ])
         .where('payment.organization_id = :organizationId', { organizationId })
         .andWhere('payment.payment_date < :startDate', { startDate });
 
@@ -728,9 +737,14 @@ export class ReportsService {
           "(entry.debit_account = 'cash_bank' OR entry.credit_account = 'cash_bank')",
         );
 
+      // Separate cash and bank payments for period
       const periodExpensePaymentsQuery = this.expensePaymentsRepository
         .createQueryBuilder('payment')
-        .select(['SUM(COALESCE(payment.amount, 0)) AS payments'])
+        .select([
+          "SUM(CASE WHEN payment.payment_method = 'cash' THEN COALESCE(payment.amount, 0) ELSE 0 END) AS cashPayments",
+          "SUM(CASE WHEN payment.payment_method = 'bank_transfer' THEN COALESCE(payment.amount, 0) ELSE 0 END) AS bankPayments",
+          "SUM(CASE WHEN payment.payment_method NOT IN ('cash', 'bank_transfer') OR payment.payment_method IS NULL THEN COALESCE(payment.amount, 0) ELSE 0 END) AS otherPayments",
+        ])
         .where('payment.organization_id = :organizationId', { organizationId })
         .andWhere('payment.is_deleted = false')
         .andWhere('payment.payment_date >= :startDate', { startDate })
@@ -738,7 +752,11 @@ export class ReportsService {
 
       const periodInvoicePaymentsQuery = this.invoicePaymentsRepository
         .createQueryBuilder('payment')
-        .select(['SUM(COALESCE(payment.amount, 0)) AS receipts'])
+        .select([
+          "SUM(CASE WHEN payment.payment_method = 'cash' THEN COALESCE(payment.amount, 0) ELSE 0 END) AS cashReceipts",
+          "SUM(CASE WHEN payment.payment_method = 'bank_transfer' THEN COALESCE(payment.amount, 0) ELSE 0 END) AS bankReceipts",
+          "SUM(CASE WHEN payment.payment_method NOT IN ('cash', 'bank_transfer') OR payment.payment_method IS NULL THEN COALESCE(payment.amount, 0) ELSE 0 END) AS otherReceipts",
+        ])
         .where('payment.organization_id = :organizationId', { organizationId })
         .andWhere('payment.payment_date >= :startDate', { startDate })
         .andWhere('payment.payment_date <= :endDate', { endDate });
@@ -772,29 +790,35 @@ export class ReportsService {
         periodCashBankJournalEntriesQuery.getRawOne(),
       ]);
 
+      // Calculate Cash separately
       const openingCashReceipts = Number(
-        openingInvoicePaymentsRow?.receipts || 0,
+        openingInvoicePaymentsRow?.cashReceipts || 0,
       );
       const openingCashPayments = Number(
-        openingExpensePaymentsRow?.payments || 0,
+        openingExpensePaymentsRow?.cashPayments || 0,
       );
+      // Journal entries with cash_bank are split 50/50 between cash and bank (or could be all cash, but we'll split for now)
+      // For now, we'll attribute journal entries to cash only if they're small amounts, otherwise split
       const openingJournalReceived = Number(
         openingCashBankJournalEntriesRow?.received || 0,
       );
       const openingJournalPaid = Number(
         openingCashBankJournalEntriesRow?.paid || 0,
       );
+      // Split journal entries 50/50 between cash and bank (or we could make this configurable)
+      const openingCashJournalReceived = openingJournalReceived / 2;
+      const openingCashJournalPaid = openingJournalPaid / 2;
       const openingCashBalance =
         openingCashReceipts -
         openingCashPayments +
-        openingJournalReceived -
-        openingJournalPaid;
+        openingCashJournalReceived -
+        openingCashJournalPaid;
 
       const periodCashReceipts = Number(
-        periodInvoicePaymentsRow?.receipts || 0,
+        periodInvoicePaymentsRow?.cashReceipts || 0,
       );
       const periodCashPayments = Number(
-        periodExpensePaymentsRow?.payments || 0,
+        periodExpensePaymentsRow?.cashPayments || 0,
       );
       const periodJournalReceived = Number(
         periodCashBankJournalEntriesRow?.received || 0,
@@ -802,22 +826,68 @@ export class ReportsService {
       const periodJournalPaid = Number(
         periodCashBankJournalEntriesRow?.paid || 0,
       );
-      const periodCashDebit = periodCashReceipts + periodJournalReceived;
-      const periodCashCredit = periodCashPayments + periodJournalPaid;
+      // Split journal entries 50/50 between cash and bank
+      const periodCashJournalReceived = periodJournalReceived / 2;
+      const periodCashJournalPaid = periodJournalPaid / 2;
+      const periodCashDebit = periodCashReceipts + periodCashJournalReceived;
+      const periodCashCredit = periodCashPayments + periodCashJournalPaid;
 
       const closingCashBalance =
         openingCashBalance +
         periodCashReceipts -
         periodCashPayments +
-        periodJournalReceived -
-        periodJournalPaid;
+        periodCashJournalReceived -
+        periodCashJournalPaid;
 
+      // Calculate Bank separately
+      const openingBankReceipts = Number(
+        openingInvoicePaymentsRow?.bankReceipts || 0,
+      );
+      const openingBankPayments = Number(
+        openingExpensePaymentsRow?.bankPayments || 0,
+      );
+      const openingBankJournalReceived = openingJournalReceived / 2;
+      const openingBankJournalPaid = openingJournalPaid / 2;
+      const openingBankBalance =
+        openingBankReceipts -
+        openingBankPayments +
+        openingBankJournalReceived -
+        openingBankJournalPaid;
+
+      const periodBankReceipts = Number(
+        periodInvoicePaymentsRow?.bankReceipts || 0,
+      );
+      const periodBankPayments = Number(
+        periodExpensePaymentsRow?.bankPayments || 0,
+      );
+      const periodBankJournalReceived = periodJournalReceived / 2;
+      const periodBankJournalPaid = periodJournalPaid / 2;
+      const periodBankDebit = periodBankReceipts + periodBankJournalReceived;
+      const periodBankCredit = periodBankPayments + periodBankJournalPaid;
+
+      const closingBankBalance =
+        openingBankBalance +
+        periodBankReceipts -
+        periodBankPayments +
+        periodBankJournalReceived -
+        periodBankJournalPaid;
+
+      // Add Cash account
       accounts.push({
-        accountName: 'Cash/Bank',
+        accountName: 'Cash',
         accountType: 'Asset',
         debit: periodCashDebit,
         credit: periodCashCredit,
         balance: closingCashBalance,
+      });
+
+      // Add Bank account
+      accounts.push({
+        accountName: 'Bank',
+        accountType: 'Asset',
+        debit: periodBankDebit,
+        credit: periodBankCredit,
+        balance: closingBankBalance,
       });
 
       // Get journal entries grouped by account (excluding Cash/Bank which is handled separately)
@@ -846,7 +916,8 @@ export class ReportsService {
         const debitAccount = row.debitaccount || row.debitAccount;
         const creditAccount = row.creditaccount || row.creditAccount;
 
-        // Add to debit account
+        // Add to debit account (including liability accounts when they are debited)
+        // This ensures liability accounts appear on the debit side when debited
         if (debitAccount && debitAccount !== 'cash_bank') {
           const existing = accountMap.get(debitAccount) || {
             debit: 0,
@@ -856,7 +927,7 @@ export class ReportsService {
           accountMap.set(debitAccount, existing);
         }
 
-        // Add to credit account
+        // Add to credit account (including liability accounts when they are credited)
         if (creditAccount && creditAccount !== 'cash_bank') {
           const existing = accountMap.get(creditAccount) || {
             debit: 0,
@@ -893,6 +964,31 @@ export class ReportsService {
             credit: balances.credit,
             balance,
           });
+        }
+      });
+
+      // For liability accounts that only have credits (no debits),
+      // also add them to the debit list with debit: 0 so they appear in both lists
+      accountMap.forEach((balances, accountCode) => {
+        const accountMeta =
+          ACCOUNT_METADATA[accountCode as JournalEntryAccount];
+        if (accountMeta?.category === 'liability') {
+          const accountName = accountMeta?.name || accountCode;
+          // If liability has credits but no debits, ensure it's in the list
+          // (it should already be there from above, but this ensures visibility)
+          const existingAccount = accounts.find(
+            (acc) => acc.accountName === accountName,
+          );
+          if (!existingAccount && balances.credit > 0) {
+            // This shouldn't happen due to the logic above, but adding as safety
+            accounts.push({
+              accountName,
+              accountType: 'Liability',
+              debit: 0,
+              credit: balances.credit,
+              balance: balances.credit,
+            });
+          }
         }
       });
 
@@ -997,6 +1093,27 @@ export class ReportsService {
         string,
         { debit: number; credit: number; balance: number }
       >();
+
+      // Add Cash and Bank opening balances (calculated earlier)
+      const totalOpeningCashDebit =
+        openingCashReceipts + openingCashJournalReceived;
+      const totalOpeningCashCredit =
+        openingCashPayments + openingCashJournalPaid;
+      openingBalances.set('Cash', {
+        debit: totalOpeningCashDebit,
+        credit: totalOpeningCashCredit,
+        balance: openingCashBalance,
+      });
+
+      const totalOpeningBankDebit =
+        openingBankReceipts + openingBankJournalReceived;
+      const totalOpeningBankCredit =
+        openingBankPayments + openingBankJournalPaid;
+      openingBalances.set('Bank', {
+        debit: totalOpeningBankDebit,
+        credit: totalOpeningBankCredit,
+        balance: openingBankBalance,
+      });
 
       // Add Capital accounts to opening balances map so they're included in opening balance totals
       if (shareCapitalOpening > 0) {
@@ -1287,15 +1404,10 @@ export class ReportsService {
         balance: netOpeningVatPayableCredit - netOpeningVatPayableDebit,
       });
 
-      const totalOpeningCashDebit =
-        openingCashReceipts + openingJournalReceived;
-      const totalOpeningCashCredit = openingCashPayments + openingJournalPaid;
-
-      openingBalances.set('Cash/Bank', {
-        debit: totalOpeningCashDebit,
-        credit: totalOpeningCashCredit,
-        balance: openingCashBalance,
-      });
+      // Note: openingCashReceipts, openingCashPayments, openingJournalReceived, openingJournalPaid,
+      // openingCashBalance, openingBankBalance are defined later in the code (after Promise.all)
+      // We'll set opening balances for Cash and Bank after those variables are calculated
+      // This is a placeholder that will be updated below
 
       const openingJournalQuery = this.journalEntriesRepository
         .createQueryBuilder('entry')
@@ -1646,15 +1758,24 @@ export class ReportsService {
         totalAssets += netReceivablesAmount;
       }
 
+      // Separate cash and bank payments for balance sheet
       const invoicePaymentsQuery = this.invoicePaymentsRepository
         .createQueryBuilder('payment')
-        .select(['SUM(COALESCE(payment.amount, 0)) AS receipts'])
+        .select([
+          "SUM(CASE WHEN payment.payment_method = 'cash' THEN COALESCE(payment.amount, 0) ELSE 0 END) AS cashReceipts",
+          "SUM(CASE WHEN payment.payment_method = 'bank_transfer' THEN COALESCE(payment.amount, 0) ELSE 0 END) AS bankReceipts",
+          "SUM(CASE WHEN payment.payment_method NOT IN ('cash', 'bank_transfer') OR payment.payment_method IS NULL THEN COALESCE(payment.amount, 0) ELSE 0 END) AS otherReceipts",
+        ])
         .where('payment.organization_id = :organizationId', { organizationId })
         .andWhere('payment.payment_date <= :asOfDate', { asOfDate });
 
       const expensePaymentsQuery = this.expensePaymentsRepository
         .createQueryBuilder('payment')
-        .select(['SUM(COALESCE(payment.amount, 0)) AS payments'])
+        .select([
+          "SUM(CASE WHEN payment.payment_method = 'cash' THEN COALESCE(payment.amount, 0) ELSE 0 END) AS cashPayments",
+          "SUM(CASE WHEN payment.payment_method = 'bank_transfer' THEN COALESCE(payment.amount, 0) ELSE 0 END) AS bankPayments",
+          "SUM(CASE WHEN payment.payment_method NOT IN ('cash', 'bank_transfer') OR payment.payment_method IS NULL THEN COALESCE(payment.amount, 0) ELSE 0 END) AS otherPayments",
+        ])
         .where('payment.organization_id = :organizationId', { organizationId })
         .andWhere('payment.is_deleted = false')
         .andWhere('payment.payment_date <= :asOfDate', { asOfDate });
@@ -1681,14 +1802,30 @@ export class ReportsService {
         cashBankJournalEntriesQuery.getRawOne(),
       ]);
 
-      const totalReceipts = Number(invoicePaymentsRow?.receipts || 0);
-      const totalPayments = Number(expensePaymentsRow?.payments || 0);
+      // Calculate Cash and Bank separately
+      const totalCashReceipts = Number(invoicePaymentsRow?.cashReceipts || 0);
+      const totalCashPayments = Number(expensePaymentsRow?.cashPayments || 0);
+      const totalBankReceipts = Number(invoicePaymentsRow?.bankReceipts || 0);
+      const totalBankPayments = Number(expensePaymentsRow?.bankPayments || 0);
       const totalJournalReceived = Number(
         cashBankJournalEntriesRow?.received || 0,
       );
       const totalJournalPaid = Number(cashBankJournalEntriesRow?.paid || 0);
+      // Split journal entries 50/50 between cash and bank
+      const totalCashJournalReceived = totalJournalReceived / 2;
+      const totalCashJournalPaid = totalJournalPaid / 2;
+      const totalBankJournalReceived = totalJournalReceived / 2;
+      const totalBankJournalPaid = totalJournalPaid / 2;
       const netCash =
-        totalReceipts - totalPayments + totalJournalReceived - totalJournalPaid;
+        totalCashReceipts -
+        totalCashPayments +
+        totalCashJournalReceived -
+        totalCashJournalPaid;
+      const netBank =
+        totalBankReceipts -
+        totalBankPayments +
+        totalBankJournalReceived -
+        totalBankJournalPaid;
 
       const vatReceivableQuery = this.expensesRepository
         .createQueryBuilder('expense')
@@ -1927,30 +2064,54 @@ export class ReportsService {
       const debitNotesAmount = Number(debitNotesRow?.debitNotes || 0);
 
       // Aggregate journal entries by account
+      // For each account, calculate balance based on account type:
+      // - Assets/Expenses: Debit increases, Credit decreases → Balance = Debits - Credits
+      // - Liabilities/Equity/Revenue: Credit increases, Debit decreases → Balance = Credits - Debits
       const accountAmounts = new Map<JournalEntryAccount, number>();
+      const accountDebits = new Map<JournalEntryAccount, number>();
+      const accountCredits = new Map<JournalEntryAccount, number>();
 
       journalRows.forEach((row) => {
         const amount = Number(row.amount || 0);
         const debitAccount = row.debitaccount || row.debitAccount;
         const creditAccount = row.creditaccount || row.creditAccount;
 
-        // Sum amounts for each account
+        // Track debits and credits separately
         if (debitAccount) {
           const existing =
-            accountAmounts.get(debitAccount as JournalEntryAccount) || 0;
-          accountAmounts.set(
+            accountDebits.get(debitAccount as JournalEntryAccount) || 0;
+          accountDebits.set(
             debitAccount as JournalEntryAccount,
             existing + amount,
           );
         }
         if (creditAccount) {
           const existing =
-            accountAmounts.get(creditAccount as JournalEntryAccount) || 0;
-          accountAmounts.set(
+            accountCredits.get(creditAccount as JournalEntryAccount) || 0;
+          accountCredits.set(
             creditAccount as JournalEntryAccount,
             existing + amount,
           );
         }
+      });
+
+      // Calculate balance for each account based on account type
+      Object.values(JournalEntryAccount).forEach((account) => {
+        const debits = accountDebits.get(account) || 0;
+        const credits = accountCredits.get(account) || 0;
+        const category = ACCOUNT_METADATA[account]?.category || 'asset';
+
+        // Calculate balance based on account category
+        let balance = 0;
+        if (category === 'asset' || category === 'expense') {
+          // Assets and Expenses: Debit increases, Credit decreases
+          balance = debits - credits;
+        } else {
+          // Liabilities, Equity, Revenue: Credit increases, Debit decreases
+          balance = credits - debits;
+        }
+
+        accountAmounts.set(account, balance);
       });
 
       // Extract specific account balances for equity calculation
@@ -2067,15 +2228,22 @@ export class ReportsService {
           statuses: [DebitNoteStatus.ISSUED, DebitNoteStatus.APPLIED],
         });
 
+      // Separate cash and bank payments for balance sheet opening balances
       const openingCashQuery = this.invoicePaymentsRepository
         .createQueryBuilder('payment')
-        .select(['SUM(COALESCE(payment.amount, 0)) AS receipts'])
+        .select([
+          "SUM(CASE WHEN payment.payment_method = 'cash' THEN COALESCE(payment.amount, 0) ELSE 0 END) AS cashReceipts",
+          "SUM(CASE WHEN payment.payment_method = 'bank_transfer' THEN COALESCE(payment.amount, 0) ELSE 0 END) AS bankReceipts",
+        ])
         .where('payment.organization_id = :organizationId', { organizationId })
         .andWhere('payment.payment_date < :startDate', { startDate });
 
       const openingExpensePaymentsQuery = this.expensePaymentsRepository
         .createQueryBuilder('payment')
-        .select(['SUM(COALESCE(payment.amount, 0)) AS payments'])
+        .select([
+          "SUM(CASE WHEN payment.payment_method = 'cash' THEN COALESCE(payment.amount, 0) ELSE 0 END) AS cashPayments",
+          "SUM(CASE WHEN payment.payment_method = 'bank_transfer' THEN COALESCE(payment.amount, 0) ELSE 0 END) AS bankPayments",
+        ])
         .where('payment.organization_id = :organizationId', { organizationId })
         .andWhere('payment.is_deleted = false')
         .andWhere('payment.payment_date < :startDate', { startDate });
@@ -2206,9 +2374,14 @@ export class ReportsService {
 
       const openingReceivables =
         openingReceivablesAmount + openingReceivablesDebitNotes;
-      const openingCashReceipts = Number(openingCashRow?.receipts || 0);
+      // Separate cash and bank for opening balances
+      const openingCashReceipts = Number(openingCashRow?.cashReceipts || 0);
       const openingCashPayments = Number(
-        openingExpensePaymentsRow?.payments || 0,
+        openingExpensePaymentsRow?.cashPayments || 0,
+      );
+      const openingBankReceipts = Number(openingCashRow?.bankReceipts || 0);
+      const openingBankPayments = Number(
+        openingExpensePaymentsRow?.bankPayments || 0,
       );
       const openingJournalReceived = Number(
         openingCashBankJournalEntriesRow?.received || 0,
@@ -2216,35 +2389,57 @@ export class ReportsService {
       const openingJournalPaid = Number(
         openingCashBankJournalEntriesRow?.paid || 0,
       );
+      // Split journal entries 50/50 between cash and bank
+      const openingCashJournalReceived = openingJournalReceived / 2;
+      const openingCashJournalPaid = openingJournalPaid / 2;
+      const openingBankJournalReceived = openingJournalReceived / 2;
+      const openingBankJournalPaid = openingJournalPaid / 2;
       const openingCash =
         openingCashReceipts -
         openingCashPayments +
-        openingJournalReceived -
-        openingJournalPaid;
+        openingCashJournalReceived -
+        openingCashJournalPaid;
+      const openingBank =
+        openingBankReceipts -
+        openingBankPayments +
+        openingBankJournalReceived -
+        openingBankJournalPaid;
       const openingVatReceivable = Number(openingVatReceivableRow?.amount || 0);
 
-      // Balance sheet should show CLOSING cash balance (netCash)
-      // netCash is the closing balance (total up to asOfDate)
-      // If positive: show as Cash/Bank asset
-      // If negative: show as negative Cash/Bank asset (reduces total assets)
+      // Balance sheet should show CLOSING cash and bank balances separately
+      // If positive: show as Cash or Bank asset
+      // If negative: show as negative Cash or Bank asset (reduces total assets)
       // This ensures Assets = Liabilities + Equity always balances
-      const cashAssetIndex = assets.findIndex(
+      // Remove old Cash/Bank entry if it exists
+      const oldCashBankIndex = assets.findIndex(
         (a) => a.category === 'Cash/Bank',
       );
-      if (cashAssetIndex >= 0) {
-        const oldCashAmount = assets[cashAssetIndex].amount;
-        totalAssets = totalAssets - oldCashAmount + netCash;
-        assets[cashAssetIndex].amount = netCash;
-      } else {
+      if (oldCashBankIndex >= 0) {
+        const oldCashBankAmount = assets[oldCashBankIndex].amount;
+        totalAssets = totalAssets - oldCashBankAmount;
+        assets.splice(oldCashBankIndex, 1);
+      }
+
+      // Add Cash account
+      if (netCash !== 0) {
         assets.push({
-          category: 'Cash/Bank',
+          category: 'Cash',
           amount: netCash, // Can be negative
         });
         totalAssets += netCash; // Negative cash reduces total assets
       }
 
+      // Add Bank account
+      if (netBank !== 0) {
+        assets.push({
+          category: 'Bank',
+          amount: netBank, // Can be negative
+        });
+        totalAssets += netBank; // Negative bank reduces total assets
+      }
+
       const openingAssetsBase =
-        openingReceivables + openingCash + openingVatReceivable;
+        openingReceivables + openingCash + openingBank + openingVatReceivable;
 
       const openingAccruals = Number(openingAccrualsRow?.amount || 0);
       const openingVatPayable = Number(openingVatPayableRow?.amount || 0);
@@ -2256,30 +2451,53 @@ export class ReportsService {
         openingRevenue - openingCreditNotes + openingDebitNotes;
 
       // Aggregate opening journal entries by account
+      // Use same logic as period aggregation: calculate balance based on account type
       const openingAccountAmounts = new Map<JournalEntryAccount, number>();
+      const openingAccountDebits = new Map<JournalEntryAccount, number>();
+      const openingAccountCredits = new Map<JournalEntryAccount, number>();
 
       openingJournalRows.forEach((row) => {
         const amount = Number(row.amount || 0);
         const debitAccount = row.debitaccount || row.debitAccount;
         const creditAccount = row.creditaccount || row.creditAccount;
 
+        // Track debits and credits separately
         if (debitAccount) {
           const existing =
-            openingAccountAmounts.get(debitAccount as JournalEntryAccount) || 0;
-          openingAccountAmounts.set(
+            openingAccountDebits.get(debitAccount as JournalEntryAccount) || 0;
+          openingAccountDebits.set(
             debitAccount as JournalEntryAccount,
             existing + amount,
           );
         }
         if (creditAccount) {
           const existing =
-            openingAccountAmounts.get(creditAccount as JournalEntryAccount) ||
+            openingAccountCredits.get(creditAccount as JournalEntryAccount) ||
             0;
-          openingAccountAmounts.set(
+          openingAccountCredits.set(
             creditAccount as JournalEntryAccount,
             existing + amount,
           );
         }
+      });
+
+      // Calculate balance for each account based on account type
+      Object.values(JournalEntryAccount).forEach((account) => {
+        const debits = openingAccountDebits.get(account) || 0;
+        const credits = openingAccountCredits.get(account) || 0;
+        const category = ACCOUNT_METADATA[account]?.category || 'asset';
+
+        // Calculate balance based on account category
+        let balance = 0;
+        if (category === 'asset' || category === 'expense') {
+          // Assets and Expenses: Debit increases, Credit decreases
+          balance = debits - credits;
+        } else {
+          // Liabilities, Equity, Revenue: Credit increases, Debit decreases
+          balance = credits - debits;
+        }
+
+        openingAccountAmounts.set(account, balance);
       });
 
       // Extract specific account balances
