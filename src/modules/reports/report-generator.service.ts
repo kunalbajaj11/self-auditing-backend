@@ -391,6 +391,7 @@ export class ReportGeneratorService {
       'expense_summary',
       'bank_reconciliation',
       'trial_balance',
+      'stock_balance',
     ];
     return landscapeReports.includes(reportType);
   }
@@ -408,6 +409,7 @@ export class ReportGeneratorService {
       profit_and_loss: 'Profit and Loss Statement',
       payables: 'Payables (Accruals) Report',
       receivables: 'Receivables Report',
+      stock_balance: 'Stock Balance Report',
       audit_trail: 'Transaction Audit Trail',
       vendor_report: 'Vendor Report',
       employee_report: 'Employee Report',
@@ -926,6 +928,12 @@ export class ReportGeneratorService {
     ) {
       // VAT Control Account report
       this.addXLSXVatControlAccount(workbook, reportData, currency);
+    } else if (
+      reportData.type === 'stock_balance' &&
+      typeof reportData.data === 'object'
+    ) {
+      // Stock Balance report
+      this.addXLSXStockBalance(workbook, reportData, currency);
     } else if (
       (reportData.type === 'expense_summary' ||
         reportData.type === 'expense_detail') &&
@@ -2248,6 +2256,10 @@ export class ReportGeneratorService {
     // Handle VAT Control Account
     else if (reportData.type === 'vat_control_account') {
       this.addPDFVatControlAccount(doc, data, currency);
+    }
+    // Handle Stock Balance
+    else if (reportData.type === 'stock_balance') {
+      this.addPDFStockBalance(doc, data, currency);
     }
     // Default object display
     else {
@@ -3897,6 +3909,405 @@ export class ReportGeneratorService {
     doc.y = totalY + totalRowHeight + 10;
   }
 
+  /**
+   * Professional Stock Balance PDF Rendering
+   */
+  private addPDFStockBalance(
+    doc: PDFKit.PDFDocument,
+    data: any,
+    currency: string,
+  ): void {
+    const margin = 50;
+    const pageWidth = doc.page.width;
+    const contentWidth = pageWidth - 2 * margin;
+
+    // Brand colors
+    const primaryColor = '#0077C8';
+    const accentColor = '#00A3E0';
+    const borderColor = '#e1e8ed';
+    const textDark = '#1a1a1a';
+    const textMuted = '#6b7280';
+    const headerBg = '#f0f7fc';
+    const altRowBg = '#f8fafc';
+    const positiveColor = '#059669';
+    const negativeColor = '#dc2626';
+
+    // Starting position
+    doc.y = 175;
+
+    // Period information
+    if (data.period) {
+      doc.fontSize(9).font('Helvetica').fillColor(textMuted);
+      if (data.period.startDate) {
+        doc.text(`From: ${new Date(data.period.startDate).toLocaleDateString('en-GB')}`, margin);
+        doc.y += 12;
+      }
+      if (data.period.endDate) {
+        doc.text(`To: ${new Date(data.period.endDate).toLocaleDateString('en-GB')}`, margin);
+        doc.y += 12;
+      }
+      doc.y += 8;
+    }
+
+    // Summary cards
+    const summary = data.summary || {};
+    const cardWidth = (contentWidth - 30) / 6;
+    const cardHeight = 70;
+    const cardY = doc.y;
+
+    const summaryItems = [
+      {
+        label: 'Opening Stock',
+        value: summary.totalOpeningStock || 0,
+        color: primaryColor,
+      },
+      {
+        label: 'Stock Inwards',
+        value: summary.totalStockInwards || 0,
+        color: positiveColor,
+      },
+      {
+        label: 'Stock Outwards',
+        value: summary.totalStockOutwards || 0,
+        color: negativeColor,
+      },
+      {
+        label: 'Adjustments',
+        value: summary.totalAdjustments || 0,
+        color: accentColor,
+      },
+      {
+        label: 'Closing Stock',
+        value: summary.totalClosingStock || 0,
+        color: primaryColor,
+        bold: true,
+      },
+      {
+        label: 'Stock Value',
+        value: summary.totalStockValue || 0,
+        color: primaryColor,
+        bold: true,
+        isCurrency: true,
+      },
+    ];
+
+    summaryItems.forEach((item, index) => {
+      const cardX = margin + index * (cardWidth + 5);
+
+      // Card background
+      doc
+        .rect(cardX, cardY, cardWidth, cardHeight)
+        .fillColor('#ffffff')
+        .fill()
+        .strokeColor(borderColor)
+        .lineWidth(1)
+        .stroke();
+
+      // Top accent line
+      doc.rect(cardX, cardY, cardWidth, 3).fillColor(item.color).fill();
+
+      // Label
+      doc
+        .fontSize(7)
+        .font('Helvetica')
+        .fillColor(textMuted)
+        .text(item.label.toUpperCase(), cardX + 6, cardY + 10, {
+          width: cardWidth - 12,
+          align: 'left',
+        });
+
+      // Value
+      const displayValue = item.isCurrency
+        ? this.formatCurrency(item.value as number, currency)
+        : (item.value as number).toFixed(2);
+      doc
+        .fontSize(item.bold ? 12 : 10)
+        .font(item.bold ? 'Helvetica-Bold' : 'Helvetica-Bold')
+        .fillColor(textDark)
+        .text(displayValue, cardX + 6, cardY + 24, {
+          width: cardWidth - 12,
+          align: 'left',
+        });
+    });
+
+    doc.y = cardY + cardHeight + 20;
+
+    // Products table
+    if (data.products && Array.isArray(data.products) && data.products.length > 0) {
+      doc.fontSize(11).font('Helvetica-Bold').fillColor(textDark);
+      doc.text('Product Stock Details', margin, doc.y);
+      doc.y += 15;
+
+      // Column widths for landscape
+      const colWidths = [
+        contentWidth * 0.18, // Product Name
+        contentWidth * 0.08, // Unit
+        contentWidth * 0.1, // Opening Stock
+        contentWidth * 0.1, // Stock Inwards
+        contentWidth * 0.1, // Stock Outwards
+        contentWidth * 0.1, // Adjustments
+        contentWidth * 0.1, // Closing Stock
+        contentWidth * 0.12, // Avg Cost
+        contentWidth * 0.12, // Stock Value
+      ];
+
+      const headerHeight = 28;
+      const rowHeight = 22;
+
+      // Check if header fits
+      if (doc.y + headerHeight + rowHeight > doc.page.height - 60) {
+        doc.addPage();
+        doc.y = 50;
+      }
+
+      const headerY = doc.y;
+
+      // Table header
+      doc
+        .rect(margin, headerY, contentWidth, headerHeight)
+        .fillColor(accentColor)
+        .fill();
+
+      doc.fontSize(9).font('Helvetica-Bold').fillColor('#ffffff');
+
+      const headers = [
+        'Product',
+        'Unit',
+        'Opening',
+        'Inwards',
+        'Outwards',
+        'Adjust',
+        'Closing',
+        'Avg Cost',
+        'Value',
+      ];
+      let x = margin + 6;
+      headers.forEach((header, i) => {
+        doc.text(header, x, headerY + 9, {
+          width: colWidths[i] - 12,
+          align: i >= 2 ? 'right' : 'left',
+        });
+        x += colWidths[i];
+      });
+
+      doc.fillColor(textDark);
+
+      // Data rows
+      let rowY = headerY + headerHeight;
+
+      data.products.forEach((product: any, index: number) => {
+        // Check if new page needed
+        if (rowY + rowHeight > doc.page.height - 100) {
+          doc.addPage();
+          rowY = 50;
+          doc.y = rowY;
+
+          // Re-draw header
+          doc
+            .rect(margin, rowY, contentWidth, headerHeight)
+            .fillColor(accentColor)
+            .fill();
+          doc.fontSize(9).font('Helvetica-Bold').fillColor('#ffffff');
+          x = margin + 6;
+          headers.forEach((header, i) => {
+            doc.text(header, x, rowY + 9, {
+              width: colWidths[i] - 12,
+              align: i >= 2 ? 'right' : 'left',
+            });
+            x += colWidths[i];
+          });
+          doc.fillColor(textDark);
+          rowY += headerHeight;
+          doc.y = rowY;
+        }
+
+        // Alternate row background
+        if (index % 2 === 1) {
+          doc
+            .rect(margin, rowY, contentWidth, rowHeight)
+            .fillColor(altRowBg)
+            .fill();
+        }
+
+        // Row border
+        doc
+          .strokeColor(borderColor)
+          .lineWidth(0.5)
+          .moveTo(margin, rowY)
+          .lineTo(margin + contentWidth, rowY)
+          .stroke();
+
+        doc.fontSize(8.5).font('Helvetica');
+        x = margin + 6;
+
+        // Product Name
+        doc.fillColor(textDark);
+        doc.text(product.productName || 'N/A', x, rowY + 7, {
+          width: colWidths[0] - 12,
+          align: 'left',
+        });
+        x += colWidths[0];
+
+        // Unit
+        doc.fillColor(textMuted);
+        doc.text(product.unitOfMeasure || 'unit', x, rowY + 7, {
+          width: colWidths[1] - 12,
+          align: 'left',
+        });
+        x += colWidths[1];
+
+        // Opening Stock
+        doc.fillColor(textDark);
+        doc.text((product.openingStock || 0).toFixed(2), x, rowY + 7, {
+          width: colWidths[2] - 12,
+          align: 'right',
+        });
+        x += colWidths[2];
+
+        // Stock Inwards
+        doc.fillColor(positiveColor);
+        doc.text((product.stockInwards || 0).toFixed(2), x, rowY + 7, {
+          width: colWidths[3] - 12,
+          align: 'right',
+        });
+        x += colWidths[3];
+
+        // Stock Outwards
+        doc.fillColor(negativeColor);
+        doc.text((product.stockOutwards || 0).toFixed(2), x, rowY + 7, {
+          width: colWidths[4] - 12,
+          align: 'right',
+        });
+        x += colWidths[4];
+
+        // Adjustments
+        const adjColor = (product.adjustments || 0) >= 0 ? positiveColor : negativeColor;
+        doc.fillColor(adjColor);
+        doc.text((product.adjustments || 0).toFixed(2), x, rowY + 7, {
+          width: colWidths[5] - 12,
+          align: 'right',
+        });
+        x += colWidths[5];
+
+        // Closing Stock
+        doc.font('Helvetica-Bold').fillColor(textDark);
+        doc.text((product.closingStock || 0).toFixed(2), x, rowY + 7, {
+          width: colWidths[6] - 12,
+          align: 'right',
+        });
+        x += colWidths[6];
+
+        // Average Cost
+        doc.font('Helvetica').fillColor(textMuted);
+        doc.text(this.formatCurrency(product.averageCost || 0, currency), x, rowY + 7, {
+          width: colWidths[7] - 12,
+          align: 'right',
+        });
+        x += colWidths[7];
+
+        // Stock Value
+        doc.font('Helvetica-Bold').fillColor(textDark);
+        doc.text(this.formatCurrency(product.stockValue || 0, currency), x, rowY + 7, {
+          width: colWidths[8] - 12,
+          align: 'right',
+        });
+
+        doc.font('Helvetica');
+        rowY += rowHeight;
+      });
+
+      // Total row
+      const totalRowHeight = 28;
+      const totalY = rowY;
+      doc
+        .rect(margin, totalY, contentWidth, totalRowHeight)
+        .fillColor(headerBg)
+        .fill();
+
+      doc
+        .strokeColor(accentColor)
+        .lineWidth(1.5)
+        .moveTo(margin, totalY)
+        .lineTo(margin + contentWidth, totalY)
+        .stroke();
+
+      doc.fontSize(9.5).font('Helvetica-Bold').fillColor(textDark);
+
+      x = margin + 6;
+      doc.text('TOTAL', x, totalY + 9, {
+        width: colWidths[0] + colWidths[1] - 12,
+        align: 'left',
+      });
+      x += colWidths[0] + colWidths[1];
+
+      doc.text((summary.totalOpeningStock || 0).toFixed(2), x, totalY + 9, {
+        width: colWidths[2] - 12,
+        align: 'right',
+      });
+      x += colWidths[2];
+
+      doc.fillColor(positiveColor);
+      doc.text((summary.totalStockInwards || 0).toFixed(2), x, totalY + 9, {
+        width: colWidths[3] - 12,
+        align: 'right',
+      });
+      x += colWidths[3];
+
+      doc.fillColor(negativeColor);
+      doc.text((summary.totalStockOutwards || 0).toFixed(2), x, totalY + 9, {
+        width: colWidths[4] - 12,
+        align: 'right',
+      });
+      x += colWidths[4];
+
+      const adjTotalColor = (summary.totalAdjustments || 0) >= 0 ? positiveColor : negativeColor;
+      doc.fillColor(adjTotalColor);
+      doc.text((summary.totalAdjustments || 0).toFixed(2), x, totalY + 9, {
+        width: colWidths[5] - 12,
+        align: 'right',
+      });
+      x += colWidths[5];
+
+      doc.fillColor(textDark);
+      doc.text((summary.totalClosingStock || 0).toFixed(2), x, totalY + 9, {
+        width: colWidths[6] - 12,
+        align: 'right',
+      });
+      x += colWidths[6];
+
+      doc.fillColor(textMuted);
+      doc.text('', x, totalY + 9, { width: colWidths[7] - 12 }); // Skip avg cost
+      x += colWidths[7];
+
+      doc.fillColor(textDark);
+      doc.text(this.formatCurrency(summary.totalStockValue || 0, currency), x, totalY + 9, {
+        width: colWidths[8] - 12,
+        align: 'right',
+      });
+
+      doc.y = totalY + totalRowHeight + 10;
+    } else {
+      doc.fontSize(10).font('Helvetica').fillColor(textMuted);
+      doc.text('No stock movements found for the selected period.', margin, doc.y);
+      doc.y += 15;
+    }
+
+    // Validation note
+    if (summary.totalStockValue > 0) {
+      doc.y += 10;
+      doc.fontSize(8).font('Helvetica').fillColor(textMuted);
+      doc.text(
+        `Note: Total stock value (${this.formatCurrency(summary.totalStockValue, currency)}) should match the "Closing Stock (Inventory)" amount in the Balance Sheet report for the same date.`,
+        margin,
+        doc.y,
+        {
+          width: contentWidth,
+          align: 'left',
+        },
+      );
+    }
+  }
+
   private addPDFTable(
     doc: PDFKit.PDFDocument,
     data: any[],
@@ -5513,6 +5924,162 @@ export class ReportGeneratorService {
     }
   }
 
+  /**
+   * Excel Stock Balance Report
+   */
+  private addXLSXStockBalance(
+    workbook: ExcelJS.Workbook,
+    reportData: ReportData,
+    currency: string,
+  ): void {
+    const data = reportData.data as any;
+
+    // Summary sheet
+    const summarySheet = workbook.getWorksheet('Summary') || workbook.addWorksheet('Summary');
+    this.addXLSXHeader(summarySheet, reportData);
+
+    summarySheet.addRow(['Stock Balance Report Summary']);
+    const titleRow = summarySheet.getRow(summarySheet.rowCount);
+    titleRow.font = { bold: true, size: 14 };
+    summarySheet.addRow([]);
+
+    // Period
+    if (data.period) {
+      if (data.period.startDate) {
+        summarySheet.addRow(['From:', new Date(data.period.startDate).toLocaleDateString('en-GB')]);
+      }
+      if (data.period.endDate) {
+        summarySheet.addRow(['To:', new Date(data.period.endDate).toLocaleDateString('en-GB')]);
+      }
+      summarySheet.addRow([]);
+    }
+
+    // Summary cards
+    const summary = data.summary || {};
+    summarySheet.addRow(['Summary']);
+    const summaryTitleRow = summarySheet.getRow(summarySheet.rowCount);
+    summaryTitleRow.font = { bold: true, size: 12 };
+    summarySheet.addRow([]);
+
+    summarySheet.addRow(['Opening Stock', summary.totalOpeningStock || 0]);
+    summarySheet.addRow(['Stock Inwards', summary.totalStockInwards || 0]);
+    summarySheet.addRow(['Stock Outwards', summary.totalStockOutwards || 0]);
+    summarySheet.addRow(['Adjustments', summary.totalAdjustments || 0]);
+    summarySheet.addRow(['Closing Stock', summary.totalClosingStock || 0]);
+    summarySheet.addRow(['Stock Value', summary.totalStockValue || 0]);
+    const stockValueRow = summarySheet.getRow(summarySheet.rowCount);
+    stockValueRow.font = { bold: true };
+
+    // Format summary
+    summarySheet.getColumn('A').width = 20;
+    summarySheet.getColumn('B').numFmt = '#,##0.00';
+    summarySheet.getColumn('B').alignment = { horizontal: 'right' };
+    summarySheet.getRow(summarySheet.rowCount).getCell('B').numFmt = `"${currency}" #,##0.00`;
+
+    summarySheet.addRow([]);
+    summarySheet.addRow(['Note: Total stock value should match the "Closing Stock (Inventory)" amount in the Balance Sheet report for the same date.']);
+    const noteRow = summarySheet.getRow(summarySheet.rowCount);
+    noteRow.font = { italic: true, size: 9 };
+    noteRow.getCell('A').fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FFF0F7FC' },
+    };
+
+    // Products sheet
+    if (data.products && Array.isArray(data.products) && data.products.length > 0) {
+      const productsSheet = workbook.addWorksheet('Products');
+      productsSheet.addRow([
+        'Product Name',
+        'SKU',
+        'Unit',
+        'Opening Stock',
+        'Stock Inwards',
+        'Stock Outwards',
+        'Adjustments',
+        'Closing Stock',
+        'Avg Cost/Unit',
+        'Stock Value',
+      ]);
+
+      const headerRow = productsSheet.getRow(1);
+      headerRow.font = {
+        bold: true,
+        size: 11,
+        color: { argb: 'FFFFFFFF' },
+      };
+      headerRow.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FF0077C8' },
+      };
+      headerRow.border = {
+        top: { style: 'medium', color: { argb: 'FF005A9A' } },
+        bottom: { style: 'medium', color: { argb: 'FF005A9A' } },
+        left: { style: 'thin', color: { argb: 'FF005A9A' } },
+        right: { style: 'thin', color: { argb: 'FF005A9A' } },
+      };
+      headerRow.height = 22;
+      headerRow.alignment = { horizontal: 'center', vertical: 'middle' };
+
+      data.products.forEach((product: any) => {
+        productsSheet.addRow([
+          product.productName || 'N/A',
+          product.sku || 'N/A',
+          product.unitOfMeasure || 'unit',
+          product.openingStock || 0,
+          product.stockInwards || 0,
+          product.stockOutwards || 0,
+          product.adjustments || 0,
+          product.closingStock || 0,
+          product.averageCost || 0,
+          product.stockValue || 0,
+        ]);
+      });
+
+      // Total row
+      productsSheet.addRow([
+        'TOTAL',
+        '',
+        '',
+        summary.totalOpeningStock || 0,
+        summary.totalStockInwards || 0,
+        summary.totalStockOutwards || 0,
+        summary.totalAdjustments || 0,
+        summary.totalClosingStock || 0,
+        '',
+        summary.totalStockValue || 0,
+      ]);
+      const totalRow = productsSheet.getRow(productsSheet.rowCount);
+      totalRow.font = { bold: true };
+      totalRow.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FFF0F7FC' },
+      };
+
+      // Format columns
+      productsSheet.getColumn('A').width = 30;
+      productsSheet.getColumn('B').width = 15;
+      productsSheet.getColumn('C').width = 10;
+      productsSheet.getColumn('D').numFmt = '#,##0.00';
+      productsSheet.getColumn('D').alignment = { horizontal: 'right' };
+      productsSheet.getColumn('E').numFmt = '#,##0.00';
+      productsSheet.getColumn('E').alignment = { horizontal: 'right' };
+      productsSheet.getColumn('F').numFmt = '#,##0.00';
+      productsSheet.getColumn('F').alignment = { horizontal: 'right' };
+      productsSheet.getColumn('G').numFmt = '#,##0.00';
+      productsSheet.getColumn('G').alignment = { horizontal: 'right' };
+      productsSheet.getColumn('H').numFmt = '#,##0.00';
+      productsSheet.getColumn('H').alignment = { horizontal: 'right' };
+      productsSheet.getColumn('I').numFmt = `"${currency}" #,##0.00`;
+      productsSheet.getColumn('I').alignment = { horizontal: 'right' };
+      productsSheet.getColumn('J').numFmt = `"${currency}" #,##0.00`;
+      productsSheet.getColumn('J').alignment = { horizontal: 'right' };
+      totalRow.getCell('J').font = { bold: true };
+    }
+  }
+
   private addXLSXReceivables(
     workbook: ExcelJS.Workbook,
     reportData: ReportData,
@@ -5908,6 +6475,87 @@ export class ReportGeneratorService {
           lines.push(
             `Total,,,,${this.formatCurrency(totalOutputAmount, currency)},,${this.formatCurrency(totalOutput, currency)},`,
           );
+        }
+      } else if (reportData.type === 'stock_balance') {
+        // Stock Balance CSV format
+        const data = reportData.data;
+        const currency = reportData.metadata?.currency || 'AED';
+
+        lines.push('Stock Balance Report');
+        lines.push('');
+        if (data.period) {
+          if (data.period.startDate) {
+            lines.push(`From,${new Date(data.period.startDate).toLocaleDateString('en-GB')}`);
+          }
+          if (data.period.endDate) {
+            lines.push(`To,${new Date(data.period.endDate).toLocaleDateString('en-GB')}`);
+          }
+        }
+        lines.push('');
+        lines.push('Summary');
+        lines.push('-'.repeat(80));
+        if (data.summary) {
+          lines.push(`Opening Stock,${(data.summary.totalOpeningStock || 0).toFixed(2)}`);
+          lines.push(`Stock Inwards,${(data.summary.totalStockInwards || 0).toFixed(2)}`);
+          lines.push(`Stock Outwards,${(data.summary.totalStockOutwards || 0).toFixed(2)}`);
+          lines.push(`Adjustments,${(data.summary.totalAdjustments || 0).toFixed(2)}`);
+          lines.push(`Closing Stock,${(data.summary.totalClosingStock || 0).toFixed(2)}`);
+          lines.push(`Stock Value,${this.formatCurrency(data.summary.totalStockValue || 0, currency)}`);
+        }
+        lines.push('');
+        lines.push('-'.repeat(80));
+        lines.push('');
+
+        // Products
+        if (
+          data.products &&
+          Array.isArray(data.products) &&
+          data.products.length > 0
+        ) {
+          lines.push('Product Stock Details');
+          lines.push('-'.repeat(80));
+          lines.push(
+            'Product Name,SKU,Unit,Opening Stock,Stock Inwards,Stock Outwards,Adjustments,Closing Stock,Avg Cost/Unit,Stock Value',
+          );
+          data.products.forEach((product: any) => {
+            lines.push(
+              [
+                product.productName || 'N/A',
+                product.sku || 'N/A',
+                product.unitOfMeasure || 'unit',
+                (product.openingStock || 0).toFixed(2),
+                (product.stockInwards || 0).toFixed(2),
+                (product.stockOutwards || 0).toFixed(2),
+                (product.adjustments || 0).toFixed(2),
+                (product.closingStock || 0).toFixed(2),
+                this.formatCurrency(product.averageCost || 0, currency),
+                this.formatCurrency(product.stockValue || 0, currency),
+              ].join(','),
+            );
+          });
+          lines.push('');
+          lines.push(
+            [
+              'TOTAL',
+              '',
+              '',
+              (data.summary?.totalOpeningStock || 0).toFixed(2),
+              (data.summary?.totalStockInwards || 0).toFixed(2),
+              (data.summary?.totalStockOutwards || 0).toFixed(2),
+              (data.summary?.totalAdjustments || 0).toFixed(2),
+              (data.summary?.totalClosingStock || 0).toFixed(2),
+              '',
+              this.formatCurrency(data.summary?.totalStockValue || 0, currency),
+            ].join(','),
+          );
+          lines.push('');
+          lines.push('-'.repeat(80));
+          lines.push('');
+          lines.push(
+            `Note: Total stock value (${this.formatCurrency(data.summary?.totalStockValue || 0, currency)}) should match the "Closing Stock (Inventory)" amount in the Balance Sheet report for the same date.`,
+          );
+        } else {
+          lines.push('No stock movements found for the selected period.');
         }
       } else if (reportData.type === 'vat_report') {
         lines.push('VAT Summary');

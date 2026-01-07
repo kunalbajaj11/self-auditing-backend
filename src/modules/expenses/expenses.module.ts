@@ -20,6 +20,7 @@ import { Product } from '../products/product.entity';
 import { InventoryModule } from '../inventory/inventory.module';
 import { TaxRulesModule } from '../tax-rules/tax-rules.module';
 import { PurchaseLineItem } from '../../entities/purchase-line-item.entity';
+import { ExpensePayment } from '../../entities/expense-payment.entity';
 
 @Module({
   imports: [
@@ -33,6 +34,7 @@ import { PurchaseLineItem } from '../../entities/purchase-line-item.entity';
       Vendor,
       Product,
       PurchaseLineItem,
+      ExpensePayment,
     ]),
     NotificationsModule,
     AttachmentsModule,

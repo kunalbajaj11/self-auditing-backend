@@ -210,6 +210,9 @@ export class ReportsService {
         case ReportType.VAT_CONTROL_ACCOUNT:
           data = await this.buildVatControlAccount(organizationId, dto.filters);
           break;
+        case ReportType.STOCK_BALANCE:
+          data = await this.buildStockBalanceReport(organizationId, dto.filters);
+          break;
         default:
           this.logger.warn(`Unknown report type: ${dto.type}`);
           data = {};
@@ -989,6 +992,23 @@ export class ReportsService {
         string,
         { debit: number; credit: number; balance: number }
       >();
+
+      // Add Capital accounts to opening balances map so they're included in opening balance totals
+      if (shareCapitalOpening > 0) {
+        openingBalances.set('Share Capital', {
+          debit: 0,
+          credit: shareCapitalOpening,
+          balance: shareCapitalOpening, // Positive balance for equity (credit account)
+        });
+      }
+
+      if (ownerAccountOpening > 0) {
+        openingBalances.set('Owner/Shareholder Account', {
+          debit: 0,
+          credit: ownerAccountOpening,
+          balance: ownerAccountOpening, // Positive balance for equity (credit account)
+        });
+      }
 
       const openingExpenseQuery = this.expensesRepository
         .createQueryBuilder('expense')
@@ -3739,6 +3759,311 @@ export class ReportsService {
       );
       // Return 0 on error to not break the Balance Sheet
       return 0;
+    }
+  }
+
+  /**
+   * Build Stock Balance Report
+   * Shows stock inwards, outwards, adjustments, and balance for each product
+   */
+  private async buildStockBalanceReport(
+    organizationId: string,
+    filters?: Record<string, any>,
+  ): Promise<{
+    products: Array<{
+      productId: string;
+      productName: string;
+      sku?: string;
+      unitOfMeasure?: string;
+      openingStock: number;
+      stockInwards: number;
+      stockOutwards: number;
+      adjustments: number;
+      closingStock: number;
+      averageCost: number;
+      stockValue: number;
+    }>;
+    summary: {
+      totalOpeningStock: number;
+      totalStockInwards: number;
+      totalStockOutwards: number;
+      totalAdjustments: number;
+      totalClosingStock: number;
+      totalStockValue: number;
+    };
+    period: {
+      startDate?: string;
+      endDate?: string;
+    };
+  }> {
+    this.logger.log(
+      `Building Stock Balance Report: organizationId=${organizationId}, filters=${JSON.stringify(filters)}`,
+    );
+
+    try {
+      const startDate = filters?.startDate
+        ? new Date(filters.startDate).toISOString().split('T')[0]
+        : undefined;
+      const endDate = filters?.endDate
+        ? new Date(filters.endDate).toISOString().split('T')[0]
+        : new Date().toISOString().split('T')[0];
+
+      // Get all products for this organization
+      const products = await this.productsRepository.find({
+        where: {
+          organization: { id: organizationId },
+          isDeleted: false,
+        },
+        order: { name: 'ASC' },
+      });
+
+      if (products.length === 0) {
+        this.logger.debug('No products found for stock balance report');
+        return {
+          products: [],
+          summary: {
+            totalOpeningStock: 0,
+            totalStockInwards: 0,
+            totalStockOutwards: 0,
+            totalAdjustments: 0,
+            totalClosingStock: 0,
+            totalStockValue: 0,
+          },
+          period: { startDate, endDate },
+        };
+      }
+
+      const productReports: Array<{
+        productId: string;
+        productName: string;
+        sku?: string;
+        unitOfMeasure?: string;
+        openingStock: number;
+        stockInwards: number;
+        stockOutwards: number;
+        adjustments: number;
+        closingStock: number;
+        averageCost: number;
+        stockValue: number;
+      }> = [];
+
+      let totalOpeningStock = 0;
+      let totalStockInwards = 0;
+      let totalStockOutwards = 0;
+      let totalAdjustments = 0;
+      let totalClosingStock = 0;
+      let totalStockValue = 0;
+
+      for (const product of products) {
+        // Calculate opening stock (as of start date, or 0 if no start date)
+        let openingStock = 0;
+        if (startDate) {
+          const openingQuery = this.stockMovementsRepository
+            .createQueryBuilder('movement')
+            .select('COALESCE(SUM(CAST(movement.quantity AS DECIMAL)), 0)', 'total')
+            .where('movement.product_id = :productId', { productId: product.id })
+            .andWhere('movement.organization_id = :organizationId', {
+              organizationId,
+            })
+            .andWhere('movement.is_deleted = false')
+            .andWhere('movement.created_at::date < :startDate', { startDate });
+
+          const openingResult = await openingQuery.getRawOne();
+          openingStock = parseFloat(openingResult?.total || '0');
+        }
+
+        // Calculate stock inwards (PURCHASE movements in period)
+        const inwardsQuery = this.stockMovementsRepository
+          .createQueryBuilder('movement')
+          .select('COALESCE(SUM(CAST(movement.quantity AS DECIMAL)), 0)', 'total')
+          .where('movement.product_id = :productId', { productId: product.id })
+          .andWhere('movement.organization_id = :organizationId', {
+            organizationId,
+          })
+          .andWhere('movement.movement_type = :type', {
+            type: StockMovementType.PURCHASE,
+          })
+          .andWhere('movement.is_deleted = false');
+
+        if (startDate) {
+          inwardsQuery.andWhere('movement.created_at::date >= :startDate', {
+            startDate,
+          });
+        }
+        if (endDate) {
+          inwardsQuery.andWhere('movement.created_at::date <= :endDate', {
+            endDate,
+          });
+        }
+
+        const inwardsResult = await inwardsQuery.getRawOne();
+        const stockInwards = parseFloat(inwardsResult?.total || '0');
+
+        // Calculate stock outwards (SALE movements in period)
+        const outwardsQuery = this.stockMovementsRepository
+          .createQueryBuilder('movement')
+          .select('COALESCE(SUM(ABS(CAST(movement.quantity AS DECIMAL))), 0)', 'total')
+          .where('movement.product_id = :productId', { productId: product.id })
+          .andWhere('movement.organization_id = :organizationId', {
+            organizationId,
+          })
+          .andWhere('movement.movement_type = :type', {
+            type: StockMovementType.SALE,
+          })
+          .andWhere('movement.is_deleted = false');
+
+        if (startDate) {
+          outwardsQuery.andWhere('movement.created_at::date >= :startDate', {
+            startDate,
+          });
+        }
+        if (endDate) {
+          outwardsQuery.andWhere('movement.created_at::date <= :endDate', {
+            endDate,
+          });
+        }
+
+        const outwardsResult = await outwardsQuery.getRawOne();
+        const stockOutwards = parseFloat(outwardsResult?.total || '0');
+
+        // Calculate adjustments (ADJUSTMENT movements in period)
+        const adjustmentsQuery = this.stockMovementsRepository
+          .createQueryBuilder('movement')
+          .select('COALESCE(SUM(CAST(movement.quantity AS DECIMAL)), 0)', 'total')
+          .where('movement.product_id = :productId', { productId: product.id })
+          .andWhere('movement.organization_id = :organizationId', {
+            organizationId,
+          })
+          .andWhere('movement.movement_type = :type', {
+            type: StockMovementType.ADJUSTMENT,
+          })
+          .andWhere('movement.is_deleted = false');
+
+        if (startDate) {
+          adjustmentsQuery.andWhere('movement.created_at::date >= :startDate', {
+            startDate,
+          });
+        }
+        if (endDate) {
+          adjustmentsQuery.andWhere('movement.created_at::date <= :endDate', {
+            endDate,
+          });
+        }
+
+        const adjustmentsResult = await adjustmentsQuery.getRawOne();
+        const adjustments = parseFloat(adjustmentsResult?.total || '0');
+
+        // Calculate closing stock (as of end date)
+        const closingQuery = this.stockMovementsRepository
+          .createQueryBuilder('movement')
+          .select('COALESCE(SUM(CAST(movement.quantity AS DECIMAL)), 0)', 'total')
+          .where('movement.product_id = :productId', { productId: product.id })
+          .andWhere('movement.organization_id = :organizationId', {
+            organizationId,
+          })
+          .andWhere('movement.is_deleted = false')
+          .andWhere('movement.created_at::date <= :endDate', { endDate });
+
+        const closingResult = await closingQuery.getRawOne();
+        const closingStock = parseFloat(closingResult?.total || '0');
+
+        // Calculate average cost per unit
+        let averageCost = 0;
+        if (product.averageCost) {
+          averageCost = parseFloat(product.averageCost);
+        } else if (product.costPrice) {
+          averageCost = parseFloat(product.costPrice);
+        } else {
+          // Calculate from purchase movements up to end date
+          const costQuery = this.stockMovementsRepository
+            .createQueryBuilder('movement')
+            .select([
+              'SUM(CAST(movement.quantity AS DECIMAL)) AS totalQty',
+              'SUM(CAST(movement.total_cost AS DECIMAL)) AS totalCost',
+            ])
+            .where('movement.product_id = :productId', { productId: product.id })
+            .andWhere('movement.organization_id = :organizationId', {
+              organizationId,
+            })
+            .andWhere('movement.movement_type = :type', {
+              type: StockMovementType.PURCHASE,
+            })
+            .andWhere('movement.is_deleted = false')
+            .andWhere('movement.created_at::date <= :endDate', { endDate });
+
+          const costResult = await costQuery.getRawOne();
+          const totalQty = parseFloat(costResult?.totalQty || '0');
+          const totalCost = parseFloat(costResult?.totalCost || '0');
+
+          if (totalQty > 0) {
+            averageCost = totalCost / totalQty;
+          }
+        }
+
+        // Calculate stock value
+        const stockValue = closingStock * averageCost;
+
+        // Only include products with any stock activity or current stock
+        if (
+          openingStock !== 0 ||
+          stockInwards !== 0 ||
+          stockOutwards !== 0 ||
+          adjustments !== 0 ||
+          closingStock !== 0
+        ) {
+          productReports.push({
+            productId: product.id,
+            productName: product.name,
+            sku: product.sku || undefined,
+            unitOfMeasure: product.unitOfMeasure || undefined,
+            openingStock: Math.round(openingStock * 100) / 100,
+            stockInwards: Math.round(stockInwards * 100) / 100,
+            stockOutwards: Math.round(stockOutwards * 100) / 100,
+            adjustments: Math.round(adjustments * 100) / 100,
+            closingStock: Math.round(closingStock * 100) / 100,
+            averageCost: Math.round(averageCost * 100) / 100,
+            stockValue: Math.round(stockValue * 100) / 100,
+          });
+
+          totalOpeningStock += openingStock;
+          totalStockInwards += stockInwards;
+          totalStockOutwards += stockOutwards;
+          totalAdjustments += adjustments;
+          totalClosingStock += closingStock;
+          totalStockValue += stockValue;
+        }
+      }
+
+      // Round totals
+      totalOpeningStock = Math.round(totalOpeningStock * 100) / 100;
+      totalStockInwards = Math.round(totalStockInwards * 100) / 100;
+      totalStockOutwards = Math.round(totalStockOutwards * 100) / 100;
+      totalAdjustments = Math.round(totalAdjustments * 100) / 100;
+      totalClosingStock = Math.round(totalClosingStock * 100) / 100;
+      totalStockValue = Math.round(totalStockValue * 100) / 100;
+
+      this.logger.debug(
+        `Stock Balance Report built: products=${productReports.length}, totalStockValue=${totalStockValue}, organizationId=${organizationId}`,
+      );
+
+      return {
+        products: productReports,
+        summary: {
+          totalOpeningStock,
+          totalStockInwards,
+          totalStockOutwards,
+          totalAdjustments,
+          totalClosingStock,
+          totalStockValue,
+        },
+        period: { startDate, endDate },
+      };
+    } catch (error) {
+      this.logger.error(
+        `Error building stock balance report: organizationId=${organizationId}, error=${error.message}`,
+        error.stack,
+      );
+      throw error;
     }
   }
 }

@@ -36,6 +36,8 @@ import { ConflictException, Optional, Inject } from '@nestjs/common';
 import { PurchaseLineItem } from '../../entities/purchase-line-item.entity';
 import { PurchaseLineItemDto } from './dto/purchase-line-item.dto';
 import { TaxRulesService } from '../tax-rules/tax-rules.service';
+import { ExpensePayment } from '../../entities/expense-payment.entity';
+import { PaymentMethod } from '../../common/enums/payment-method.enum';
 
 const DEFAULT_ACCRUAL_TOLERANCE = Number(
   process.env.ACCRUAL_AMOUNT_TOLERANCE ?? 5,
@@ -62,6 +64,8 @@ export class ExpensesService {
     private readonly productsRepository: Repository<Product>,
     @InjectRepository(PurchaseLineItem)
     private readonly lineItemsRepository: Repository<PurchaseLineItem>,
+    @InjectRepository(ExpensePayment)
+    private readonly expensePaymentsRepository: Repository<ExpensePayment>,
     private readonly notificationsService: NotificationsService,
     private readonly fileStorageService: FileStorageService,
     private readonly duplicateDetectionService: DuplicateDetectionService,
@@ -710,6 +714,31 @@ export class ExpensesService {
       }
     }
 
+    // Auto-create payment record for cash-paid expenses
+    // This ensures trial balance stays balanced by creating the credit entry
+    if (dto.purchaseStatus === 'Purchase - Cash Paid') {
+      // Check if payment record already exists (avoid duplicates)
+      const existingPayments = await this.expensePaymentsRepository.find({
+        where: {
+          expense: { id: saved.id },
+          organization: { id: organizationId },
+        },
+      });
+
+      // Only create if no payment record exists
+      if (existingPayments.length === 0) {
+        const payment = this.expensePaymentsRepository.create({
+          expense: saved,
+          organization: { id: organizationId },
+          paymentDate: dto.expenseDate, // Use expense date as payment date
+          amount: saved.totalAmount, // Use total amount (includes VAT)
+          paymentMethod: PaymentMethod.CASH,
+          notes: `Auto-created payment for cash-paid expense: ${saved.vendorName || 'N/A'}`,
+        });
+        await this.expensePaymentsRepository.save(payment);
+      }
+    }
+
     if (linkedAccrualExpense) {
       await this.linkExpenseToAccrual(saved, linkedAccrualExpense);
     } else if (
@@ -1221,6 +1250,9 @@ export class ExpensesService {
     if (dto.description !== undefined) {
       expense.description = dto.description;
     }
+    // Capture previous purchase status BEFORE updating (for payment auto-creation check)
+    const previousPurchaseStatus = expense.purchaseStatus;
+    
     if (dto.purchaseStatus !== undefined) {
       expense.purchaseStatus = dto.purchaseStatus;
     }
@@ -1246,6 +1278,35 @@ export class ExpensesService {
     // Set totalAmount explicitly to override generated column calculation
     expense.totalAmount = this.formatMoney(calculatedTotalAmount);
     const saved = await this.expensesRepository.save(expense);
+
+    // Auto-create payment record if status changed to "Purchase - Cash Paid"
+    // Do this AFTER saving to ensure we use the saved expense's totalAmount
+    if (
+      dto.purchaseStatus !== undefined &&
+      dto.purchaseStatus === 'Purchase - Cash Paid' &&
+      previousPurchaseStatus !== 'Purchase - Cash Paid'
+    ) {
+      // Check if payment record already exists (avoid duplicates)
+      const existingPayments = await this.expensePaymentsRepository.find({
+        where: {
+          expense: { id: saved.id },
+          organization: { id: organizationId },
+        },
+      });
+
+      // Only create if no payment record exists
+      if (existingPayments.length === 0) {
+        const payment = this.expensePaymentsRepository.create({
+          expense: saved,
+          organization: { id: organizationId },
+          paymentDate: saved.expenseDate, // Use expense date as payment date
+          amount: saved.totalAmount, // Use saved expense's totalAmount (after save)
+          paymentMethod: PaymentMethod.CASH,
+          notes: `Auto-created payment for cash-paid expense: ${saved.vendorName || 'N/A'}`,
+        });
+        await this.expensePaymentsRepository.save(payment);
+      }
+    }
 
     // Verify totalAmount is correct (especially for reverse charge)
     // If the generated column still overrides our value, we need to update it
