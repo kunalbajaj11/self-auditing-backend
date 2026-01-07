@@ -2223,43 +2223,24 @@ export class ReportsService {
         openingJournalPaid;
       const openingVatReceivable = Number(openingVatReceivableRow?.amount || 0);
 
-      // Balance sheet should show CLOSING cash balance (netCash), not period change
+      // Balance sheet should show CLOSING cash balance (netCash)
       // netCash is the closing balance (total up to asOfDate)
-      // If negative, show as Bank Overdraft in liabilities
-      if (netCash > 0) {
-        const cashAssetIndex = assets.findIndex(
-          (a) => a.category === 'Cash/Bank',
-        );
-        if (cashAssetIndex >= 0) {
-          const oldCashAmount = assets[cashAssetIndex].amount;
-          totalAssets = totalAssets - oldCashAmount + netCash;
-          assets[cashAssetIndex].amount = netCash;
-        } else {
-          assets.push({
-            category: 'Cash/Bank',
-            amount: netCash,
-          });
-          totalAssets += netCash;
-        }
-      } else if (netCash < 0) {
-        // Negative cash balance should be shown as Bank Overdraft in liabilities
-        // This represents the amount owed (overdraft)
-        const overdraftIndex = liabilities.findIndex(
-          (l) => l.vendor === 'Bank Overdraft',
-        );
-        if (overdraftIndex >= 0) {
-          const oldOverdraftAmount = liabilities[overdraftIndex].amount;
-          totalLiabilities =
-            totalLiabilities - oldOverdraftAmount + Math.abs(netCash);
-          liabilities[overdraftIndex].amount = Math.abs(netCash);
-        } else {
-          liabilities.push({
-            vendor: 'Bank Overdraft',
-            amount: Math.abs(netCash),
-            status: 'Liability',
-          });
-          totalLiabilities += Math.abs(netCash);
-        }
+      // If positive: show as Cash/Bank asset
+      // If negative: show as negative Cash/Bank asset (reduces total assets)
+      // This ensures Assets = Liabilities + Equity always balances
+      const cashAssetIndex = assets.findIndex(
+        (a) => a.category === 'Cash/Bank',
+      );
+      if (cashAssetIndex >= 0) {
+        const oldCashAmount = assets[cashAssetIndex].amount;
+        totalAssets = totalAssets - oldCashAmount + netCash;
+        assets[cashAssetIndex].amount = netCash;
+      } else {
+        assets.push({
+          category: 'Cash/Bank',
+          amount: netCash, // Can be negative
+        });
+        totalAssets += netCash; // Negative cash reduces total assets
       }
 
       const openingAssetsBase =
