@@ -3,13 +3,19 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { JournalEntry } from '../../entities/journal-entry.entity';
 import { Organization } from '../../entities/organization.entity';
 import { User } from '../../entities/user.entity';
+import { ExpensePayment } from '../../entities/expense-payment.entity';
 import { JournalEntriesService } from './journal-entries.service';
 import { JournalEntriesController } from './journal-entries.controller';
 import { AuditLogsModule } from '../audit-logs/audit-logs.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([JournalEntry, Organization, User]),
+    TypeOrmModule.forFeature([
+      JournalEntry,
+      Organization,
+      User,
+      ExpensePayment,
+    ]),
     AuditLogsModule,
   ],
   controllers: [JournalEntriesController],

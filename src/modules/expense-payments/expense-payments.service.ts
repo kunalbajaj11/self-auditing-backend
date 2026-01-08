@@ -253,10 +253,12 @@ export class ExpensePaymentsService {
       const totalAmount = parseFloat(expense.totalAmount || '0');
 
       // Get direct payments for this expense
+      // CRITICAL: Filter by is_deleted = false to only count active payments
       const existingPayments = await manager.find(ExpensePayment, {
         where: {
           expense: { id: allocation.expenseId },
           organization: { id: organizationId },
+          isDeleted: false, // Only check non-deleted payments
         },
       });
 
@@ -348,10 +350,12 @@ export class ExpensePaymentsService {
     const totalAmount = parseFloat(expense.totalAmount || '0');
 
     // Get direct payments for this expense
+    // CRITICAL: Filter by is_deleted = false to only count active payments
     const existingPayments = await manager.find(ExpensePayment, {
       where: {
         expense: { id: dto.expenseId },
         organization: { id: organizationId },
+        isDeleted: false, // Only check non-deleted payments
       },
     });
 
@@ -386,6 +390,21 @@ export class ExpensePaymentsService {
       throw new BadRequestException(
         `Payment amount (${paymentAmount.toFixed(2)}) exceeds outstanding balance (${outstandingBalance.toFixed(2)})`,
       );
+    }
+
+    // Prevent duplicate payments for expenses with "Purchase - Cash Paid" status
+    // If expense has auto-created payment and user tries to create another, warn them
+    if (
+      existingPayments.length > 0 &&
+      dto.paymentMethod === PaymentMethod.CASH
+    ) {
+      if (expense.purchaseStatus === 'Purchase - Cash Paid') {
+        throw new BadRequestException(
+          'A cash payment already exists for this expense. ' +
+            'Expenses with "Purchase - Cash Paid" status automatically create payments. ' +
+            'If you need to modify the payment, please delete the existing payment first.',
+        );
+      }
     }
 
     // Create payment record

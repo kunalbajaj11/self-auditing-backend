@@ -8,11 +8,13 @@ import { Repository, DataSource } from 'typeorm';
 import { JournalEntry } from '../../entities/journal-entry.entity';
 import { Organization } from '../../entities/organization.entity';
 import { User } from '../../entities/user.entity';
+import { ExpensePayment } from '../../entities/expense-payment.entity';
 import { CreateJournalEntryDto } from './dto/create-journal-entry.dto';
 import { UpdateJournalEntryDto } from './dto/update-journal-entry.dto';
 import { JournalEntryFilterDto } from './dto/journal-entry-filter.dto';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { AuditAction } from '../../common/enums/audit-action.enum';
+import { PaymentMethod } from '../../common/enums/payment-method.enum';
 
 @Injectable()
 export class JournalEntriesService {
@@ -23,6 +25,8 @@ export class JournalEntriesService {
     private readonly organizationsRepository: Repository<Organization>,
     @InjectRepository(User)
     private readonly usersRepository: Repository<User>,
+    @InjectRepository(ExpensePayment)
+    private readonly expensePaymentsRepository: Repository<ExpensePayment>,
     private readonly auditLogsService: AuditLogsService,
     private readonly dataSource: DataSource,
   ) {}
@@ -121,6 +125,46 @@ export class JournalEntriesService {
       throw new BadRequestException(
         'Retained Earnings is a system-calculated account and cannot be used in journal entries',
       );
+    }
+
+    // Validate: Prevent duplicate cash payments via journal entries
+    // If journal entry involves cash (credit or debit), check for existing cash payments
+    const isCashJournalEntry =
+      dto.creditAccount === 'cash' || dto.debitAccount === 'cash';
+
+    if (isCashJournalEntry && dto.customerVendorName) {
+      // Check if there's an existing cash payment for the same vendor on the same date
+      const existingCashPayments = await this.expensePaymentsRepository
+        .createQueryBuilder('payment')
+        .leftJoin('payment.expense', 'expense')
+        .where('payment.organization_id = :organizationId', { organizationId })
+        .andWhere('payment.payment_method = :paymentMethod', {
+          paymentMethod: PaymentMethod.CASH,
+        })
+        .andWhere('payment.is_deleted = false')
+        .andWhere('payment.payment_date = :entryDate', {
+          entryDate: dto.entryDate,
+        })
+        .andWhere(
+          '(expense.vendor_name = :vendorName OR payment.notes LIKE :vendorNamePattern)',
+          {
+            vendorName: dto.customerVendorName,
+            vendorNamePattern: `%${dto.customerVendorName}%`,
+          },
+        )
+        .andWhere(
+          'ABS(CAST(payment.amount AS DECIMAL) - :amount) <= 0.01',
+          { amount: dto.amount },
+        )
+        .getMany();
+
+      if (existingCashPayments.length > 0) {
+        throw new BadRequestException(
+          `A cash payment already exists for vendor "${dto.customerVendorName}" on ${dto.entryDate} with amount ${dto.amount.toFixed(2)}. ` +
+            'Creating a journal entry for cash would duplicate this payment. ' +
+            'If you need to record this transaction, please delete the existing payment first or use a different account.',
+        );
+      }
     }
 
     const journalEntry = this.journalEntriesRepository.create({

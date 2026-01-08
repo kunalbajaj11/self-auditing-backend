@@ -718,10 +718,12 @@ export class ExpensesService {
     // This ensures trial balance stays balanced by creating the credit entry
     if (dto.purchaseStatus === 'Purchase - Cash Paid') {
       // Check if payment record already exists (avoid duplicates)
+      // CRITICAL: Filter by is_deleted = false to avoid finding deleted payments
       const existingPayments = await this.expensePaymentsRepository.find({
         where: {
           expense: { id: saved.id },
           organization: { id: organizationId },
+          isDeleted: false, // Only check non-deleted payments
         },
       });
 
@@ -1288,10 +1290,12 @@ export class ExpensesService {
       previousPurchaseStatus !== 'Purchase - Cash Paid'
     ) {
       // Check if payment record already exists (avoid duplicates)
+      // CRITICAL: Filter by is_deleted = false to avoid finding deleted payments
       const existingPayments = await this.expensePaymentsRepository.find({
         where: {
           expense: { id: saved.id },
           organization: { id: organizationId },
+          isDeleted: false, // Only check non-deleted payments
         },
       });
 
