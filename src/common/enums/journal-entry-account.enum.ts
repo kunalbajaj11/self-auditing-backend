@@ -4,7 +4,8 @@
  */
 export enum JournalEntryAccount {
   // Assets
-  CASH_BANK = 'cash_bank',
+  CASH = 'cash',
+  BANK = 'bank',
   ACCOUNTS_RECEIVABLE = 'accounts_receivable',
   VAT_RECEIVABLE = 'vat_receivable',
   PREPAID_EXPENSES = 'prepaid_expenses',
@@ -37,9 +38,14 @@ export interface AccountMetadata {
 }
 
 export const ACCOUNT_METADATA: Record<JournalEntryAccount, AccountMetadata> = {
-  [JournalEntryAccount.CASH_BANK]: {
-    code: JournalEntryAccount.CASH_BANK,
-    name: 'Cash/Bank',
+  [JournalEntryAccount.CASH]: {
+    code: JournalEntryAccount.CASH,
+    name: 'Cash',
+    category: 'asset',
+  },
+  [JournalEntryAccount.BANK]: {
+    code: JournalEntryAccount.BANK,
+    name: 'Bank',
     category: 'asset',
   },
   [JournalEntryAccount.ACCOUNTS_RECEIVABLE]: {

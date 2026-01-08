@@ -71,8 +71,8 @@ export async function migrateJournalEntries(
         legacyStatus === 'cash_received' ||
         legacyStatus === 'bank_received'
       ) {
-        // Cash/Bank received - debit Cash/Bank
-        debitAccount = JournalEntryAccount.CASH_BANK;
+        // Cash/Bank received - debit Cash (mapping all to cash)
+        debitAccount = JournalEntryAccount.CASH;
 
         // Credit side based on type
         if (legacyType === 'share_capital') {
@@ -83,8 +83,8 @@ export async function migrateJournalEntries(
           creditAccount = JournalEntryAccount.SALES_REVENUE; // Default
         }
       } else if (legacyStatus === 'cash_paid' || legacyStatus === 'bank_paid') {
-        // Cash/Bank paid - credit Cash/Bank
-        creditAccount = JournalEntryAccount.CASH_BANK;
+        // Cash/Bank paid - credit Cash (mapping all to cash)
+        creditAccount = JournalEntryAccount.CASH;
 
         // Debit side based on type
         if (legacyType === 'shareholder_account') {
@@ -98,14 +98,14 @@ export async function migrateJournalEntries(
         // Non-cash entries - based on type and category
         if (legacyCategory === 'equity') {
           if (legacyType === 'share_capital') {
-            debitAccount = JournalEntryAccount.CASH_BANK;
+            debitAccount = JournalEntryAccount.CASH;
             creditAccount = JournalEntryAccount.SHARE_CAPITAL;
           } else if (legacyType === 'retained_earnings') {
             debitAccount = JournalEntryAccount.GENERAL_EXPENSE; // Usually expenses
             creditAccount = JournalEntryAccount.RETAINED_EARNINGS;
           } else if (legacyType === 'shareholder_account') {
             debitAccount = JournalEntryAccount.OWNER_SHAREHOLDER_ACCOUNT;
-            creditAccount = JournalEntryAccount.CASH_BANK;
+            creditAccount = JournalEntryAccount.CASH;
           } else {
             debitAccount = JournalEntryAccount.GENERAL_EXPENSE;
             creditAccount = JournalEntryAccount.SHARE_CAPITAL;
@@ -114,19 +114,19 @@ export async function migrateJournalEntries(
           // Others category
           if (legacyType === 'prepaid') {
             debitAccount = JournalEntryAccount.PREPAID_EXPENSES;
-            creditAccount = JournalEntryAccount.CASH_BANK;
+            creditAccount = JournalEntryAccount.CASH;
           } else if (legacyType === 'accrued_income') {
             debitAccount = JournalEntryAccount.ACCOUNTS_RECEIVABLE;
             creditAccount = JournalEntryAccount.SALES_REVENUE;
           } else if (legacyType === 'depreciation') {
             debitAccount = JournalEntryAccount.GENERAL_EXPENSE;
-            creditAccount = JournalEntryAccount.CASH_BANK; // May need manual review
+            creditAccount = JournalEntryAccount.CASH; // May need manual review
           } else if (legacyType === 'outstanding') {
             debitAccount = JournalEntryAccount.GENERAL_EXPENSE;
             creditAccount = JournalEntryAccount.ACCOUNTS_PAYABLE;
           } else {
             debitAccount = JournalEntryAccount.GENERAL_EXPENSE;
-            creditAccount = JournalEntryAccount.CASH_BANK;
+            creditAccount = JournalEntryAccount.CASH;
           }
         }
       }
