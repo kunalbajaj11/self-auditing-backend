@@ -304,6 +304,7 @@ export class ExpensePaymentsService {
       paymentMethod: dto.paymentMethod || PaymentMethod.OTHER,
       referenceNumber: dto.referenceNumber,
       notes: dto.notes,
+      isDeleted: false, // Explicitly set to ensure it's not filtered out
     });
 
     const savedPayment = await manager.save(payment);
@@ -396,6 +397,7 @@ export class ExpensePaymentsService {
       paymentMethod: dto.paymentMethod || PaymentMethod.OTHER,
       referenceNumber: dto.referenceNumber,
       notes: dto.notes,
+      isDeleted: false, // Explicitly set to ensure it's not filtered out
     });
 
     const savedPayment = await manager.save(payment);

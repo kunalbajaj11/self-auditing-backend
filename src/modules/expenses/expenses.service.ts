@@ -734,6 +734,7 @@ export class ExpensesService {
           amount: saved.totalAmount, // Use total amount (includes VAT)
           paymentMethod: PaymentMethod.CASH,
           notes: `Auto-created payment for cash-paid expense: ${saved.vendorName || 'N/A'}`,
+          isDeleted: false, // Explicitly set to ensure it's not filtered out
         });
         await this.expensePaymentsRepository.save(payment);
       }
@@ -1303,6 +1304,7 @@ export class ExpensesService {
           amount: saved.totalAmount, // Use saved expense's totalAmount (after save)
           paymentMethod: PaymentMethod.CASH,
           notes: `Auto-created payment for cash-paid expense: ${saved.vendorName || 'N/A'}`,
+          isDeleted: false, // Explicitly set to ensure it's not filtered out
         });
         await this.expensePaymentsRepository.save(payment);
       }

@@ -27,6 +27,7 @@ import {
 import { Product } from '../products/product.entity';
 import { StockMovement } from '../inventory/entities/stock-movement.entity';
 import { StockMovementType } from '../../common/enums/stock-movement-type.enum';
+import { PaymentMethod } from '../../common/enums/payment-method.enum';
 
 @Injectable()
 export class ReportsService {
@@ -707,12 +708,13 @@ export class ReportsService {
       const openingExpensePaymentsQuery = this.expensePaymentsRepository
         .createQueryBuilder('payment')
         .select([
-          "SUM(CASE WHEN payment.payment_method = 'cash' THEN COALESCE(payment.amount, 0) ELSE 0 END) AS cashPayments",
-          "SUM(CASE WHEN payment.payment_method = 'bank_transfer' THEN COALESCE(payment.amount, 0) ELSE 0 END) AS bankPayments",
-          "SUM(CASE WHEN payment.payment_method NOT IN ('cash', 'bank_transfer') OR payment.payment_method IS NULL THEN COALESCE(payment.amount, 0) ELSE 0 END) AS otherPayments",
+          `SUM(CASE WHEN payment.payment_method = '${PaymentMethod.CASH}' THEN COALESCE(payment.amount, 0) ELSE 0 END) AS cashPayments`,
+          `SUM(CASE WHEN payment.payment_method = '${PaymentMethod.BANK_TRANSFER}' THEN COALESCE(payment.amount, 0) ELSE 0 END) AS bankPayments`,
+          `SUM(CASE WHEN payment.payment_method NOT IN ('${PaymentMethod.CASH}', '${PaymentMethod.BANK_TRANSFER}') OR payment.payment_method IS NULL THEN COALESCE(payment.amount, 0) ELSE 0 END) AS otherPayments`,
         ])
         .where('payment.organization_id = :organizationId', { organizationId })
         .andWhere('payment.is_deleted = false')
+        .andWhere('payment.deleted_at IS NULL')
         .andWhere('payment.payment_date < :startDate', { startDate });
 
       const openingInvoicePaymentsQuery = this.invoicePaymentsRepository
@@ -755,12 +757,13 @@ export class ReportsService {
       const periodExpensePaymentsQuery = this.expensePaymentsRepository
         .createQueryBuilder('payment')
         .select([
-          "SUM(CASE WHEN payment.payment_method = 'cash' THEN COALESCE(payment.amount, 0) ELSE 0 END) AS cashPayments",
-          "SUM(CASE WHEN payment.payment_method = 'bank_transfer' THEN COALESCE(payment.amount, 0) ELSE 0 END) AS bankPayments",
-          "SUM(CASE WHEN payment.payment_method NOT IN ('cash', 'bank_transfer') OR payment.payment_method IS NULL THEN COALESCE(payment.amount, 0) ELSE 0 END) AS otherPayments",
+          `SUM(CASE WHEN payment.payment_method = '${PaymentMethod.CASH}' THEN COALESCE(payment.amount, 0) ELSE 0 END) AS cashPayments`,
+          `SUM(CASE WHEN payment.payment_method = '${PaymentMethod.BANK_TRANSFER}' THEN COALESCE(payment.amount, 0) ELSE 0 END) AS bankPayments`,
+          `SUM(CASE WHEN payment.payment_method NOT IN ('${PaymentMethod.CASH}', '${PaymentMethod.BANK_TRANSFER}') OR payment.payment_method IS NULL THEN COALESCE(payment.amount, 0) ELSE 0 END) AS otherPayments`,
         ])
         .where('payment.organization_id = :organizationId', { organizationId })
         .andWhere('payment.is_deleted = false')
+        .andWhere('payment.deleted_at IS NULL')
         .andWhere('payment.payment_date >= :startDate', { startDate })
         .andWhere('payment.payment_date <= :endDate', { endDate });
 
@@ -1823,12 +1826,13 @@ export class ReportsService {
       const expensePaymentsQuery = this.expensePaymentsRepository
         .createQueryBuilder('payment')
         .select([
-          "SUM(CASE WHEN payment.payment_method = 'cash' THEN COALESCE(payment.amount, 0) ELSE 0 END) AS cashPayments",
-          "SUM(CASE WHEN payment.payment_method = 'bank_transfer' THEN COALESCE(payment.amount, 0) ELSE 0 END) AS bankPayments",
-          "SUM(CASE WHEN payment.payment_method NOT IN ('cash', 'bank_transfer') OR payment.payment_method IS NULL THEN COALESCE(payment.amount, 0) ELSE 0 END) AS otherPayments",
+          `SUM(CASE WHEN payment.payment_method = '${PaymentMethod.CASH}' THEN COALESCE(payment.amount, 0) ELSE 0 END) AS cashPayments`,
+          `SUM(CASE WHEN payment.payment_method = '${PaymentMethod.BANK_TRANSFER}' THEN COALESCE(payment.amount, 0) ELSE 0 END) AS bankPayments`,
+          `SUM(CASE WHEN payment.payment_method NOT IN ('${PaymentMethod.CASH}', '${PaymentMethod.BANK_TRANSFER}') OR payment.payment_method IS NULL THEN COALESCE(payment.amount, 0) ELSE 0 END) AS otherPayments`,
         ])
         .where('payment.organization_id = :organizationId', { organizationId })
         .andWhere('payment.is_deleted = false')
+        .andWhere('payment.deleted_at IS NULL')
         .andWhere('payment.payment_date <= :asOfDate', { asOfDate });
 
       // Query journal entries for Cash separately
@@ -2137,13 +2141,38 @@ export class ReportsService {
         .groupBy('entry.debit_account')
         .addGroupBy('entry.credit_account');
 
-      const [revenueRow, creditNotesRow, debitNotesRow, journalRows] =
-        await Promise.all([
-          revenueQuery.getRawOne(),
-          creditNotesQuery.getRawOne(),
-          debitNotesQuery.getRawOne(),
-          journalEntriesQuery.getRawMany(),
-        ]);
+      // Separate query for equity accounts to include entries even when debit is Cash/Bank
+      // This ensures Share Capital entries are captured even if they're debited to Cash/Bank
+      // Only query entries where debit is Cash/Bank (since main query excludes these)
+      const equityAccountsQuery = this.journalEntriesRepository
+        .createQueryBuilder('entry')
+        .select([
+          'entry.debit_account AS debitAccount',
+          'entry.credit_account AS creditAccount',
+          'SUM(entry.amount) AS amount',
+        ])
+        .where('entry.organization_id = :organizationId', { organizationId })
+        .andWhere('entry.entry_date <= :asOfDate', { asOfDate })
+        .andWhere(
+          "entry.credit_account IN ('share_capital', 'retained_earnings', 'owner_shareholder_account')",
+        )
+        .andWhere("entry.debit_account IN ('cash', 'bank')")
+        .groupBy('entry.debit_account')
+        .addGroupBy('entry.credit_account');
+
+      const [
+        revenueRow,
+        creditNotesRow,
+        debitNotesRow,
+        journalRows,
+        equityRows,
+      ] = await Promise.all([
+        revenueQuery.getRawOne(),
+        creditNotesQuery.getRawOne(),
+        debitNotesQuery.getRawOne(),
+        journalEntriesQuery.getRawMany(),
+        equityAccountsQuery.getRawMany(),
+      ]);
 
       const totalRevenue = Number(revenueRow?.revenue || 0);
       const creditNotesAmount = Number(creditNotesRow?.creditNotes || 0);
@@ -2172,6 +2201,41 @@ export class ReportsService {
           );
         }
         if (creditAccount) {
+          const existing =
+            accountCredits.get(creditAccount as JournalEntryAccount) || 0;
+          accountCredits.set(
+            creditAccount as JournalEntryAccount,
+            existing + amount,
+          );
+        }
+      });
+
+      // Add equity account entries (including those with Cash/Bank as debit)
+      // This ensures Share Capital entries are captured even when debited to Cash/Bank
+      equityRows.forEach((row) => {
+        const amount = Number(row.amount || 0);
+        const debitAccount = row.debitaccount || row.debitAccount;
+        const creditAccount = row.creditaccount || row.creditAccount;
+
+        // Only process if credit account is an equity account
+        if (
+          creditAccount &&
+          [
+            'share_capital',
+            'retained_earnings',
+            'owner_shareholder_account',
+          ].includes(creditAccount)
+        ) {
+          // Track debits (even if to Cash/Bank) for equity accounts
+          if (debitAccount) {
+            const existing =
+              accountDebits.get(debitAccount as JournalEntryAccount) || 0;
+            accountDebits.set(
+              debitAccount as JournalEntryAccount,
+              existing + amount,
+            );
+          }
+          // Track credits for equity accounts
           const existing =
             accountCredits.get(creditAccount as JournalEntryAccount) || 0;
           accountCredits.set(
@@ -2327,11 +2391,12 @@ export class ReportsService {
       const openingExpensePaymentsQuery = this.expensePaymentsRepository
         .createQueryBuilder('payment')
         .select([
-          "SUM(CASE WHEN payment.payment_method = 'cash' THEN COALESCE(payment.amount, 0) ELSE 0 END) AS cashPayments",
-          "SUM(CASE WHEN payment.payment_method = 'bank_transfer' THEN COALESCE(payment.amount, 0) ELSE 0 END) AS bankPayments",
+          `SUM(CASE WHEN payment.payment_method = '${PaymentMethod.CASH}' THEN COALESCE(payment.amount, 0) ELSE 0 END) AS cashPayments`,
+          `SUM(CASE WHEN payment.payment_method = '${PaymentMethod.BANK_TRANSFER}' THEN COALESCE(payment.amount, 0) ELSE 0 END) AS bankPayments`,
         ])
         .where('payment.organization_id = :organizationId', { organizationId })
         .andWhere('payment.is_deleted = false')
+        .andWhere('payment.deleted_at IS NULL')
         .andWhere('payment.payment_date < :startDate', { startDate });
 
       // Query journal entries for Cash separately (opening - balance sheet)
@@ -2434,6 +2499,24 @@ export class ReportsService {
         .groupBy('entry.debit_account')
         .addGroupBy('entry.credit_account');
 
+      // Separate query for opening equity accounts to include entries even when debit is Cash/Bank
+      // This ensures Share Capital entries are captured even if they're debited to Cash/Bank
+      const openingEquityAccountsQuery = this.journalEntriesRepository
+        .createQueryBuilder('entry')
+        .select([
+          'entry.debit_account AS debitAccount',
+          'entry.credit_account AS creditAccount',
+          'SUM(entry.amount) AS amount',
+        ])
+        .where('entry.organization_id = :organizationId', { organizationId })
+        .andWhere('entry.entry_date < :startDate', { startDate })
+        .andWhere(
+          "entry.credit_account IN ('share_capital', 'retained_earnings', 'owner_shareholder_account')",
+        )
+        .andWhere("entry.debit_account IN ('cash', 'bank')")
+        .groupBy('entry.debit_account')
+        .addGroupBy('entry.credit_account');
+
       const [
         openingExpensesRow,
         openingReceivablesRow,
@@ -2447,6 +2530,7 @@ export class ReportsService {
         openingCreditNotesRow,
         openingDebitNotesRow,
         openingJournalRows,
+        openingEquityRows,
         openingCashJournalEntriesRow,
         openingBankJournalEntriesRow,
       ] = await Promise.all([
@@ -2462,6 +2546,7 @@ export class ReportsService {
         openingCreditNotesQuery.getRawOne(),
         openingDebitNotesQuery.getRawOne(),
         openingJournalQuery.getRawMany(),
+        openingEquityAccountsQuery.getRawMany(),
         openingCashJournalEntriesQuery.getRawOne(),
         openingBankJournalEntriesQuery.getRawOne(),
       ]);
@@ -2576,6 +2661,43 @@ export class ReportsService {
           );
         }
         if (creditAccount) {
+          const existing =
+            openingAccountCredits.get(creditAccount as JournalEntryAccount) ||
+            0;
+          openingAccountCredits.set(
+            creditAccount as JournalEntryAccount,
+            existing + amount,
+          );
+        }
+      });
+
+      // Add opening equity account entries (including those with Cash/Bank as debit)
+      // This ensures Share Capital entries are captured even when debited to Cash/Bank
+      openingEquityRows.forEach((row) => {
+        const amount = Number(row.amount || 0);
+        const debitAccount = row.debitaccount || row.debitAccount;
+        const creditAccount = row.creditaccount || row.creditAccount;
+
+        // Only process if credit account is an equity account
+        if (
+          creditAccount &&
+          [
+            'share_capital',
+            'retained_earnings',
+            'owner_shareholder_account',
+          ].includes(creditAccount)
+        ) {
+          // Track debits (even if to Cash/Bank) for equity accounts
+          if (debitAccount) {
+            const existing =
+              openingAccountDebits.get(debitAccount as JournalEntryAccount) ||
+              0;
+            openingAccountDebits.set(
+              debitAccount as JournalEntryAccount,
+              existing + amount,
+            );
+          }
+          // Track credits for equity accounts
           const existing =
             openingAccountCredits.get(creditAccount as JournalEntryAccount) ||
             0;
