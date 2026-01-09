@@ -1553,8 +1553,9 @@ export class ReportsService {
 
       const totalClosingDebit = totalOpeningDebit + totalDebit;
       const totalClosingCredit = totalOpeningCredit + totalCredit;
-      const totalOpeningBalance = totalOpeningDebit - totalOpeningCredit;
-      const totalClosingBalance = totalClosingDebit - totalClosingCredit;
+      // Balance = Credit - Debit (negative when debit > credit, positive when credit > debit)
+      const totalOpeningBalance = totalOpeningCredit - totalOpeningDebit;
+      const totalClosingBalance = totalClosingCredit - totalClosingDebit;
 
       const retainedEarningsRevenueCredit = accounts
         .filter((acc) => acc.accountName === 'Sales Revenue')
@@ -1705,14 +1706,14 @@ export class ReportsService {
           openingBalance: Number(totalOpeningBalance.toFixed(2)),
           periodDebit: Number(totalDebit.toFixed(2)),
           periodCredit: Number(totalCredit.toFixed(2)),
-          periodBalance: Number((totalDebit - totalCredit).toFixed(2)),
+          periodBalance: Number((totalCredit - totalDebit).toFixed(2)),
           closingDebit: Number(totalClosingDebit.toFixed(2)),
           closingCredit: Number(totalClosingCredit.toFixed(2)),
           closingBalance: Number(totalClosingBalance.toFixed(2)),
 
           totalDebit: Number(totalDebit.toFixed(2)),
           totalCredit: Number(totalCredit.toFixed(2)),
-          totalBalance: Number((totalDebit - totalCredit).toFixed(2)),
+          totalBalance: Number((totalCredit - totalDebit).toFixed(2)),
           accountCount: accounts.length,
 
           retainedEarnings: Number(retainedEarningsBalance.toFixed(2)),
