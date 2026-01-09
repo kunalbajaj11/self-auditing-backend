@@ -9,6 +9,7 @@ import { Attachment } from '../../entities/attachment.entity';
 import { Accrual } from '../../entities/accrual.entity';
 import { AuditLog } from '../../entities/audit-log.entity';
 import { LicenseKeysModule } from '../license-keys/license-keys.module';
+import { CategoriesModule } from '../categories/categories.module';
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { LicenseKeysModule } from '../license-keys/license-keys.module';
       AuditLog,
     ]),
     LicenseKeysModule,
+    CategoriesModule,
   ],
   controllers: [SuperAdminController],
   providers: [SuperAdminService],

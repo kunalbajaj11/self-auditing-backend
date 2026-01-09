@@ -1,15 +1,54 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Not } from 'typeorm';
+import { Repository, Not, DataSource } from 'typeorm';
 import { Organization } from '../../entities/organization.entity';
 import { Expense } from '../../entities/expense.entity';
 import { User } from '../../entities/user.entity';
 import { Attachment } from '../../entities/attachment.entity';
 import { Accrual } from '../../entities/accrual.entity';
 import { AuditLog } from '../../entities/audit-log.entity';
+import { ExpensePayment } from '../../entities/expense-payment.entity';
+import { InvoicePayment } from '../../entities/invoice-payment.entity';
+import { PaymentAllocation } from '../../entities/payment-allocation.entity';
+import { SalesInvoice } from '../../entities/sales-invoice.entity';
+import { CreditNote } from '../../entities/credit-note.entity';
+import { DebitNote } from '../../entities/debit-note.entity';
+import { CreditNoteApplication } from '../../entities/credit-note-application.entity';
+import { DebitNoteApplication } from '../../entities/debit-note-application.entity';
+import { JournalEntry } from '../../entities/journal-entry.entity';
+import { Category } from '../../entities/category.entity';
+import { ExpenseType } from '../../entities/expense-type.entity';
+import { Vendor } from '../vendors/vendor.entity';
+import { Report } from '../../entities/report.entity';
+import { Notification } from '../../entities/notification.entity';
+import { ExchangeRate } from '../../entities/exchange-rate.entity';
+import { InvoiceLineItem } from '../../entities/invoice-line-item.entity';
+import { PurchaseLineItem } from '../../entities/purchase-line-item.entity';
 import { AccrualStatus } from '../../common/enums/accrual-status.enum';
 import { OrganizationStatus } from '../../common/enums/organization-status.enum';
 import { LicenseKeysService } from '../license-keys/license-keys.service';
+import { CategoriesService } from '../categories/categories.service';
+import { Product } from '../products/product.entity';
+import { StockMovement } from '../inventory/entities/stock-movement.entity';
+import { InventoryLocation } from '../inventory/entities/inventory-location.entity';
+import { StockAdjustment } from '../inventory/entities/stock-adjustment.entity';
+import { StockAdjustmentItem } from '../inventory/entities/stock-adjustment-item.entity';
+import { Customer } from '../customers/customer.entity';
+import { TaxRate } from '../../entities/tax-rate.entity';
+import { TaxRule } from '../../entities/tax-rule.entity';
+import { OrganizationSettings } from '../../entities/organization-settings.entity';
+import { NumberingSequence } from '../../entities/numbering-sequence.entity';
+import { BankTransaction } from '../../entities/bank-transaction.entity';
+import { SystemTransaction } from '../../entities/system-transaction.entity';
+import { ReconciliationRecord } from '../../entities/reconciliation-record.entity';
+import { EmailTemplate } from '../../entities/email-template.entity';
+import { LicenseKey } from '../../entities/license-key.entity';
+import { PayrollRun } from '../payroll/entities/payroll-run.entity';
+import { PayrollEntry } from '../payroll/entities/payroll-entry.entity';
+import { PayrollEntryDetail } from '../payroll/entities/payroll-entry-detail.entity';
+import { EmployeeSalaryProfile } from '../payroll/entities/employee-salary-profile.entity';
+import { SalaryComponent } from '../payroll/entities/salary-component.entity';
+import { CategoryTaxRule } from '../../entities/category-tax-rule.entity';
 
 // Cache TTL: 5 minutes (300000 ms)
 const CACHE_TTL_MS = 5 * 60 * 1000;
@@ -71,6 +110,8 @@ export class SuperAdminService {
     @InjectRepository(AuditLog)
     private readonly auditLogsRepository: Repository<AuditLog>,
     private readonly licenseKeysService: LicenseKeysService,
+    private readonly categoriesService: CategoriesService,
+    private readonly dataSource: DataSource,
   ) {}
 
   private isCacheValid<T>(cache: CacheItem<T> | null): boolean {
@@ -247,5 +288,739 @@ export class SuperAdminService {
     const totalBytes = Number(result?.total ?? 0);
     // Convert bytes to MB: divide by 1024×1024
     return Number((totalBytes / (1024 * 1024)).toFixed(2));
+  }
+
+  async deleteAllOrganizationData(organizationId: string): Promise<void> {
+    // Verify organization exists
+    const organization = await this.organizationsRepository.findOne({
+      where: { id: organizationId },
+    });
+
+    if (!organization) {
+      throw new NotFoundException('Organization not found');
+    }
+
+    // Use transaction to ensure all-or-nothing deletion
+    await this.dataSource.transaction(async (manager) => {
+      // Delete in order to respect foreign key constraints
+      // 1. Delete child records first (payments, allocations, line items)
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(PaymentAllocation, 'pa')
+        .where(
+          'pa.payment_id IN (SELECT id FROM expense_payments WHERE organization_id = :orgId)',
+          { orgId: organizationId },
+        )
+        .execute();
+
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(ExpensePayment, 'ep')
+        .where('ep.organization_id = :orgId', { orgId: organizationId })
+        .execute();
+
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(InvoicePayment, 'ip')
+        .where('ip.organization_id = :orgId', { orgId: organizationId })
+        .execute();
+
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(CreditNoteApplication, 'cna')
+        .where(
+          'cna.credit_note_id IN (SELECT id FROM credit_notes WHERE organization_id = :orgId)',
+          { orgId: organizationId },
+        )
+        .execute();
+
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(DebitNoteApplication, 'dna')
+        .where(
+          'dna.debit_note_id IN (SELECT id FROM debit_notes WHERE organization_id = :orgId)',
+          { orgId: organizationId },
+        )
+        .execute();
+
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(InvoiceLineItem, 'ili')
+        .where(
+          'ili.invoice_id IN (SELECT id FROM sales_invoices WHERE organization_id = :orgId)',
+          { orgId: organizationId },
+        )
+        .execute();
+
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(PurchaseLineItem, 'pli')
+        .where(
+          'pli.expense_id IN (SELECT id FROM expenses WHERE organization_id = :orgId)',
+          { orgId: organizationId },
+        )
+        .execute();
+
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(StockAdjustmentItem, 'sai')
+        .where(
+          'sai.adjustment_id IN (SELECT id FROM stock_adjustments WHERE organization_id = :orgId)',
+          { orgId: organizationId },
+        )
+        .execute();
+
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(StockAdjustment, 'sa')
+        .where('sa.organization_id = :orgId', { orgId: organizationId })
+        .execute();
+
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(StockMovement, 'sm')
+        .where('sm.organization_id = :orgId', { orgId: organizationId })
+        .execute();
+
+      // Delete payroll details first (cascade from entries)
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(PayrollEntryDetail, 'ped')
+        .where(
+          'ped.payroll_entry_id IN (SELECT id FROM payroll_entries WHERE payroll_run_id IN (SELECT id FROM payroll_runs WHERE organization_id = :orgId))',
+          { orgId: organizationId },
+        )
+        .execute();
+
+      // Delete payroll entries (cascade from runs)
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(PayrollEntry, 'pe')
+        .where(
+          'pe.payroll_run_id IN (SELECT id FROM payroll_runs WHERE organization_id = :orgId)',
+          { orgId: organizationId },
+        )
+        .execute();
+
+      // Delete payroll runs
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(PayrollRun, 'pr')
+        .where('pr.organization_id = :orgId', { orgId: organizationId })
+        .execute();
+
+      // Delete salary components (cascade from profiles)
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(SalaryComponent, 'sc')
+        .where(
+          'sc.salary_profile_id IN (SELECT id FROM employee_salary_profiles WHERE organization_id = :orgId)',
+          { orgId: organizationId },
+        )
+        .execute();
+
+      // Delete employee salary profiles
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(EmployeeSalaryProfile, 'esp')
+        .where('esp.organization_id = :orgId', { orgId: organizationId })
+        .execute();
+
+      // Delete bank and system transactions first (they reference reconciliation records)
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(BankTransaction, 'bt')
+        .where('bt.organization_id = :orgId', { orgId: organizationId })
+        .execute();
+
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(SystemTransaction, 'st')
+        .where('st.organization_id = :orgId', { orgId: organizationId })
+        .execute();
+
+      // Delete reconciliation records (after transactions that reference them)
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(ReconciliationRecord, 'rr')
+        .where('rr.organization_id = :orgId', { orgId: organizationId })
+        .execute();
+
+      // 2. Delete main transaction records
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(Expense, 'e')
+        .where('e.organization_id = :orgId', { orgId: organizationId })
+        .execute();
+
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(SalesInvoice, 'si')
+        .where('si.organization_id = :orgId', { orgId: organizationId })
+        .execute();
+
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(CreditNote, 'cn')
+        .where('cn.organization_id = :orgId', { orgId: organizationId })
+        .execute();
+
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(DebitNote, 'dn')
+        .where('dn.organization_id = :orgId', { orgId: organizationId })
+        .execute();
+
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(JournalEntry, 'je')
+        .where('je.organization_id = :orgId', { orgId: organizationId })
+        .execute();
+
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(Accrual, 'a')
+        .where('a.organization_id = :orgId', { orgId: organizationId })
+        .execute();
+
+      // 3. Delete inventory-related
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(Product, 'p')
+        .where('p.organization_id = :orgId', { orgId: organizationId })
+        .execute();
+
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(InventoryLocation, 'il')
+        .where('il.organization_id = :orgId', { orgId: organizationId })
+        .execute();
+
+      // 4. Delete master data
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(Vendor, 'v')
+        .where('v.organization_id = :orgId', { orgId: organizationId })
+        .execute();
+
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(Customer, 'c')
+        .where('c.organization_id = :orgId', { orgId: organizationId })
+        .execute();
+
+      // Delete junction table first (references both Category and TaxRule)
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(CategoryTaxRule, 'ctr')
+        .where(
+          'ctr.tax_rule_id IN (SELECT id FROM tax_rules WHERE organization_id = :orgId) OR ctr.category_id IN (SELECT id FROM categories WHERE organization_id = :orgId)',
+          { orgId: organizationId },
+        )
+        .execute();
+
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(Category, 'cat')
+        .where('cat.organization_id = :orgId', { orgId: organizationId })
+        .execute();
+
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(ExpenseType, 'et')
+        .where('et.organization_id = :orgId', { orgId: organizationId })
+        .execute();
+
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(TaxRate, 'tr')
+        .where('tr.organization_id = :orgId', { orgId: organizationId })
+        .execute();
+
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(TaxRule, 'trule')
+        .where('trule.organization_id = :orgId', { orgId: organizationId })
+        .execute();
+
+      // 5. Delete settings and configuration
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(OrganizationSettings, 'os')
+        .where('os.organization_id = :orgId', { orgId: organizationId })
+        .execute();
+
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(NumberingSequence, 'ns')
+        .where('ns.organization_id = :orgId', { orgId: organizationId })
+        .execute();
+
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(ExchangeRate, 'er')
+        .where('er.organization_id = :orgId', { orgId: organizationId })
+        .execute();
+
+      // Delete email templates
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(EmailTemplate, 'et')
+        .where('et.organization_id = :orgId', { orgId: organizationId })
+        .execute();
+
+      // 6. Delete reports and logs
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(Report, 'r')
+        .where('r.organization_id = :orgId', { orgId: organizationId })
+        .execute();
+
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(AuditLog, 'al')
+        .where('al.organization_id = :orgId', { orgId: organizationId })
+        .execute();
+
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(Notification, 'n')
+        .where('n.organization_id = :orgId', { orgId: organizationId })
+        .execute();
+
+      // 7. Delete attachments
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(Attachment, 'att')
+        .where('att.organization_id = :orgId', { orgId: organizationId })
+        .execute();
+
+      // 8. Delete users (but keep organization)
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(User, 'u')
+        .where('u.organization_id = :orgId', { orgId: organizationId })
+        .execute();
+
+      // 9. Clear license key references (don't delete license keys, just clear organization reference)
+      await manager
+        .createQueryBuilder()
+        .update(LicenseKey)
+        .set({ consumedByOrganizationId: null, consumedByUserId: null })
+        .where('consumedByOrganizationId = :orgId', { orgId: organizationId })
+        .execute();
+
+      // Note: Organization itself is NOT deleted, only its data
+      // If you want to delete the organization too, uncomment:
+      // await manager.delete(Organization, { id: organizationId });
+    });
+  }
+
+  async clearOrganizationDataKeepUsers(organizationId: string): Promise<void> {
+    // Verify organization exists
+    const organization = await this.organizationsRepository.findOne({
+      where: { id: organizationId },
+    });
+
+    if (!organization) {
+      throw new NotFoundException('Organization not found');
+    }
+
+    // Use transaction to ensure all-or-nothing deletion
+    await this.dataSource.transaction(async (manager) => {
+      // Delete in order to respect foreign key constraints
+      // Same deletion order as deleteAllOrganizationData, but SKIP user deletion
+
+      // 1. Delete child records first (payments, allocations, line items)
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(PaymentAllocation)
+        .where(
+          'payment_id IN (SELECT id FROM expense_payments WHERE organization_id = :orgId)',
+          { orgId: organizationId },
+        )
+        .execute();
+
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(ExpensePayment)
+        .where('organization_id = :orgId', { orgId: organizationId })
+        .execute();
+
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(InvoicePayment)
+        .where('organization_id = :orgId', { orgId: organizationId })
+        .execute();
+
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(CreditNoteApplication)
+        .where(
+          'credit_note_id IN (SELECT id FROM credit_notes WHERE organization_id = :orgId)',
+          { orgId: organizationId },
+        )
+        .execute();
+
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(DebitNoteApplication)
+        .where(
+          'debit_note_id IN (SELECT id FROM debit_notes WHERE organization_id = :orgId)',
+          { orgId: organizationId },
+        )
+        .execute();
+
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(InvoiceLineItem)
+        .where(
+          'invoice_id IN (SELECT id FROM sales_invoices WHERE organization_id = :orgId)',
+          { orgId: organizationId },
+        )
+        .execute();
+
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(PurchaseLineItem)
+        .where(
+          'expense_id IN (SELECT id FROM expenses WHERE organization_id = :orgId)',
+          { orgId: organizationId },
+        )
+        .execute();
+
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(StockAdjustmentItem)
+        .where(
+          'adjustment_id IN (SELECT id FROM stock_adjustments WHERE organization_id = :orgId)',
+          { orgId: organizationId },
+        )
+        .execute();
+
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(StockAdjustment)
+        .where('organization_id = :orgId', { orgId: organizationId })
+        .execute();
+
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(StockMovement)
+        .where('organization_id = :orgId', { orgId: organizationId })
+        .execute();
+
+      // Delete payroll details first (cascade from entries)
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(PayrollEntryDetail)
+        .where(
+          'payroll_entry_id IN (SELECT id FROM payroll_entries WHERE payroll_run_id IN (SELECT id FROM payroll_runs WHERE organization_id = :orgId))',
+          { orgId: organizationId },
+        )
+        .execute();
+
+      // Delete payroll entries (cascade from runs)
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(PayrollEntry)
+        .where(
+          'payroll_run_id IN (SELECT id FROM payroll_runs WHERE organization_id = :orgId)',
+          { orgId: organizationId },
+        )
+        .execute();
+
+      // Delete payroll runs
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(PayrollRun)
+        .where('organization_id = :orgId', { orgId: organizationId })
+        .execute();
+
+      // Delete salary components (cascade from profiles)
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(SalaryComponent)
+        .where(
+          'salary_profile_id IN (SELECT id FROM employee_salary_profiles WHERE organization_id = :orgId)',
+          { orgId: organizationId },
+        )
+        .execute();
+
+      // Delete employee salary profiles
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(EmployeeSalaryProfile)
+        .where('organization_id = :orgId', { orgId: organizationId })
+        .execute();
+
+      // Delete bank and system transactions first (they reference reconciliation records)
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(BankTransaction)
+        .where('organization_id = :orgId', { orgId: organizationId })
+        .execute();
+
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(SystemTransaction)
+        .where('organization_id = :orgId', { orgId: organizationId })
+        .execute();
+
+      // Delete reconciliation records (after transactions that reference them)
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(ReconciliationRecord)
+        .where('organization_id = :orgId', { orgId: organizationId })
+        .execute();
+
+      // 2. Delete main transaction records
+      // Delete accruals FIRST (they reference expenses via foreign key)
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(Accrual)
+        .where('organization_id = :orgId', { orgId: organizationId })
+        .execute();
+
+      // Now delete expenses (accruals are already deleted)
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(Expense)
+        .where('organization_id = :orgId', { orgId: organizationId })
+        .execute();
+
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(SalesInvoice)
+        .where('organization_id = :orgId', { orgId: organizationId })
+        .execute();
+
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(CreditNote)
+        .where('organization_id = :orgId', { orgId: organizationId })
+        .execute();
+
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(DebitNote)
+        .where('organization_id = :orgId', { orgId: organizationId })
+        .execute();
+
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(JournalEntry)
+        .where('organization_id = :orgId', { orgId: organizationId })
+        .execute();
+
+      // 3. Delete inventory-related
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(Product)
+        .where('organization_id = :orgId', { orgId: organizationId })
+        .execute();
+
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(InventoryLocation)
+        .where('organization_id = :orgId', { orgId: organizationId })
+        .execute();
+
+      // 4. Delete master data
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(Vendor)
+        .where('organization_id = :orgId', { orgId: organizationId })
+        .execute();
+
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(Customer)
+        .where('organization_id = :orgId', { orgId: organizationId })
+        .execute();
+
+      // Delete junction table first (references both Category and TaxRule)
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(CategoryTaxRule)
+        .where(
+          'tax_rule_id IN (SELECT id FROM tax_rules WHERE organization_id = :orgId) OR category_id IN (SELECT id FROM categories WHERE organization_id = :orgId)',
+          { orgId: organizationId },
+        )
+        .execute();
+
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(Category)
+        .where('organization_id = :orgId', { orgId: organizationId })
+        .execute();
+
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(ExpenseType)
+        .where('organization_id = :orgId', { orgId: organizationId })
+        .execute();
+
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(TaxRate)
+        .where('organization_id = :orgId', { orgId: organizationId })
+        .execute();
+
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(TaxRule)
+        .where('organization_id = :orgId', { orgId: organizationId })
+        .execute();
+
+      // 5. Delete settings and configuration
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(OrganizationSettings)
+        .where('organization_id = :orgId', { orgId: organizationId })
+        .execute();
+
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(NumberingSequence)
+        .where('organization_id = :orgId', { orgId: organizationId })
+        .execute();
+
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(ExchangeRate)
+        .where('organization_id = :orgId', { orgId: organizationId })
+        .execute();
+
+      // Delete email templates
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(EmailTemplate)
+        .where('organization_id = :orgId', { orgId: organizationId })
+        .execute();
+
+      // 6. Delete reports and logs
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(Report)
+        .where('organization_id = :orgId', { orgId: organizationId })
+        .execute();
+
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(AuditLog)
+        .where('organization_id = :orgId', { orgId: organizationId })
+        .execute();
+
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(Notification)
+        .where('organization_id = :orgId', { orgId: organizationId })
+        .execute();
+
+      // 7. Delete attachments
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(Attachment)
+        .where('organization_id = :orgId', { orgId: organizationId })
+        .execute();
+
+      // NOTE: Users are NOT deleted - they can still login
+      // Users will see empty organization when they login
+
+      // 8. Clear license key references (don't delete license keys, just clear organization reference)
+      await manager
+        .createQueryBuilder()
+        .update(LicenseKey)
+        .set({ consumedByOrganizationId: null, consumedByUserId: null })
+        .where('consumedByOrganizationId = :orgId', { orgId: organizationId })
+        .execute();
+    });
+
+    // After deletion, recreate default categories to make it feel like fresh start
+    await this.categoriesService.ensureDefaultsForOrganization(organizationId);
   }
 }

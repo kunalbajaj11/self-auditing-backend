@@ -1,4 +1,12 @@
-import { Controller, Get, Query, UseGuards } from '@nestjs/common';
+import {
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import {
   SuperAdminService,
   DashboardMetrics,
@@ -39,5 +47,20 @@ export class SuperAdminController {
     const limitNum = limit ? parseInt(limit, 10) : 10;
     const skipNum = skip ? parseInt(skip, 10) : 0;
     return this.superAdminService.getLatestAuditLogs(limitNum, skipNum);
+  }
+
+  @Delete('organizations/:id/data')
+  async deleteOrganizationData(@Param('id') organizationId: string) {
+    await this.superAdminService.deleteAllOrganizationData(organizationId);
+    return { message: 'All organization data deleted successfully' };
+  }
+
+  @Post('organizations/:id/clear-data')
+  async clearOrganizationData(@Param('id') organizationId: string) {
+    await this.superAdminService.clearOrganizationDataKeepUsers(organizationId);
+    return {
+      message:
+        'All organization data cleared successfully. Users can still login.',
+    };
   }
 }
