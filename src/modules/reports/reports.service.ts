@@ -1821,6 +1821,8 @@ export class ReportsService {
           "SUM(CASE WHEN payment.payment_method NOT IN ('cash', 'bank_transfer') OR payment.payment_method IS NULL THEN COALESCE(payment.amount, 0) ELSE 0 END) AS otherReceipts",
         ])
         .where('payment.organization_id = :organizationId', { organizationId })
+        .andWhere('payment.is_deleted = false')
+        .andWhere('payment.deleted_at IS NULL')
         .andWhere('payment.payment_date <= :asOfDate', { asOfDate });
 
       const expensePaymentsQuery = this.expensePaymentsRepository
@@ -2610,7 +2612,23 @@ export class ReportsService {
         assets.splice(oldCashBankIndex, 1);
       }
 
-      // Add Cash account
+      // Remove existing Cash entry if it exists (to avoid duplicates)
+      const existingCashIndex = assets.findIndex((a) => a.category === 'Cash');
+      if (existingCashIndex >= 0) {
+        const existingCashAmount = assets[existingCashIndex].amount;
+        totalAssets = totalAssets - existingCashAmount;
+        assets.splice(existingCashIndex, 1);
+      }
+
+      // Remove existing Bank entry if it exists (to avoid duplicates)
+      const existingBankIndex = assets.findIndex((a) => a.category === 'Bank');
+      if (existingBankIndex >= 0) {
+        const existingBankAmount = assets[existingBankIndex].amount;
+        totalAssets = totalAssets - existingBankAmount;
+        assets.splice(existingBankIndex, 1);
+      }
+
+      // Add Cash account (only once)
       if (netCash !== 0) {
         assets.push({
           category: 'Cash',
@@ -2619,7 +2637,7 @@ export class ReportsService {
         totalAssets += netCash; // Negative cash reduces total assets
       }
 
-      // Add Bank account
+      // Add Bank account (only once)
       if (netBank !== 0) {
         assets.push({
           category: 'Bank',
