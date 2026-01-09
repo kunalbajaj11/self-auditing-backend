@@ -858,6 +858,14 @@ export class ReportsService {
       const periodCashJournalPaid = Number(
         periodCashJournalEntriesRow?.paid || 0,
       );
+
+      // Debug logging for cash calculation
+      this.logger.debug(
+        `Trial Balance Cash Calculation: receipts=${periodCashReceipts}, payments=${periodCashPayments}, ` +
+          `journalReceived=${periodCashJournalReceived}, journalPaid=${periodCashJournalPaid}, ` +
+          `organizationId=${organizationId}, period=${startDate} to ${endDate}`,
+      );
+
       const periodCashDebit = periodCashReceipts + periodCashJournalReceived;
       const periodCashCredit = periodCashPayments + periodCashJournalPaid;
 
@@ -1890,6 +1898,15 @@ export class ReportsService {
         bankJournalEntriesRow?.received || 0,
       );
       const totalBankJournalPaid = Number(bankJournalEntriesRow?.paid || 0);
+
+      // Debug logging for cash calculation
+      this.logger.debug(
+        `Balance Sheet Cash Calculation: receipts=${totalCashReceipts}, payments=${totalCashPayments}, ` +
+          `journalReceived=${totalCashJournalReceived}, journalPaid=${totalCashJournalPaid}, ` +
+          `netCash=${totalCashReceipts - totalCashPayments + totalCashJournalReceived - totalCashJournalPaid}, ` +
+          `organizationId=${organizationId}, asOfDate=${asOfDate}`,
+      );
+
       const netCash =
         totalCashReceipts -
         totalCashPayments +
@@ -1980,6 +1997,7 @@ export class ReportsService {
         .where('payment.expense_id = expense.id')
         .andWhere('payment.payment_date <= :asOfDate')
         .andWhere('payment.organization_id = :organizationId')
+        .andWhere('payment.is_deleted = false')
         .getQuery();
 
       const accrualsQuery = this.accrualsRepository

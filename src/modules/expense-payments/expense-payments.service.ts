@@ -446,25 +446,32 @@ export class ExpensePaymentsService {
     expenseId: string,
     paymentDate: string,
   ): Promise<void> {
-    const expenseWithAccrual = await manager.findOne(Expense, {
-      where: { id: expenseId, organization: { id: organizationId } },
-      relations: ['linkedAccrual'],
+    // Find accrual directly by expense_id (accrual has expense_id foreign key)
+    const accrual = await manager.findOne(Accrual, {
+      where: {
+        expense: { id: expenseId },
+        organization: { id: organizationId },
+      },
     });
 
-    if (expenseWithAccrual?.linkedAccrual) {
-      const accrual = await manager.findOne(Accrual, {
-        where: {
-          expense: { id: expenseWithAccrual.linkedAccrual.id },
-          organization: { id: organizationId },
-        },
-      });
+    if (accrual) {
 
       if (accrual && accrual.status === AccrualStatus.PENDING_SETTLEMENT) {
-        // Get direct payments
+        // Get the expense to check total amount
+        const expense = await manager.findOne(Expense, {
+          where: { id: expenseId, organization: { id: organizationId } },
+        });
+
+        if (!expense) {
+          return;
+        }
+
+        // Get direct payments (only non-deleted payments)
         const allPayments = await manager.find(ExpensePayment, {
           where: {
             expense: { id: expenseId },
             organization: { id: organizationId },
+            isDeleted: false,
           },
         });
 
@@ -474,11 +481,12 @@ export class ExpensePaymentsService {
           relations: ['payment'],
         });
 
-        // Filter allocations to only those from payments in this organization
+        // Filter allocations to only those from payments in this organization and not deleted
         const validAllocations = allAllocations.filter((alloc) => {
           return (
             alloc.payment &&
-            (alloc.payment as any).organization?.id === organizationId
+            (alloc.payment as any).organization?.id === organizationId &&
+            !(alloc.payment as any).isDeleted
           );
         });
 
@@ -493,12 +501,12 @@ export class ExpensePaymentsService {
         );
 
         const totalPaid = directPaid + allocatedPaid;
-        const expenseTotal = parseFloat(expenseWithAccrual.totalAmount || '0');
+        const expenseTotal = parseFloat(expense.totalAmount || '0');
 
         if (totalPaid >= expenseTotal - 0.01) {
           accrual.status = AccrualStatus.SETTLED;
           accrual.settlementDate = paymentDate;
-          accrual.settlementExpense = expenseWithAccrual;
+          accrual.settlementExpense = expense;
           await manager.save(accrual);
         }
       }
