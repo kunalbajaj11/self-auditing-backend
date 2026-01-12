@@ -509,6 +509,10 @@ export class ReportsService {
           .andWhere('cna.organization_id = :organizationId', { organizationId })
           .getQuery();
 
+      // Calculate receivables - match Balance Sheet query EXACTLY
+      // Balance Sheet uses: invoice_date <= asOfDate with payment_status filter
+      // Trial Balance should use: invoice_date <= endDate with same payment_status filter
+      // Note: Balance Sheet selects both 'category' and 'amount', but we only need the amount
       const receivablesAtEndQuery = this.salesInvoicesRepository
         .createQueryBuilder('invoice')
         .select([
@@ -519,7 +523,8 @@ export class ReportsService {
         .andWhere('invoice.payment_status IN (:...statuses)', {
           statuses: [PaymentStatus.UNPAID, PaymentStatus.PARTIAL],
         })
-        .setParameter('organizationId', organizationId);
+        .setParameter('organizationId', organizationId)
+        .setParameter('endDate', endDate);
 
       const receivablesAtStartQuery = this.salesInvoicesRepository
         .createQueryBuilder('invoice')
@@ -531,7 +536,8 @@ export class ReportsService {
         .andWhere('invoice.payment_status IN (:...statuses)', {
           statuses: [PaymentStatus.UNPAID, PaymentStatus.PARTIAL],
         })
-        .setParameter('organizationId', organizationId);
+        .setParameter('organizationId', organizationId)
+        .setParameter('startDate', startDate);
 
       const debitNotesAtEndQuery = this.debitNotesRepository
         .createQueryBuilder('debitNote')
@@ -567,10 +573,25 @@ export class ReportsService {
         debitNotesAtStartQuery.getRawOne(),
       ]);
 
-      const receivablesAtEnd = Number(receivablesAtEndRow?.invoiceAmount || 0);
-      const receivablesAtStart = Number(
-        receivablesAtStartRow?.invoiceAmount || 0,
+      // Handle potential negative values (overpaid invoices) - only count positive receivables
+      // CRITICAL FIX: TypeORM getRawOne() returns lowercase field names from SQL aliases
+      // The query uses "AS invoiceAmount" but getRawOne() returns it as "invoiceamount" (lowercase)
+      // Balance Sheet works because it uses "AS amount" (already lowercase)
+      const receivablesAtEndRaw = Number(
+        receivablesAtEndRow?.invoiceamount ||
+          receivablesAtEndRow?.invoiceAmount ||
+          0,
       );
+      const receivablesAtStartRaw = Number(
+        receivablesAtStartRow?.invoiceamount ||
+          receivablesAtStartRow?.invoiceAmount ||
+          0,
+      );
+
+      const receivablesAtEnd =
+        receivablesAtEndRaw > 0 ? receivablesAtEndRaw : 0;
+      const receivablesAtStart =
+        receivablesAtStartRaw > 0 ? receivablesAtStartRaw : 0;
       const debitNotesAtEnd = Number(debitNotesAtEndRow?.debit || 0);
       const debitNotesAtStart = Number(debitNotesAtStartRow?.debit || 0);
 
@@ -587,9 +608,13 @@ export class ReportsService {
       const arClosingBalance = arAtEnd;
 
       // Always add AR account if there's any balance (opening or closing)
+      // Match Balance Sheet logic exactly: show if netReceivablesAmount > 0
+      // arAtEnd (closing balance) should equal netReceivablesAmount in Balance Sheet
+      // Use same condition as Balance Sheet: if closing balance > 0, always show
+      // Also show if there's an opening balance (even if closing is 0) or any period movement
       if (
-        arAtStart > 0 ||
         arAtEnd > 0 ||
+        arAtStart > 0 ||
         arPeriodDebit > 0 ||
         arPeriodCredit > 0
       ) {
@@ -993,6 +1018,13 @@ export class ReportsService {
       });
 
       // Convert to accounts array
+      // Note: If journal entries use 'accounts_receivable' account, they will create an entry
+      // with the same name "Accounts Receivable". We need to merge it with the main AR entry
+      // that was added earlier from invoices/debit notes.
+      const existingARIndex = accounts.findIndex(
+        (acc) => acc.accountName === 'Accounts Receivable',
+      );
+
       accountMap.forEach((balances, accountCode) => {
         if (balances.debit > 0 || balances.credit > 0) {
           const accountMeta =
@@ -1002,6 +1034,32 @@ export class ReportsService {
             ? accountMeta.category.charAt(0).toUpperCase() +
               accountMeta.category.slice(1)
             : 'Journal Entry';
+
+          // If this is Accounts Receivable from journal entries, merge with existing entry
+          if (accountName === 'Accounts Receivable' && existingARIndex >= 0) {
+            const existingAR = accounts[existingARIndex];
+            // Merge journal entry amounts with existing AR entry
+            existingAR.debit += balances.debit;
+            existingAR.credit += balances.credit;
+            const isCreditAccount =
+              accountType === 'Equity' ||
+              accountType === 'Revenue' ||
+              accountType === 'Liability';
+            const journalBalance = isCreditAccount
+              ? balances.credit - balances.debit
+              : balances.debit - balances.credit;
+            // Update balance: for assets, balance = debit - credit
+            if (accountType === 'Asset') {
+              existingAR.balance = existingAR.debit - existingAR.credit;
+            } else {
+              existingAR.balance += journalBalance;
+            }
+            this.logger.debug(
+              `Merged journal entry Accounts Receivable: debit=${balances.debit}, ` +
+                `credit=${balances.credit}, into existing AR entry, organizationId=${organizationId}`,
+            );
+            return; // Skip adding duplicate entry
+          }
 
           const isCreditAccount =
             accountType === 'Equity' ||
