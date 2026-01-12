@@ -436,6 +436,29 @@ export class ReportsService {
         balance: revenueBalance,
       });
 
+      // Subquery to calculate paid amount for each expense (for end date)
+      const expensePaymentsSubqueryEnd = this.expensePaymentsRepository
+        .createQueryBuilder('payment')
+        .select('COALESCE(SUM(payment.amount), 0)')
+        .where('payment.expense_id = expense.id')
+        .andWhere('payment.payment_date <= :endDate')
+        .andWhere('payment.organization_id = :organizationId')
+        .andWhere('payment.is_deleted = false')
+        .getQuery();
+
+      // Subquery to calculate paid amount for each expense (for start date)
+      const expensePaymentsSubqueryStart = this.expensePaymentsRepository
+        .createQueryBuilder('payment')
+        .select('COALESCE(SUM(payment.amount), 0)')
+        .where('payment.expense_id = expense.id')
+        .andWhere('payment.payment_date < :startDate')
+        .andWhere('payment.organization_id = :organizationId')
+        .andWhere('payment.is_deleted = false')
+        .getQuery();
+
+      // Calculate Accounts Payable based on unpaid expenses linked to accruals
+      // Only include accruals where expense has not been fully paid
+      // Use a subquery to filter out fully paid expenses
       const accrualsAtEndQuery = this.accrualsRepository
         .createQueryBuilder('accrual')
         .leftJoin('accrual.expense', 'expense')
@@ -446,7 +469,13 @@ export class ReportsService {
         .andWhere('accrual.status = :status', {
           status: AccrualStatus.PENDING_SETTLEMENT,
         })
-        .andWhere('expense.expense_date <= :endDate', { endDate });
+        .andWhere('expense.expense_date <= :endDate', { endDate })
+        .andWhere(
+          `COALESCE(expense.total_amount, 0) > (${expensePaymentsSubqueryEnd})`,
+        )
+        .setParameter('organizationId', organizationId)
+        .setParameter('endDate', endDate)
+        .setParameter('startDate', startDate);
 
       const accrualsAtStartQuery = this.accrualsRepository
         .createQueryBuilder('accrual')
@@ -458,12 +487,23 @@ export class ReportsService {
         .andWhere('accrual.status = :status', {
           status: AccrualStatus.PENDING_SETTLEMENT,
         })
-        .andWhere('expense.expense_date < :startDate', { startDate });
+        .andWhere('expense.expense_date < :startDate', { startDate })
+        .andWhere(
+          `COALESCE(expense.total_amount, 0) > (${expensePaymentsSubqueryStart})`,
+        )
+        .setParameter('organizationId', organizationId)
+        .setParameter('endDate', endDate)
+        .setParameter('startDate', startDate);
 
       const [accrualsAtEndRow, accrualsAtStartRow] = await Promise.all([
         accrualsAtEndQuery.getRawOne(),
         accrualsAtStartQuery.getRawOne(),
       ]);
+
+      // Debug logging for Accounts Payable calculation
+      this.logger.debug(
+        `Trial Balance Accounts Payable - accrualsAtEndRow: ${JSON.stringify(accrualsAtEndRow)}, accrualsAtStartRow: ${JSON.stringify(accrualsAtStartRow)}`,
+      );
 
       const accrualsAtEnd = Number(accrualsAtEndRow?.credit || 0);
       const accrualsAtStart = Number(accrualsAtStartRow?.credit || 0);
