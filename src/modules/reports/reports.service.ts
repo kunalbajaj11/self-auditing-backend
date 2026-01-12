@@ -852,11 +852,23 @@ export class ReportsService {
       ]);
 
       // Calculate Cash separately
+      // Debug: Check actual field names from query results
+      this.logger.debug(
+        `Trial Balance Cash Query Results - openingExpensePaymentsRow: ${JSON.stringify(openingExpensePaymentsRow)}, periodExpensePaymentsRow: ${JSON.stringify(periodExpensePaymentsRow)}`,
+      );
+      this.logger.debug(
+        `Trial Balance Cash Query Results - openingInvoicePaymentsRow: ${JSON.stringify(openingInvoicePaymentsRow)}, periodInvoicePaymentsRow: ${JSON.stringify(periodInvoicePaymentsRow)}`,
+      );
+
       const openingCashReceipts = Number(
-        openingInvoicePaymentsRow?.cashReceipts || 0,
+        openingInvoicePaymentsRow?.cashreceipts ||
+          openingInvoicePaymentsRow?.cashReceipts ||
+          0,
       );
       const openingCashPayments = Number(
-        openingExpensePaymentsRow?.cashPayments || 0,
+        openingExpensePaymentsRow?.cashpayments ||
+          openingExpensePaymentsRow?.cashPayments ||
+          0,
       );
       // Journal entries for cash (no splitting - direct from cash account)
       const openingCashJournalReceived = Number(
@@ -872,10 +884,14 @@ export class ReportsService {
         openingCashJournalPaid;
 
       const periodCashReceipts = Number(
-        periodInvoicePaymentsRow?.cashReceipts || 0,
+        periodInvoicePaymentsRow?.cashreceipts ||
+          periodInvoicePaymentsRow?.cashReceipts ||
+          0,
       );
       const periodCashPayments = Number(
-        periodExpensePaymentsRow?.cashPayments || 0,
+        periodExpensePaymentsRow?.cashpayments ||
+          periodExpensePaymentsRow?.cashPayments ||
+          0,
       );
       const periodCashJournalReceived = Number(
         periodCashJournalEntriesRow?.received || 0,
@@ -888,6 +904,7 @@ export class ReportsService {
       this.logger.debug(
         `Trial Balance Cash Calculation: receipts=${periodCashReceipts}, payments=${periodCashPayments}, ` +
           `journalReceived=${periodCashJournalReceived}, journalPaid=${periodCashJournalPaid}, ` +
+          `openingBalance=${openingCashBalance}, closingBalance=${openingCashBalance + periodCashReceipts - periodCashPayments + periodCashJournalReceived - periodCashJournalPaid}, ` +
           `organizationId=${organizationId}, period=${startDate} to ${endDate}`,
       );
 
@@ -903,10 +920,14 @@ export class ReportsService {
 
       // Calculate Bank separately
       const openingBankReceipts = Number(
-        openingInvoicePaymentsRow?.bankReceipts || 0,
+        openingInvoicePaymentsRow?.bankreceipts ||
+          openingInvoicePaymentsRow?.bankReceipts ||
+          0,
       );
       const openingBankPayments = Number(
-        openingExpensePaymentsRow?.bankPayments || 0,
+        openingExpensePaymentsRow?.bankpayments ||
+          openingExpensePaymentsRow?.bankPayments ||
+          0,
       );
       // Journal entries for bank (no splitting - direct from bank account)
       const openingBankJournalReceived = Number(
@@ -922,10 +943,14 @@ export class ReportsService {
         openingBankJournalPaid;
 
       const periodBankReceipts = Number(
-        periodInvoicePaymentsRow?.bankReceipts || 0,
+        periodInvoicePaymentsRow?.bankreceipts ||
+          periodInvoicePaymentsRow?.bankReceipts ||
+          0,
       );
       const periodBankPayments = Number(
-        periodExpensePaymentsRow?.bankPayments || 0,
+        periodExpensePaymentsRow?.bankpayments ||
+          periodExpensePaymentsRow?.bankPayments ||
+          0,
       );
       const periodBankJournalReceived = Number(
         periodBankJournalEntriesRow?.received || 0,
@@ -1943,10 +1968,27 @@ export class ReportsService {
       ]);
 
       // Calculate Cash and Bank separately
-      const totalCashReceipts = Number(invoicePaymentsRow?.cashReceipts || 0);
-      const totalCashPayments = Number(expensePaymentsRow?.cashPayments || 0);
-      const totalBankReceipts = Number(invoicePaymentsRow?.bankReceipts || 0);
-      const totalBankPayments = Number(expensePaymentsRow?.bankPayments || 0);
+      // Fix case sensitivity for Balance Sheet cash/bank fields
+      const totalCashReceipts = Number(
+        invoicePaymentsRow?.cashreceipts ||
+          invoicePaymentsRow?.cashReceipts ||
+          0,
+      );
+      const totalCashPayments = Number(
+        expensePaymentsRow?.cashpayments ||
+          expensePaymentsRow?.cashPayments ||
+          0,
+      );
+      const totalBankReceipts = Number(
+        invoicePaymentsRow?.bankreceipts ||
+          invoicePaymentsRow?.bankReceipts ||
+          0,
+      );
+      const totalBankPayments = Number(
+        expensePaymentsRow?.bankpayments ||
+          expensePaymentsRow?.bankPayments ||
+          0,
+      );
       // Journal entries for cash (no splitting)
       const totalCashJournalReceived = Number(
         cashJournalEntriesRow?.received || 0,
@@ -2641,13 +2683,22 @@ export class ReportsService {
       const openingReceivables =
         openingReceivablesAmount + openingReceivablesDebitNotes;
       // Separate cash and bank for opening balances
-      const openingCashReceipts = Number(openingCashRow?.cashReceipts || 0);
-      const openingCashPayments = Number(
-        openingExpensePaymentsRow?.cashPayments || 0,
+      // Fix case sensitivity for Balance Sheet opening balances
+      const openingCashReceipts = Number(
+        openingCashRow?.cashreceipts || openingCashRow?.cashReceipts || 0,
       );
-      const openingBankReceipts = Number(openingCashRow?.bankReceipts || 0);
+      const openingCashPayments = Number(
+        openingExpensePaymentsRow?.cashpayments ||
+          openingExpensePaymentsRow?.cashPayments ||
+          0,
+      );
+      const openingBankReceipts = Number(
+        openingCashRow?.bankreceipts || openingCashRow?.bankReceipts || 0,
+      );
       const openingBankPayments = Number(
-        openingExpensePaymentsRow?.bankPayments || 0,
+        openingExpensePaymentsRow?.bankpayments ||
+          openingExpensePaymentsRow?.bankPayments ||
+          0,
       );
       // Journal entries for cash (no splitting)
       const openingCashJournalReceived = Number(
