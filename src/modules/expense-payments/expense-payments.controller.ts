@@ -88,4 +88,16 @@ export class ExpensePaymentsController {
       decodeURIComponent(vendorName),
     );
   }
+
+  @Post('recalculate-accrual-settlement/:expenseId')
+  @Roles(UserRole.ADMIN, UserRole.ACCOUNTANT)
+  async recalculateAccrualSettlement(
+    @Param('expenseId') expenseId: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.expensePaymentsService.recalculateAccrualSettlement(
+      user?.organizationId as string,
+      expenseId,
+    );
+  }
 }

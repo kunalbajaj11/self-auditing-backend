@@ -2,6 +2,7 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
+  Logger,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
@@ -16,6 +17,8 @@ import { CreateExpensePaymentDto } from './dto/create-expense-payment.dto';
 
 @Injectable()
 export class ExpensePaymentsService {
+  private readonly logger = new Logger(ExpensePaymentsService.name);
+
   constructor(
     @InjectRepository(ExpensePayment)
     private readonly expensePaymentsRepository: Repository<ExpensePayment>,
@@ -446,6 +449,10 @@ export class ExpensePaymentsService {
     expenseId: string,
     paymentDate: string,
   ): Promise<void> {
+    this.logger.debug(
+      `updateAccrualStatusForExpense: expenseId=${expenseId}, organizationId=${organizationId}, paymentDate=${paymentDate}`,
+    );
+
     // Find accrual directly by expense_id (accrual has expense_id foreign key)
     const accrual = await manager.findOne(Accrual, {
       where: {
@@ -454,63 +461,178 @@ export class ExpensePaymentsService {
       },
     });
 
-    if (accrual) {
-
-      if (accrual && accrual.status === AccrualStatus.PENDING_SETTLEMENT) {
-        // Get the expense to check total amount
-        const expense = await manager.findOne(Expense, {
-          where: { id: expenseId, organization: { id: organizationId } },
-        });
-
-        if (!expense) {
-          return;
-        }
-
-        // Get direct payments (only non-deleted payments)
-        const allPayments = await manager.find(ExpensePayment, {
-          where: {
-            expense: { id: expenseId },
-            organization: { id: organizationId },
-            isDeleted: false,
-          },
-        });
-
-        // Get allocations
-        const allAllocations = await manager.find(PaymentAllocation, {
-          where: { expense: { id: expenseId } },
-          relations: ['payment'],
-        });
-
-        // Filter allocations to only those from payments in this organization and not deleted
-        const validAllocations = allAllocations.filter((alloc) => {
-          return (
-            alloc.payment &&
-            (alloc.payment as any).organization?.id === organizationId &&
-            !(alloc.payment as any).isDeleted
-          );
-        });
-
-        const directPaid = allPayments.reduce(
-          (sum, p) => sum + parseFloat(p.amount),
-          0,
-        );
-
-        const allocatedPaid = validAllocations.reduce(
-          (sum, alloc) => sum + parseFloat(alloc.allocatedAmount),
-          0,
-        );
-
-        const totalPaid = directPaid + allocatedPaid;
-        const expenseTotal = parseFloat(expense.totalAmount || '0');
-
-        if (totalPaid >= expenseTotal - 0.01) {
-          accrual.status = AccrualStatus.SETTLED;
-          accrual.settlementDate = paymentDate;
-          accrual.settlementExpense = expense;
-          await manager.save(accrual);
-        }
-      }
+    if (!accrual) {
+      this.logger.debug(
+        `No accrual found for expenseId=${expenseId}, organizationId=${organizationId}`,
+      );
+      return;
     }
+
+    this.logger.debug(
+      `Found accrual: id=${accrual.id}, status=${accrual.status}, amount=${accrual.amount}`,
+    );
+
+    if (accrual.status === AccrualStatus.PENDING_SETTLEMENT) {
+      // Get the expense to check total amount
+      const expense = await manager.findOne(Expense, {
+        where: { id: expenseId, organization: { id: organizationId } },
+      });
+
+      if (!expense) {
+        this.logger.warn(
+          `Expense not found: expenseId=${expenseId}, organizationId=${organizationId}`,
+        );
+        return;
+      }
+
+      this.logger.debug(
+        `Expense found: id=${expense.id}, totalAmount=${expense.totalAmount}, vendorName=${expense.vendorName}`,
+      );
+
+      // Get direct payments (only non-deleted payments)
+      const allPayments = await manager.find(ExpensePayment, {
+        where: {
+          expense: { id: expenseId },
+          organization: { id: organizationId },
+          isDeleted: false,
+        },
+      });
+
+      this.logger.debug(
+        `Found ${allPayments.length} payments for expenseId=${expenseId}`,
+      );
+
+      // Get allocations
+      const allAllocations = await manager.find(PaymentAllocation, {
+        where: { expense: { id: expenseId } },
+        relations: ['payment'],
+      });
+
+      // Filter allocations to only those from payments in this organization and not deleted
+      const validAllocations = allAllocations.filter((alloc) => {
+        return (
+          alloc.payment &&
+          (alloc.payment as any).organization?.id === organizationId &&
+          !(alloc.payment as any).isDeleted
+        );
+      });
+
+      this.logger.debug(
+        `Found ${validAllocations.length} valid allocations for expenseId=${expenseId}`,
+      );
+
+      const directPaid = allPayments.reduce(
+        (sum, p) => sum + parseFloat(p.amount),
+        0,
+      );
+
+      const allocatedPaid = validAllocations.reduce(
+        (sum, alloc) => sum + parseFloat(alloc.allocatedAmount),
+        0,
+      );
+
+      const totalPaid = directPaid + allocatedPaid;
+      const expenseTotal = parseFloat(expense.totalAmount || '0');
+
+      this.logger.debug(
+        `Payment calculation: directPaid=${directPaid}, allocatedPaid=${allocatedPaid}, totalPaid=${totalPaid}, expenseTotal=${expenseTotal}`,
+      );
+
+      if (totalPaid >= expenseTotal - 0.01) {
+        this.logger.log(
+          `Settling accrual: accrualId=${accrual.id}, expenseId=${expenseId}, vendorName=${expense.vendorName}, totalPaid=${totalPaid}, expenseTotal=${expenseTotal}`,
+        );
+        accrual.status = AccrualStatus.SETTLED;
+        accrual.settlementDate = paymentDate;
+        accrual.settlementExpense = null; // Settlement expense is optional, set to null for ExpensePayment settlements
+        await manager.save(accrual);
+        this.logger.log(
+          `Accrual settled successfully: accrualId=${accrual.id}, status=${accrual.status}`,
+        );
+      } else {
+        this.logger.debug(
+          `Accrual not fully paid yet: totalPaid=${totalPaid}, expenseTotal=${expenseTotal}, remaining=${expenseTotal - totalPaid}`,
+        );
+      }
+    } else {
+      this.logger.debug(
+        `Accrual already settled or not pending: accrualId=${accrual.id}, status=${accrual.status}`,
+      );
+    }
+  }
+
+  async recalculateAccrualSettlement(
+    organizationId: string,
+    expenseId: string,
+  ): Promise<{ settled: boolean; accrualId?: string; message: string }> {
+    this.logger.log(
+      `Recalculating accrual settlement: expenseId=${expenseId}, organizationId=${organizationId}`,
+    );
+
+    return await this.dataSource.transaction(async (manager) => {
+      // Find accrual for this expense
+      const accrual = await manager.findOne(Accrual, {
+        where: {
+          expense: { id: expenseId },
+          organization: { id: organizationId },
+        },
+      });
+
+      if (!accrual) {
+        this.logger.debug(`No accrual found for expenseId=${expenseId}`);
+        return {
+          settled: false,
+          message: 'No accrual found for this expense',
+        };
+      }
+
+      // Get the most recent payment date for settlement date
+      const payments = await manager.find(ExpensePayment, {
+        where: {
+          expense: { id: expenseId },
+          organization: { id: organizationId },
+          isDeleted: false,
+        },
+        order: { paymentDate: 'DESC' },
+        take: 1,
+      });
+
+      const paymentDate =
+        payments.length > 0 ? payments[0].paymentDate : new Date().toISOString().split('T')[0];
+
+      // Call the settlement logic
+      await this.updateAccrualStatusForExpense(
+        manager,
+        organizationId,
+        expenseId,
+        paymentDate,
+      );
+
+      // Reload accrual to check if it was settled
+      const updatedAccrual = await manager.findOne(Accrual, {
+        where: { id: accrual.id },
+      });
+
+      if (updatedAccrual?.status === AccrualStatus.SETTLED) {
+        this.logger.log(
+          `Accrual settled successfully: accrualId=${updatedAccrual.id}, expenseId=${expenseId}`,
+        );
+        return {
+          settled: true,
+          accrualId: updatedAccrual.id,
+          message: 'Accrual settled successfully',
+        };
+      } else {
+        this.logger.debug(
+          `Accrual not settled: accrualId=${updatedAccrual?.id}, status=${updatedAccrual?.status}`,
+        );
+        return {
+          settled: false,
+          accrualId: updatedAccrual?.id,
+          message: 'Accrual not fully paid or settlement conditions not met',
+        };
+      }
+    });
   }
 
   async delete(organizationId: string, id: string): Promise<void> {
