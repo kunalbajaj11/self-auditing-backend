@@ -634,6 +634,21 @@ export class ReportsService {
           .andWhere('cna.organization_id = :organizationId', { organizationId })
           .getQuery();
 
+      const unappliedCreditNotesSubqueryEnd = `(
+        SELECT COALESCE(SUM(
+          cn.total_amount - COALESCE((
+            SELECT COALESCE(SUM(cna2.applied_amount), 0)
+            FROM credit_note_applications cna2
+            WHERE cna2.credit_note_id = cn.id
+            AND cna2.organization_id = invoice.organization_id
+          ), 0)
+        ), 0)
+        FROM credit_notes cn
+        WHERE cn.invoice_id = invoice.id
+        AND cn.organization_id = invoice.organization_id
+        AND cn.status IN ('${CreditNoteStatus.DRAFT}', '${CreditNoteStatus.ISSUED}', '${CreditNoteStatus.APPLIED}')
+      )`;
+
       const creditNoteApplicationsSubqueryStart =
         this.creditNoteApplicationsRepository
           .createQueryBuilder('cna')
@@ -642,6 +657,21 @@ export class ReportsService {
           .andWhere('cna.organization_id = :organizationId', { organizationId })
           .getQuery();
 
+      const unappliedCreditNotesSubqueryStart = `(
+        SELECT COALESCE(SUM(
+          cn.total_amount - COALESCE((
+            SELECT COALESCE(SUM(cna2.applied_amount), 0)
+            FROM credit_note_applications cna2
+            WHERE cna2.credit_note_id = cn.id
+            AND cna2.organization_id = invoice.organization_id
+          ), 0)
+        ), 0)
+        FROM credit_notes cn
+        WHERE cn.invoice_id = invoice.id
+        AND cn.organization_id = invoice.organization_id
+        AND cn.status IN ('${CreditNoteStatus.DRAFT}', '${CreditNoteStatus.ISSUED}', '${CreditNoteStatus.APPLIED}')
+      )`;
+
       // Calculate receivables - match Balance Sheet query EXACTLY
       // Balance Sheet uses: invoice_date <= asOfDate with payment_status filter
       // Trial Balance should use: invoice_date <= endDate with same payment_status filter
@@ -649,7 +679,7 @@ export class ReportsService {
       const receivablesAtEndQuery = this.salesInvoicesRepository
         .createQueryBuilder('invoice')
         .select([
-          `SUM(COALESCE(invoice.total_amount, 0) - COALESCE(invoice.paid_amount, 0) - (${creditNoteApplicationsSubqueryEnd})) AS invoiceAmount`,
+          `SUM(COALESCE(invoice.total_amount, 0) - COALESCE(invoice.paid_amount, 0) - (${creditNoteApplicationsSubqueryEnd}) - (${unappliedCreditNotesSubqueryEnd})) AS invoiceAmount`,
         ])
         .where('invoice.organization_id = :organizationId', { organizationId })
         .andWhere('invoice.invoice_date <= :endDate', { endDate })
@@ -662,7 +692,7 @@ export class ReportsService {
       const receivablesAtStartQuery = this.salesInvoicesRepository
         .createQueryBuilder('invoice')
         .select([
-          `SUM(COALESCE(invoice.total_amount, 0) - COALESCE(invoice.paid_amount, 0) - (${creditNoteApplicationsSubqueryStart})) AS invoiceAmount`,
+          `SUM(COALESCE(invoice.total_amount, 0) - COALESCE(invoice.paid_amount, 0) - (${creditNoteApplicationsSubqueryStart}) - (${unappliedCreditNotesSubqueryStart})) AS invoiceAmount`,
         ])
         .where('invoice.organization_id = :organizationId', { organizationId })
         .andWhere('invoice.invoice_date < :startDate', { startDate })
@@ -1627,10 +1657,25 @@ export class ReportsService {
           .andWhere('cna.organization_id = :organizationId', { organizationId })
           .getQuery();
 
+      const openingUnappliedCreditNotesSubquery = `(
+        SELECT COALESCE(SUM(
+          cn.total_amount - COALESCE((
+            SELECT COALESCE(SUM(cna2.applied_amount), 0)
+            FROM credit_note_applications cna2
+            WHERE cna2.credit_note_id = cn.id
+            AND cna2.organization_id = invoice.organization_id
+          ), 0)
+        ), 0)
+        FROM credit_notes cn
+        WHERE cn.invoice_id = invoice.id
+        AND cn.organization_id = invoice.organization_id
+        AND cn.status IN ('${CreditNoteStatus.DRAFT}', '${CreditNoteStatus.ISSUED}', '${CreditNoteStatus.APPLIED}')
+      )`;
+
       const openingReceivablesQuery = this.salesInvoicesRepository
         .createQueryBuilder('invoice')
         .select([
-          `SUM(COALESCE(invoice.total_amount, 0) - COALESCE(invoice.paid_amount, 0) - (${openingCreditNoteApplicationsSubquery})) AS invoiceAmount`,
+          `SUM(COALESCE(invoice.total_amount, 0) - COALESCE(invoice.paid_amount, 0) - (${openingCreditNoteApplicationsSubquery}) - (${openingUnappliedCreditNotesSubquery})) AS invoiceAmount`,
         ])
         .where('invoice.organization_id = :organizationId', { organizationId })
         .andWhere('invoice.invoice_date < :startDate', { startDate })
@@ -1867,14 +1912,10 @@ export class ReportsService {
         totalOpeningCredit += balance.credit;
       });
 
+      // Calculate period totals BEFORE adding Retained Earnings
+      // Retained Earnings should NOT be included in period totals
       const totalDebit = accounts.reduce((sum, acc) => sum + acc.debit, 0);
       const totalCredit = accounts.reduce((sum, acc) => sum + acc.credit, 0);
-
-      const totalClosingDebit = totalOpeningDebit + totalDebit;
-      const totalClosingCredit = totalOpeningCredit + totalCredit;
-      // Balance = Credit - Debit (negative when debit > credit, positive when credit > debit)
-      const totalOpeningBalance = totalOpeningCredit - totalOpeningDebit;
-      const totalClosingBalance = totalClosingCredit - totalClosingDebit;
 
       const retainedEarningsRevenueCredit = accounts
         .filter((acc) => acc.accountName === 'Sales Revenue')
@@ -1918,6 +1959,7 @@ export class ReportsService {
       const retainedEarningsBalance =
         retainedEarningsNetRevenue - netExpenses + netEquityJournal;
 
+      // Add Retained Earnings to accounts (but it's already excluded from period totals)
       accounts.push({
         accountName: 'Retained Earnings / Current Year Profit',
         accountType: 'Equity',
@@ -1927,9 +1969,10 @@ export class ReportsService {
         balance: retainedEarningsBalance,
       });
 
-      const calculatedRetainedEarnings = totalClosingBalance;
-      const accountingDifference =
-        calculatedRetainedEarnings - retainedEarningsBalance;
+      // Calculate closing totals AFTER adding Retained Earnings
+      // Retained Earnings IS included in closing balances
+      // Balance = Credit - Debit (negative when debit > credit, positive when credit > debit)
+      const totalOpeningBalance = totalOpeningCredit - totalOpeningDebit;
 
       const finalTotalDebit = accounts.reduce((sum, acc) => sum + acc.debit, 0);
       const finalTotalCredit = accounts.reduce(
@@ -1937,7 +1980,19 @@ export class ReportsService {
         0,
       );
 
+      // Closing totals include Retained Earnings (since it's in accounts array now)
+      const totalClosingDebit = totalOpeningDebit + finalTotalDebit;
+      const totalClosingCredit = totalOpeningCredit + finalTotalCredit;
+      const totalClosingBalance = totalClosingCredit - totalClosingDebit;
+
+      const calculatedRetainedEarnings = totalClosingBalance;
+      const accountingDifference =
+        calculatedRetainedEarnings - retainedEarningsBalance;
+
+      // Period totals should NOT include Retained Earnings
+      // Period difference uses totals calculated BEFORE Retained Earnings was added
       const periodDifference = Math.abs(totalDebit - totalCredit);
+      // Closing difference includes Retained Earnings (finalTotalDebit/Credit include it)
       const closingDifference = Math.abs(finalTotalDebit - finalTotalCredit);
       const isBalanced = periodDifference < 0.01 && closingDifference < 0.01;
 
@@ -2099,11 +2154,26 @@ export class ReportsService {
           .andWhere('cna.organization_id = :organizationId', { organizationId })
           .getQuery();
 
+      const unappliedCreditNotesSubquery = `(
+        SELECT COALESCE(SUM(
+          cn.total_amount - COALESCE((
+            SELECT COALESCE(SUM(cna2.applied_amount), 0)
+            FROM credit_note_applications cna2
+            WHERE cna2.credit_note_id = cn.id
+            AND cna2.organization_id = invoice.organization_id
+          ), 0)
+        ), 0)
+        FROM credit_notes cn
+        WHERE cn.invoice_id = invoice.id
+        AND cn.organization_id = invoice.organization_id
+        AND cn.status IN ('${CreditNoteStatus.DRAFT}', '${CreditNoteStatus.ISSUED}', '${CreditNoteStatus.APPLIED}')
+      )`;
+
       const receivablesQuery = this.salesInvoicesRepository
         .createQueryBuilder('invoice')
         .select([
           "'Accounts Receivable' AS category",
-          `SUM(COALESCE(invoice.total_amount, 0) - COALESCE(invoice.paid_amount, 0) - (${creditNoteApplicationsSubquery})) AS amount`,
+          `SUM(COALESCE(invoice.total_amount, 0) - COALESCE(invoice.paid_amount, 0) - (${creditNoteApplicationsSubquery}) - (${unappliedCreditNotesSubquery})) AS amount`,
         ])
         .where('invoice.organization_id = :organizationId', { organizationId })
         .andWhere('invoice.invoice_date <= :asOfDate', { asOfDate })
@@ -2742,10 +2812,25 @@ export class ReportsService {
           .andWhere('cna.organization_id = :organizationId', { organizationId })
           .getQuery();
 
+      const openingUnappliedCreditNotesSubquery = `(
+        SELECT COALESCE(SUM(
+          cn.total_amount - COALESCE((
+            SELECT COALESCE(SUM(cna2.applied_amount), 0)
+            FROM credit_note_applications cna2
+            WHERE cna2.credit_note_id = cn.id
+            AND cna2.organization_id = invoice.organization_id
+          ), 0)
+        ), 0)
+        FROM credit_notes cn
+        WHERE cn.invoice_id = invoice.id
+        AND cn.organization_id = invoice.organization_id
+        AND cn.status IN ('${CreditNoteStatus.DRAFT}', '${CreditNoteStatus.ISSUED}', '${CreditNoteStatus.APPLIED}')
+      )`;
+
       const openingReceivablesQuery = this.salesInvoicesRepository
         .createQueryBuilder('invoice')
         .select([
-          `SUM(COALESCE(invoice.total_amount, 0) - COALESCE(invoice.paid_amount, 0) - (${openingCreditNoteApplicationsSubquery})) AS amount`,
+          `SUM(COALESCE(invoice.total_amount, 0) - COALESCE(invoice.paid_amount, 0) - (${openingCreditNoteApplicationsSubquery}) - (${openingUnappliedCreditNotesSubquery})) AS amount`,
         ])
         .where('invoice.organization_id = :organizationId', { organizationId })
         .andWhere('invoice.invoice_date < :startDate', { startDate })
@@ -3909,12 +3994,34 @@ export class ReportsService {
       filters?.['endDate'] || new Date().toISOString().split('T')[0];
     const startDate = filters?.['startDate'] || null;
 
+    // Subquery for applied credit note amounts (from CreditNoteApplication records)
     const creditNoteApplicationsSubquery = this.creditNoteApplicationsRepository
       .createQueryBuilder('cna')
       .select('COALESCE(SUM(cna.appliedAmount), 0)')
       .where('cna.invoice_id = invoice.id')
       .andWhere('cna.organization_id = :organizationId', { organizationId })
       .getQuery();
+
+    // Subquery for unapplied credit notes linked to this invoice
+    // This includes credit notes that are linked to the invoice but not yet applied
+    // Include DRAFT, ISSUED, and APPLIED status credit notes that are linked to the invoice
+    // Calculate: total_amount - applied_amount for each credit note
+    // For DRAFT credit notes, applied_amount will be 0, so we get the full amount
+    // Note: Using raw SQL subquery to avoid parameter binding issues with nested queries
+    const unappliedCreditNotesSubquery = `(
+      SELECT COALESCE(SUM(
+        cn.total_amount - COALESCE((
+          SELECT COALESCE(SUM(cna2.applied_amount), 0)
+          FROM credit_note_applications cna2
+          WHERE cna2.credit_note_id = cn.id
+          AND cna2.organization_id = invoice.organization_id
+        ), 0)
+      ), 0)
+      FROM credit_notes cn
+      WHERE cn.invoice_id = invoice.id
+      AND cn.organization_id = invoice.organization_id
+      AND cn.status IN ('${CreditNoteStatus.DRAFT}', '${CreditNoteStatus.ISSUED}', '${CreditNoteStatus.APPLIED}')
+    )`;
 
     // Subquery for customer debit note applications (increase receivables)
     // Note: DebitNoteApplication is for customer debit notes (linked to invoices)
@@ -3942,6 +4049,7 @@ export class ReportsService {
         'invoice.status AS status',
         'invoice.payment_status AS paymentStatus',
         `(${creditNoteApplicationsSubquery}) AS appliedCreditAmount`,
+        `(${unappliedCreditNotesSubquery}) AS unappliedCreditAmount`,
         `(${debitNoteApplicationsSubquery}) AS appliedDebitAmount`,
       ])
       .where('invoice.organization_id = :organizationId', { organizationId })
@@ -4105,14 +4213,22 @@ export class ReportsService {
       const appliedCreditAmount = Number(
         row.appliedcreditamount || row.appliedCreditAmount || 0,
       );
+      const unappliedCreditAmount = Number(
+        row.unappliedcreditamount || row.unappliedCreditAmount || 0,
+      );
       const appliedDebitAmount = Number(
         row.applieddebitamount || row.appliedDebitAmount || 0,
       );
 
-      // Outstanding = total - paid - credit_notes + debit_notes
+      // Outstanding = total - paid - applied_credit_notes - unapplied_credit_notes + debit_notes
+      // Unapplied credit notes include DRAFT, ISSUED, and APPLIED credit notes linked to the invoice
       const outstanding = Math.max(
         0,
-        total - paid - appliedCreditAmount + appliedDebitAmount,
+        total -
+          paid -
+          appliedCreditAmount -
+          unappliedCreditAmount +
+          appliedDebitAmount,
       );
       const paymentStatus = row.paymentstatus || row.paymentStatus;
       const dueDate = row.duedate || row.dueDate;
@@ -4234,10 +4350,25 @@ export class ReportsService {
           })
           .getQuery();
 
+      const openingUnappliedCreditNotesSubquery = `(
+        SELECT COALESCE(SUM(
+          cn.total_amount - COALESCE((
+            SELECT COALESCE(SUM(cna2.applied_amount), 0)
+            FROM credit_note_applications cna2
+            WHERE cna2.credit_note_id = cn.id
+            AND cna2.organization_id = invoice.organization_id
+          ), 0)
+        ), 0)
+        FROM credit_notes cn
+        WHERE cn.invoice_id = invoice.id
+        AND cn.organization_id = invoice.organization_id
+        AND cn.status IN ('${CreditNoteStatus.DRAFT}', '${CreditNoteStatus.ISSUED}', '${CreditNoteStatus.APPLIED}')
+      )`;
+
       const openingInvoicesQueryWithCN = this.salesInvoicesRepository
         .createQueryBuilder('invoice')
         .select([
-          `SUM(COALESCE(invoice.total_amount, 0) - COALESCE(invoice.paid_amount, 0) - (${openingCreditNoteApplicationsSubquery})) AS outstanding`,
+          `SUM(COALESCE(invoice.total_amount, 0) - COALESCE(invoice.paid_amount, 0) - (${openingCreditNoteApplicationsSubquery}) - (${openingUnappliedCreditNotesSubquery})) AS outstanding`,
         ])
         .where('invoice.organization_id = :organizationId', {
           organizationId,

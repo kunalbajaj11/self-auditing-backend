@@ -4,12 +4,14 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource } from 'typeorm';
+import { Repository, DataSource, In } from 'typeorm';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { SalesInvoice } from '../../entities/sales-invoice.entity';
 import { InvoiceLineItem } from '../../entities/invoice-line-item.entity';
 import { InvoicePayment } from '../../entities/invoice-payment.entity';
 import { CreditNoteApplication } from '../../entities/credit-note-application.entity';
+import { CreditNote } from '../../entities/credit-note.entity';
+import { CreditNoteStatus } from '../../common/enums/credit-note-status.enum';
 import { NumberingSequenceType } from '../../entities/numbering-sequence.entity';
 import { Organization } from '../../entities/organization.entity';
 import { User } from '../../entities/user.entity';
@@ -42,6 +44,8 @@ export class SalesInvoicesService {
     private readonly paymentsRepository: Repository<InvoicePayment>,
     @InjectRepository(CreditNoteApplication)
     private readonly creditNoteApplicationsRepository: Repository<CreditNoteApplication>,
+    @InjectRepository(CreditNote)
+    private readonly creditNotesRepository: Repository<CreditNote>,
     @InjectRepository(Organization)
     private readonly organizationsRepository: Repository<Organization>,
     @InjectRepository(User)
@@ -271,8 +275,9 @@ export class SalesInvoicesService {
 
   /**
    * CRITICAL FIX: Calculate outstanding balance correctly
-   * Outstanding = totalAmount - paidAmount - appliedCreditNoteAmount
+   * Outstanding = totalAmount - paidAmount - appliedCreditNoteAmount - unappliedCreditNoteAmount
    * This ensures paidAmount only reflects actual money received
+   * Unapplied credit notes include DRAFT, ISSUED, and APPLIED credit notes linked to the invoice
    */
   async calculateOutstandingBalance(
     invoiceId: string,
@@ -302,8 +307,44 @@ export class SalesInvoicesService {
       0,
     );
 
-    // Outstanding = totalAmount - paidAmount - appliedCreditNoteAmount
-    return Math.max(0, totalAmount - paidAmount - appliedCreditAmount);
+    // Get unapplied credit notes linked to this invoice
+    // Include DRAFT, ISSUED, and APPLIED status credit notes
+    const unappliedCreditNotes = await this.creditNotesRepository.find({
+      where: {
+        invoice: { id: invoiceId },
+        organization: { id: organizationId },
+        status: In([
+          CreditNoteStatus.DRAFT,
+          CreditNoteStatus.ISSUED,
+          CreditNoteStatus.APPLIED,
+        ]),
+      },
+    });
+
+    // Calculate unapplied amount: total_amount - applied_amount for each credit note
+    let unappliedCreditAmount = 0;
+    for (const creditNote of unappliedCreditNotes) {
+      const creditNoteTotal = parseFloat(creditNote.totalAmount);
+      // Get applied amount for this credit note
+      const creditNoteApplications =
+        await this.creditNoteApplicationsRepository.find({
+          where: {
+            creditNote: { id: creditNote.id },
+            organization: { id: organizationId },
+          },
+        });
+      const creditNoteApplied = creditNoteApplications.reduce(
+        (sum, app) => sum + parseFloat(app.appliedAmount),
+        0,
+      );
+      unappliedCreditAmount += creditNoteTotal - creditNoteApplied;
+    }
+
+    // Outstanding = totalAmount - paidAmount - appliedCreditNoteAmount - unappliedCreditNoteAmount
+    return Math.max(
+      0,
+      totalAmount - paidAmount - appliedCreditAmount - unappliedCreditAmount,
+    );
   }
 
   /**
