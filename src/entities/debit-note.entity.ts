@@ -11,10 +11,13 @@ import { AbstractEntity } from './abstract.entity';
 import { Organization } from './organization.entity';
 import { User } from './user.entity';
 import { SalesInvoice } from './sales-invoice.entity';
+import { Expense } from './expense.entity';
 import { Customer } from '../modules/customers/customer.entity';
+import { Vendor } from '../modules/vendors/vendor.entity';
 import { DebitNoteStatus } from '../common/enums/debit-note-status.enum';
 import { DebitNoteReason } from '../common/enums/debit-note-reason.enum';
 import { DebitNoteApplication } from './debit-note-application.entity';
+import { DebitNoteExpenseApplication } from './debit-note-expense-application.entity';
 
 @Entity({ name: 'debit_notes' })
 @Unique(['organization', 'debitNoteNumber'])
@@ -22,6 +25,8 @@ import { DebitNoteApplication } from './debit-note-application.entity';
 @Index(['organization', 'status'])
 @Index(['customer'])
 @Index(['invoice'])
+@Index(['vendor'])
+@Index(['expense'])
 export class DebitNote extends AbstractEntity {
   @ManyToOne(() => Organization, (organization) => organization.debitNotes, {
     nullable: false,
@@ -38,6 +43,7 @@ export class DebitNote extends AbstractEntity {
   @Column({ name: 'debit_note_number', length: 100 })
   debitNoteNumber: string;
 
+  // For customer debit notes (sales invoices)
   @ManyToOne(() => SalesInvoice, {
     nullable: true,
   })
@@ -55,6 +61,25 @@ export class DebitNote extends AbstractEntity {
 
   @Column({ name: 'customer_trn', length: 50, nullable: true })
   customerTrn?: string | null;
+
+  // For supplier debit notes (expenses)
+  @ManyToOne(() => Expense, {
+    nullable: true,
+  })
+  @JoinColumn({ name: 'expense_id' })
+  expense?: Expense | null;
+
+  @ManyToOne(() => Vendor, {
+    nullable: true,
+  })
+  @JoinColumn({ name: 'vendor_id' })
+  vendor?: Vendor | null;
+
+  @Column({ name: 'vendor_name', length: 200, nullable: true })
+  vendorName?: string | null;
+
+  @Column({ name: 'vendor_trn', length: 50, nullable: true })
+  vendorTrn?: string | null;
 
   @Column({ name: 'debit_note_date', type: 'date' })
   debitNoteDate: string;
@@ -124,6 +149,9 @@ export class DebitNote extends AbstractEntity {
   @Column({ name: 'applied_to_invoice', default: false })
   appliedToInvoice: boolean;
 
+  @Column({ name: 'applied_to_expense', default: false })
+  appliedToExpense: boolean;
+
   @Column({
     name: 'applied_amount',
     type: 'decimal',
@@ -135,4 +163,10 @@ export class DebitNote extends AbstractEntity {
 
   @OneToMany(() => DebitNoteApplication, (application) => application.debitNote)
   applications: DebitNoteApplication[];
+
+  @OneToMany(
+    () => DebitNoteExpenseApplication,
+    (application) => application.debitNote,
+  )
+  expenseApplications: DebitNoteExpenseApplication[];
 }

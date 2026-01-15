@@ -15,6 +15,8 @@ import { JournalEntry } from '../../entities/journal-entry.entity';
 import { CreditNote } from '../../entities/credit-note.entity';
 import { DebitNote } from '../../entities/debit-note.entity';
 import { CreditNoteApplication } from '../../entities/credit-note-application.entity';
+import { DebitNoteApplication } from '../../entities/debit-note-application.entity';
+import { DebitNoteExpenseApplication } from '../../entities/debit-note-expense-application.entity';
 import { Product } from '../products/product.entity';
 import { StockMovement } from '../inventory/entities/stock-movement.entity';
 import { NotificationsModule } from '../notifications/notifications.module';
@@ -35,6 +37,8 @@ import { SettingsModule } from '../settings/settings.module';
       CreditNote,
       DebitNote,
       CreditNoteApplication,
+      DebitNoteApplication,
+      DebitNoteExpenseApplication,
       Product,
       StockMovement,
     ]),

@@ -116,4 +116,19 @@ export class DebitNotesController {
       dto.appliedAmount,
     );
   }
+
+  @Post(':id/apply-to-expense')
+  @Roles(UserRole.ADMIN, UserRole.ACCOUNTANT)
+  async applyToExpense(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: { expenseId: string; appliedAmount: number },
+  ) {
+    return this.debitNotesService.applyDebitNoteToExpense(
+      user?.organizationId as string,
+      id,
+      dto.expenseId,
+      dto.appliedAmount,
+    );
+  }
 }

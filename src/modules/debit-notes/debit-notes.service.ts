@@ -7,9 +7,12 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
 import { DebitNote } from '../../entities/debit-note.entity';
 import { DebitNoteApplication } from '../../entities/debit-note-application.entity';
+import { DebitNoteExpenseApplication } from '../../entities/debit-note-expense-application.entity';
 import { NumberingSequenceType } from '../../entities/numbering-sequence.entity';
 import { SettingsService } from '../settings/settings.service';
 import { SalesInvoice } from '../../entities/sales-invoice.entity';
+import { Expense } from '../../entities/expense.entity';
+import { Vendor } from '../vendors/vendor.entity';
 import { Organization } from '../../entities/organization.entity';
 import { User } from '../../entities/user.entity';
 import { DebitNoteStatus } from '../../common/enums/debit-note-status.enum';
@@ -17,6 +20,8 @@ import { PaymentStatus } from '../../common/enums/payment-status.enum';
 import { InvoiceStatus } from '../../common/enums/invoice-status.enum';
 import { AuditAction } from '../../common/enums/audit-action.enum';
 import { SalesInvoicesService } from '../sales-invoices/sales-invoices.service';
+import { ExpensesService } from '../expenses/expenses.service';
+import { ExpensePaymentsService } from '../expense-payments/expense-payments.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 
 @Injectable()
@@ -26,13 +31,19 @@ export class DebitNotesService {
     private readonly debitNotesRepository: Repository<DebitNote>,
     @InjectRepository(DebitNoteApplication)
     private readonly debitNoteApplicationsRepository: Repository<DebitNoteApplication>,
+    @InjectRepository(DebitNoteExpenseApplication)
+    private readonly debitNoteExpenseApplicationsRepository: Repository<DebitNoteExpenseApplication>,
     @InjectRepository(SalesInvoice)
     private readonly invoicesRepository: Repository<SalesInvoice>,
+    @InjectRepository(Expense)
+    private readonly expensesRepository: Repository<Expense>,
     @InjectRepository(Organization)
     private readonly organizationsRepository: Repository<Organization>,
     @InjectRepository(User)
     private readonly usersRepository: Repository<User>,
     private readonly salesInvoicesService: SalesInvoicesService,
+    private readonly expensesService: ExpensesService,
+    private readonly expensePaymentsService: ExpensePaymentsService,
     private readonly auditLogsService: AuditLogsService,
     private readonly settingsService: SettingsService,
     private readonly dataSource: DataSource,
@@ -41,7 +52,7 @@ export class DebitNotesService {
   async findAll(organizationId: string): Promise<DebitNote[]> {
     return this.debitNotesRepository.find({
       where: { organization: { id: organizationId }, isDeleted: false },
-      relations: ['customer', 'invoice'],
+      relations: ['customer', 'invoice', 'vendor', 'expense'],
       order: { debitNoteDate: 'DESC' },
     });
   }
@@ -49,7 +60,14 @@ export class DebitNotesService {
   async findById(organizationId: string, id: string): Promise<DebitNote> {
     const debitNote = await this.debitNotesRepository.findOne({
       where: { id, organization: { id: organizationId }, isDeleted: false },
-      relations: ['customer', 'invoice', 'applications'],
+      relations: [
+        'customer',
+        'invoice',
+        'vendor',
+        'expense',
+        'applications',
+        'expenseApplications',
+      ],
     });
     if (!debitNote) {
       throw new NotFoundException('Debit note not found');
@@ -73,6 +91,18 @@ export class DebitNotesService {
       throw new NotFoundException('User not found');
     }
 
+    // Validate: Debit note should be either for customer (invoice) OR supplier (expense), not both
+    if (dto.invoiceId && dto.expenseId) {
+      throw new BadRequestException(
+        'Debit note cannot be linked to both invoice and expense',
+      );
+    }
+    if (dto.customerId && dto.vendorId) {
+      throw new BadRequestException(
+        'Debit note cannot have both customer and vendor',
+      );
+    }
+
     // Generate debit note number using centralized numbering sequence
     const debitNoteNumber = await this.settingsService.generateNextNumber(
       organizationId,
@@ -91,10 +121,16 @@ export class DebitNotesService {
       description: dto.description,
       notes: dto.notes,
       status: DebitNoteStatus.DRAFT,
+      // Customer fields (for sales debit notes)
       customer: dto.customerId ? { id: dto.customerId } : undefined,
       customerName: dto.customerName,
       customerTrn: dto.customerTrn,
       invoice: dto.invoiceId ? { id: dto.invoiceId } : undefined,
+      // Supplier fields (for expense debit notes)
+      vendor: dto.vendorId ? { id: dto.vendorId } : undefined,
+      vendorName: dto.vendorName,
+      vendorTrn: dto.vendorTrn,
+      expense: dto.expenseId ? { id: dto.expenseId } : undefined,
     });
 
     return this.debitNotesRepository.save(debitNote);
@@ -118,6 +154,13 @@ export class DebitNotesService {
 
     if (!invoice) {
       throw new NotFoundException('Invoice not found');
+    }
+
+    // Validate: Only customer debit notes (linked to invoices) can be applied to invoices
+    if (debitNote.expense?.id || debitNote.expense) {
+      throw new BadRequestException(
+        'Supplier debit notes cannot be applied to invoices. Use apply-to-expense endpoint instead.',
+      );
     }
 
     if (debitNote.status !== DebitNoteStatus.ISSUED) {
@@ -168,10 +211,128 @@ export class DebitNotesService {
     return application;
   }
 
+  /**
+   * Apply debit note to expense
+   * This method creates a DebitNoteExpenseApplication record
+   * Outstanding balance = expense.total_amount - expensePayments - debitNoteExpenseApplications
+   */
+  async applyDebitNoteToExpense(
+    organizationId: string,
+    debitNoteId: string,
+    expenseId: string,
+    appliedAmount: number,
+  ): Promise<DebitNoteExpenseApplication> {
+    const debitNote = await this.findById(organizationId, debitNoteId);
+    const expense = await this.expensesRepository.findOne({
+      where: { id: expenseId, organization: { id: organizationId } },
+    });
+
+    if (!expense) {
+      throw new NotFoundException('Expense not found');
+    }
+
+    // Validate: Only supplier debit notes (linked to expenses) can be applied to expenses
+    if (debitNote.invoice?.id || debitNote.invoice) {
+      throw new BadRequestException(
+        'Customer debit notes cannot be applied to expenses. Use apply endpoint for invoices instead.',
+      );
+    }
+
+    if (debitNote.status !== DebitNoteStatus.ISSUED) {
+      throw new BadRequestException(
+        'Debit note must be issued before applying to expense',
+      );
+    }
+
+    // Check if debit note has enough remaining amount
+    const totalApplied = await this.getTotalAppliedAmount(debitNoteId);
+    const totalExpenseApplied = await this.getTotalExpenseAppliedAmount(
+      debitNoteId,
+    );
+    const remainingAmount =
+      parseFloat(debitNote.totalAmount) - totalApplied - totalExpenseApplied;
+
+    if (appliedAmount > remainingAmount) {
+      throw new BadRequestException(
+        `Applied amount exceeds remaining debit note amount`,
+      );
+    }
+
+    // Calculate outstanding balance for expense
+    const expensePayments = await this.expensePaymentsService.findByExpense(
+      organizationId,
+      expenseId,
+    );
+    const totalPaid = expensePayments.reduce(
+      (sum, p) => sum + parseFloat(p.amount),
+      0,
+    );
+
+    // Get existing debit note applications for this expense
+    const existingApplications =
+      await this.debitNoteExpenseApplicationsRepository.find({
+        where: { expense: { id: expenseId } },
+      });
+    const totalDebitNoteApplied = existingApplications.reduce(
+      (sum, app) => sum + parseFloat(app.appliedAmount),
+      0,
+    );
+
+    const outstandingBalance =
+      parseFloat(expense.totalAmount) - totalPaid - totalDebitNoteApplied;
+
+    if (appliedAmount > outstandingBalance + 0.01) {
+      throw new BadRequestException(
+        `Applied amount (${appliedAmount}) exceeds outstanding balance (${outstandingBalance})`,
+      );
+    }
+
+    // Create debit note expense application
+    const application = this.debitNoteExpenseApplicationsRepository.create({
+      debitNote,
+      expense,
+      organization: { id: organizationId },
+      appliedAmount: appliedAmount.toString(),
+      appliedDate: new Date().toISOString().split('T')[0],
+    });
+
+    await this.debitNoteExpenseApplicationsRepository.save(application);
+
+    // Update debit note status if fully applied
+    const newTotalExpenseApplied = totalExpenseApplied + appliedAmount;
+    const newTotalApplied = totalApplied + newTotalExpenseApplied;
+    if (newTotalApplied >= parseFloat(debitNote.totalAmount)) {
+      debitNote.status = DebitNoteStatus.APPLIED;
+      debitNote.appliedToExpense = true;
+      debitNote.appliedAmount = debitNote.totalAmount;
+    } else {
+      debitNote.appliedToExpense = true;
+      const currentApplied = parseFloat(debitNote.appliedAmount || '0');
+      debitNote.appliedAmount = (currentApplied + appliedAmount).toString();
+    }
+    await this.debitNotesRepository.save(debitNote);
+
+    return application;
+  }
+
   private async getTotalAppliedAmount(debitNoteId: string): Promise<number> {
     const applications = await this.debitNoteApplicationsRepository.find({
       where: { debitNote: { id: debitNoteId } },
     });
+    return applications.reduce(
+      (sum, app) => sum + parseFloat(app.appliedAmount),
+      0,
+    );
+  }
+
+  private async getTotalExpenseAppliedAmount(
+    debitNoteId: string,
+  ): Promise<number> {
+    const applications = await this.debitNoteExpenseApplicationsRepository.find(
+      {
+        where: { debitNote: { id: debitNoteId } },
+      },
+    );
     return applications.reduce(
       (sum, app) => sum + parseFloat(app.appliedAmount),
       0,
@@ -208,6 +369,22 @@ export class DebitNotesService {
       throw new BadRequestException('Cannot update cancelled debit note');
     }
 
+    // Validate: Debit note should be either for customer (invoice) OR supplier (expense), not both
+    const newInvoiceId = dto.invoiceId !== undefined ? dto.invoiceId : debitNote.invoice?.id;
+    const newExpenseId = dto.expenseId !== undefined ? dto.expenseId : debitNote.expense?.id;
+    if (newInvoiceId && newExpenseId) {
+      throw new BadRequestException(
+        'Debit note cannot be linked to both invoice and expense',
+      );
+    }
+    const newCustomerId = dto.customerId !== undefined ? dto.customerId : debitNote.customer?.id;
+    const newVendorId = dto.vendorId !== undefined ? dto.vendorId : debitNote.vendor?.id;
+    if (newCustomerId && newVendorId) {
+      throw new BadRequestException(
+        'Debit note cannot have both customer and vendor',
+      );
+    }
+
     // Update allowed fields
     if (dto.debitNoteDate !== undefined) {
       debitNote.debitNoteDate = dto.debitNoteDate;
@@ -235,6 +412,21 @@ export class DebitNotesService {
         debitNote.customerName = dto.customerName;
         debitNote.customerTrn = dto.customerTrn;
       }
+    }
+    if (dto.vendorId !== undefined) {
+      if (dto.vendorId) {
+        debitNote.vendor = { id: dto.vendorId } as any;
+      } else {
+        debitNote.vendor = null;
+        debitNote.vendorName = dto.vendorName;
+        debitNote.vendorTrn = dto.vendorTrn;
+      }
+    }
+    if (dto.expenseId !== undefined) {
+      debitNote.expense = dto.expenseId ? ({ id: dto.expenseId } as any) : null;
+    }
+    if (dto.invoiceId !== undefined) {
+      debitNote.invoice = dto.invoiceId ? ({ id: dto.invoiceId } as any) : null;
     }
 
     const updated = await this.debitNotesRepository.save(debitNote);
@@ -282,9 +474,13 @@ export class DebitNotesService {
       );
     }
 
-    if (status === DebitNoteStatus.APPLIED && !debitNote.appliedToInvoice) {
+    if (
+      status === DebitNoteStatus.APPLIED &&
+      !debitNote.appliedToInvoice &&
+      !debitNote.appliedToExpense
+    ) {
       throw new BadRequestException(
-        'Cannot set status to APPLIED unless debit note is applied to invoice',
+        'Cannot set status to APPLIED unless debit note is applied to invoice or expense',
       );
     }
 
