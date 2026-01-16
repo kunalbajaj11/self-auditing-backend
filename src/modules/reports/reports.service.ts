@@ -2057,13 +2057,40 @@ export class ReportsService {
         let closingCredit: number;
         let closingBalance: number;
 
-        if (isRetainedEarnings && opening.debit === 0 && opening.credit === 0) {
-          // First year: period balance is 0, but closing balance = retained earnings
-          closingDebit =
-            retainedEarningsBalance < 0 ? Math.abs(retainedEarningsBalance) : 0;
-          closingCredit =
-            retainedEarningsBalance > 0 ? retainedEarningsBalance : 0;
-          closingBalance = retainedEarningsBalance;
+        if (isRetainedEarnings) {
+          // For Retained Earnings: period balance is 0, but closing balance = retained earnings
+          // Check if it's first year (no opening balance) or subsequent year
+          // Use small tolerance for floating point comparison
+          const isFirstYear =
+            Math.abs(opening.debit) < 0.01 && Math.abs(opening.credit) < 0.01;
+
+          if (isFirstYear) {
+            // First year: closing balance = retained earnings (no opening balance)
+            // For equity accounts: positive balance = credit, negative balance = debit
+            if (retainedEarningsBalance >= 0) {
+              closingDebit = 0;
+              closingCredit = retainedEarningsBalance;
+            } else {
+              closingDebit = Math.abs(retainedEarningsBalance);
+              closingCredit = 0;
+            }
+            closingBalance = retainedEarningsBalance;
+          } else {
+            // Subsequent years: closing = opening + period activity
+            // Period debit/credit are 0 (as per first year logic requirement)
+            // But we need to add the current period's retained earnings to closing
+            closingDebit = opening.debit;
+            closingCredit = opening.credit;
+
+            // Add current period retained earnings
+            if (retainedEarningsBalance > 0) {
+              closingCredit += retainedEarningsBalance;
+            } else if (retainedEarningsBalance < 0) {
+              closingDebit += Math.abs(retainedEarningsBalance);
+            }
+
+            closingBalance = closingCredit - closingDebit;
+          }
         } else {
           // Normal calculation for other accounts or subsequent years
           closingDebit = opening.debit + acc.debit;
