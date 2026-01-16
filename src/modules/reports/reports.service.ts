@@ -1975,14 +1975,15 @@ export class ReportsService {
       const retainedEarningsBalance =
         retainedEarningsNetRevenue - netExpenses + netEquityJournal;
 
-      // Add Retained Earnings to accounts (but it's already excluded from period totals)
+      // Add Retained Earnings to accounts
+      // In the first year, Retained Earnings should NOT show in period balance columns
+      // Period debit and credit should be 0.00, but closing balance should show the retained earnings amount
       accounts.push({
         accountName: 'Retained Earnings / Current Year Profit',
         accountType: 'Equity',
-        debit:
-          retainedEarningsBalance < 0 ? Math.abs(retainedEarningsBalance) : 0,
-        credit: retainedEarningsBalance > 0 ? retainedEarningsBalance : 0,
-        balance: retainedEarningsBalance,
+        debit: 0, // Period debit is 0 for first year
+        credit: 0, // Period credit is 0 for first year
+        balance: retainedEarningsBalance, // This will be used for closing balance calculation
       });
 
       // Calculate closing totals AFTER adding Retained Earnings
@@ -2046,16 +2047,36 @@ export class ReportsService {
           credit: 0,
           balance: 0,
         };
-        const closingDebit = opening.debit + acc.debit;
-        const closingCredit = opening.credit + acc.credit;
 
-        const isCreditAccount =
-          acc.accountType === 'Liability' ||
-          acc.accountType === 'Revenue' ||
-          acc.accountType === 'Equity';
-        const closingBalance = isCreditAccount
-          ? closingCredit - closingDebit
-          : closingDebit - closingCredit;
+        // Special handling for Retained Earnings in first year
+        // Period balance should be 0, but closing balance should show the retained earnings amount
+        const isRetainedEarnings =
+          acc.accountName === 'Retained Earnings / Current Year Profit';
+
+        let closingDebit: number;
+        let closingCredit: number;
+        let closingBalance: number;
+
+        if (isRetainedEarnings && opening.debit === 0 && opening.credit === 0) {
+          // First year: period balance is 0, but closing balance = retained earnings
+          closingDebit =
+            retainedEarningsBalance < 0 ? Math.abs(retainedEarningsBalance) : 0;
+          closingCredit =
+            retainedEarningsBalance > 0 ? retainedEarningsBalance : 0;
+          closingBalance = retainedEarningsBalance;
+        } else {
+          // Normal calculation for other accounts or subsequent years
+          closingDebit = opening.debit + acc.debit;
+          closingCredit = opening.credit + acc.credit;
+
+          const isCreditAccount =
+            acc.accountType === 'Liability' ||
+            acc.accountType === 'Revenue' ||
+            acc.accountType === 'Equity';
+          closingBalance = isCreditAccount
+            ? closingCredit - closingDebit
+            : closingDebit - closingCredit;
+        }
 
         return {
           ...acc,
@@ -3539,6 +3560,17 @@ export class ReportsService {
       revenueQuery.andWhere('invoice.status IN (:...statuses)', { statuses });
     }
 
+    // Include credit notes that have applications, even if in DRAFT status
+    // This ensures credit notes applied to invoices reduce revenue properly
+    const creditNotesWithApplicationsSubquery =
+      this.creditNoteApplicationsRepository
+        .createQueryBuilder('cna')
+        .select('DISTINCT cna.credit_note_id')
+        .where('cna.organization_id = :organizationId', { organizationId })
+        .getQuery();
+
+    // Include DRAFT credit notes that are linked to invoices
+    // DRAFT credit notes represent returns/refunds and should reduce revenue immediately
     const creditNotesQuery = this.creditNotesRepository
       .createQueryBuilder('creditNote')
       .select([
@@ -3551,10 +3583,18 @@ export class ReportsService {
       })
       .andWhere('creditNote.credit_note_date >= :startDate', { startDate })
       .andWhere('creditNote.credit_note_date <= :endDate', { endDate })
-      .andWhere('creditNote.status IN (:...statuses)', {
-        statuses: [CreditNoteStatus.ISSUED, CreditNoteStatus.APPLIED],
-      });
+      .andWhere(
+        '(creditNote.status IN (:...statuses) OR creditNote.id IN (' +
+          creditNotesWithApplicationsSubquery +
+          ') OR (creditNote.status = :draftStatus AND creditNote.invoice_id IS NOT NULL))',
+        {
+          statuses: [CreditNoteStatus.ISSUED, CreditNoteStatus.APPLIED],
+          draftStatus: CreditNoteStatus.DRAFT,
+        },
+      );
 
+    // Only customer debit notes (linked to invoices) affect revenue
+    // Supplier debit notes (linked to expenses) do not affect revenue
     const debitNotesQuery = this.debitNotesRepository
       .createQueryBuilder('debitNote')
       .select([
@@ -3569,7 +3609,8 @@ export class ReportsService {
       .andWhere('debitNote.debit_note_date <= :endDate', { endDate })
       .andWhere('debitNote.status IN (:...statuses)', {
         statuses: [DebitNoteStatus.ISSUED, DebitNoteStatus.APPLIED],
-      });
+      })
+      .andWhere('debitNote.invoice_id IS NOT NULL'); // Only customer debit notes
 
     const [revenueResult, creditNotesResult, debitNotesResult] =
       await Promise.all([
