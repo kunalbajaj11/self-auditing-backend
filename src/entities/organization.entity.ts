@@ -104,6 +104,12 @@ export class Organization extends AbstractEntity {
   @Column({ name: 'storage_quota_mb', type: 'int', nullable: true })
   storageQuotaMb?: number | null;
 
+  @Column({ name: 'enable_payroll', type: 'boolean', default: false })
+  enablePayroll: boolean;
+
+  @Column({ name: 'enable_inventory', type: 'boolean', default: false })
+  enableInventory: boolean;
+
   @ManyToOne(() => Plan, (plan) => plan.organizations, {
     nullable: true,
     eager: false,

@@ -1,4 +1,5 @@
 import {
+  IsBoolean,
   IsEmail,
   IsEnum,
   IsNotEmpty,
@@ -45,4 +46,12 @@ export class CreateOrganizationDto {
 
   @IsOptional()
   planId?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  enablePayroll?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  enableInventory?: boolean;
 }

@@ -88,6 +88,8 @@ export interface OrganizationUsageItem {
   rankingScore: number; // Combined score for sorting
   createdAt: Date;
   licenseExpiresAt?: Date | null;
+  enablePayroll?: boolean;
+  enableInventory?: boolean;
 }
 
 @Injectable()
@@ -244,6 +246,8 @@ export class SuperAdminService {
           rankingScore,
           createdAt: organization.createdAt,
           licenseExpiresAt: license?.expiresAt ?? null,
+          enablePayroll: organization.enablePayroll,
+          enableInventory: organization.enableInventory,
         };
       }),
     );

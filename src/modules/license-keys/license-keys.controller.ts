@@ -116,4 +116,17 @@ export class LicenseKeysController {
   ) {
     return this.licenseKeysService.updateFeatures(id, dto);
   }
+
+  @Patch(':id/link-organization/:organizationId')
+  async linkToOrganization(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('organizationId', new ParseUUIDPipe()) organizationId: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.licenseKeysService.linkLicenseToOrganization(
+      id,
+      organizationId,
+      user?.userId as string,
+    );
+  }
 }

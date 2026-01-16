@@ -61,6 +61,8 @@ export class OrganizationsService {
       storageQuotaMb: dto.storageQuotaMb ?? null,
       status: OrganizationStatus.ACTIVE,
       region: region,
+      enablePayroll: dto.enablePayroll ?? false,
+      enableInventory: dto.enableInventory ?? false,
     });
 
     if (dto.planId) {
@@ -142,6 +144,12 @@ export class OrganizationsService {
         }
         organization.plan = plan;
       }
+    }
+    if (dto.enablePayroll !== undefined) {
+      organization.enablePayroll = dto.enablePayroll;
+    }
+    if (dto.enableInventory !== undefined) {
+      organization.enableInventory = dto.enableInventory;
     }
 
     return this.organizationsRepository.save(organization);

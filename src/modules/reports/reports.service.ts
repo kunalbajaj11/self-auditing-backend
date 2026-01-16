@@ -3451,26 +3451,18 @@ export class ReportsService {
         closing: Number(closingShareCapital.toFixed(2)),
       });
 
-      const openingRetainedEarningsJournal = Number(
-        openingJournalEquityMap.get('retained_earnings') || 0,
-      );
-      // Period Retained Earnings Journal should only include entries from startDate to asOfDate
-      // journalEquityMap contains ALL entries up to asOfDate, so we need to subtract opening
-      const totalRetainedEarningsJournal = Number(
-        journalEquityMap.get('retained_earnings') || 0,
-      );
-      const periodRetainedEarningsJournal =
-        totalRetainedEarningsJournal - openingRetainedEarningsJournal;
-      const openingRetainedEarnings =
-        openingNetRevenue - openingExpenses + openingRetainedEarningsJournal;
-      const periodRetainedEarnings =
-        netRevenue - totalExpenses + periodRetainedEarningsJournal;
-      const closingRetainedEarnings =
-        openingRetainedEarnings + periodRetainedEarnings;
+      // Use the same calculation as P&L for consistency
+      // P&L: closingRetainedEarnings = openingRetainedEarnings + netProfit
+      // Where: openingRetainedEarnings = openingRevenue - openingExpenses
+      //        netProfit = periodRevenue - periodExpenses (period amounts, not cumulative)
+      // Use the periodRevenue and periodExpenses already calculated above
+      const openingRetainedEarnings = openingNetRevenue - openingExpenses;
+      const periodNetProfit = periodRevenue - periodExpenses;
+      const closingRetainedEarnings = openingRetainedEarnings + periodNetProfit;
       equityItems.push({
         account: 'Retained Earnings',
         opening: Number(openingRetainedEarnings.toFixed(2)),
-        period: Number(periodRetainedEarnings.toFixed(2)),
+        period: Number(periodNetProfit.toFixed(2)),
         closing: Number(closingRetainedEarnings.toFixed(2)),
       });
 
@@ -5197,6 +5189,7 @@ export class ReportsService {
         }
 
         // Calculate stock inwards (PURCHASE movements in period)
+        // Include movements linked to expenses via reference_id
         const inwardsQuery = this.stockMovementsRepository
           .createQueryBuilder('movement')
           .select(
@@ -5287,6 +5280,8 @@ export class ReportsService {
         const adjustments = parseFloat(adjustmentsResult?.total || '0');
 
         // Calculate closing stock (as of end date)
+        // Use created_at for date filtering (stock movements are created when expense is saved)
+        // Also check reference_id to link to expenses if needed
         const closingQuery = this.stockMovementsRepository
           .createQueryBuilder('movement')
           .select(
@@ -5341,35 +5336,28 @@ export class ReportsService {
         // Calculate stock value
         const stockValue = closingStock * averageCost;
 
-        // Only include products with any stock activity or current stock
-        if (
-          openingStock !== 0 ||
-          stockInwards !== 0 ||
-          stockOutwards !== 0 ||
-          adjustments !== 0 ||
-          closingStock !== 0
-        ) {
-          productReports.push({
-            productId: product.id,
-            productName: product.name,
-            sku: product.sku || undefined,
-            unitOfMeasure: product.unitOfMeasure || undefined,
-            openingStock: Math.round(openingStock * 100) / 100,
-            stockInwards: Math.round(stockInwards * 100) / 100,
-            stockOutwards: Math.round(stockOutwards * 100) / 100,
-            adjustments: Math.round(adjustments * 100) / 100,
-            closingStock: Math.round(closingStock * 100) / 100,
-            averageCost: Math.round(averageCost * 100) / 100,
-            stockValue: Math.round(stockValue * 100) / 100,
-          });
+        // Include ALL products in the report (even with 0 stock)
+        // This provides a complete item-wise stock report showing all items by name
+        productReports.push({
+          productId: product.id,
+          productName: product.name,
+          sku: product.sku || undefined,
+          unitOfMeasure: product.unitOfMeasure || undefined,
+          openingStock: Math.round(openingStock * 100) / 100,
+          stockInwards: Math.round(stockInwards * 100) / 100,
+          stockOutwards: Math.round(stockOutwards * 100) / 100,
+          adjustments: Math.round(adjustments * 100) / 100,
+          closingStock: Math.round(closingStock * 100) / 100,
+          averageCost: Math.round(averageCost * 100) / 100,
+          stockValue: Math.round(stockValue * 100) / 100,
+        });
 
-          totalOpeningStock += openingStock;
-          totalStockInwards += stockInwards;
-          totalStockOutwards += stockOutwards;
-          totalAdjustments += adjustments;
-          totalClosingStock += closingStock;
-          totalStockValue += stockValue;
-        }
+        totalOpeningStock += openingStock;
+        totalStockInwards += stockInwards;
+        totalStockOutwards += stockOutwards;
+        totalAdjustments += adjustments;
+        totalClosingStock += closingStock;
+        totalStockValue += stockValue;
       }
 
       // Round totals

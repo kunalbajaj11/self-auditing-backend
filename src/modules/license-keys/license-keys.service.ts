@@ -407,19 +407,63 @@ export class LicenseKeysService {
     organizationId: string,
     feature: 'payroll' | 'inventory',
   ): Promise<boolean> {
-    const license = await this.findByOrganizationId(organizationId);
-    if (!license) {
+    // Check organization's direct feature flags (not license key)
+    const organization = await this.organizationsRepository.findOne({
+      where: { id: organizationId },
+      select: ['enablePayroll', 'enableInventory'],
+    });
+    
+    if (!organization) {
       return false;
     }
 
     if (feature === 'payroll') {
-      return license.enablePayroll ?? false;
+      return organization.enablePayroll ?? false;
     }
     if (feature === 'inventory') {
-      return license.enableInventory ?? false;
+      return organization.enableInventory ?? false;
     }
 
     return false;
+  }
+
+  /**
+   * Link an existing license key to an organization
+   * Useful when organization was created without a license key
+   */
+  async linkLicenseToOrganization(
+    licenseId: string,
+    organizationId: string,
+    userId: string,
+  ): Promise<LicenseKey> {
+    const license = await this.licenseKeysRepository.findOne({
+      where: { id: licenseId },
+    });
+    if (!license) {
+      throw new NotFoundException('License key not found');
+    }
+
+    // Check if license is already consumed by another organization
+    if (
+      license.consumedByOrganizationId &&
+      license.consumedByOrganizationId !== organizationId
+    ) {
+      throw new BadRequestException(
+        'License key is already linked to another organization',
+      );
+    }
+
+    // Link the license to the organization
+    license.status = LicenseKeyStatus.CONSUMED;
+    if (!license.consumedAt) {
+      license.consumedAt = new Date();
+    }
+    license.consumedByOrganizationId = organizationId;
+    if (!license.consumedByUserId) {
+      license.consumedByUserId = userId;
+    }
+
+    return this.licenseKeysRepository.save(license);
   }
 
   private generateUniqueKey(): string {

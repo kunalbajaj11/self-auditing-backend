@@ -787,20 +787,31 @@ export class ExpensesService {
                 if (lineItemDto.productId && lineItemDto.quantity > 0) {
                   const unitCost = lineItemDto.unitPrice;
 
-                  await this.inventoryService.recordStockMovement(
-                    organizationId,
-                    userId,
-                    {
-                      productId: lineItemDto.productId,
-                      locationId: location.id,
-                      movementType: StockMovementType.PURCHASE,
-                      quantity: lineItemDto.quantity,
-                      unitCost,
-                      referenceType: 'expense',
-                      referenceId: saved.id,
-                      notes: `Purchase via expense ${saved.invoiceNumber || saved.id} - ${lineItemDto.itemName}`,
-                    },
-                  );
+                  try {
+                    await this.inventoryService.recordStockMovement(
+                      organizationId,
+                      userId,
+                      {
+                        productId: lineItemDto.productId,
+                        locationId: location.id,
+                        movementType: StockMovementType.PURCHASE,
+                        quantity: lineItemDto.quantity,
+                        unitCost,
+                        referenceType: 'expense',
+                        referenceId: saved.id,
+                        notes: `Purchase via expense ${saved.invoiceNumber || saved.id} - ${lineItemDto.itemName}`,
+                      },
+                    );
+                    console.log(
+                      `Stock movement created for expense ${saved.id}, product ${lineItemDto.productId}, quantity ${lineItemDto.quantity}`,
+                    );
+                  } catch (stockError) {
+                    console.error(
+                      `Failed to create stock movement for line item: ${stockError.message}`,
+                      stockError,
+                    );
+                    // Continue with other line items even if one fails
+                  }
 
                   // Update product cost price
                   const product = await this.productsRepository.findOne({
@@ -862,7 +873,7 @@ export class ExpensesService {
       } catch (error) {
         // Log error but don't fail expense creation
         console.error(
-          `Failed to record stock movement for expense ${saved.id}:`,
+          `Failed to record stock movement for expense ${saved.id}: ${error.message}`,
           error,
         );
       }

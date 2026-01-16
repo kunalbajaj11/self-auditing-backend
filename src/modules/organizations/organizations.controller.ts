@@ -78,6 +78,8 @@ export class OrganizationsController {
       storageQuotaMb: organization.storageQuotaMb,
       contactPerson: organization.contactPerson,
       contactEmail: organization.contactEmail,
+      enablePayroll: organization.enablePayroll,
+      enableInventory: organization.enableInventory,
     };
   }
 
