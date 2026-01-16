@@ -1976,40 +1976,54 @@ export class ReportsService {
         retainedEarningsNetRevenue - netExpenses + netEquityJournal;
 
       // Add Retained Earnings to accounts
-      // In the first year, Retained Earnings should NOT show in period balance columns
-      // Period debit and credit should be 0.00, but closing balance should show the retained earnings amount
+      // Retained Earnings should NOT show in Trial Balance period or closing columns (all 0)
+      // The retained earnings value is only for Balance Sheet calculation
+      // For next year, it will appear in opening balance
       accounts.push({
         accountName: 'Retained Earnings / Current Year Profit',
         accountType: 'Equity',
-        debit: 0, // Period debit is 0 for first year
-        credit: 0, // Period credit is 0 for first year
-        balance: retainedEarningsBalance, // This will be used for closing balance calculation
+        debit: 0, // Period debit is 0 - not shown in Trial Balance
+        credit: 0, // Period credit is 0 - not shown in Trial Balance
+        balance: retainedEarningsBalance, // Stored for Balance Sheet calculation and next year's opening balance
       });
 
       // Calculate closing totals AFTER adding Retained Earnings
-      // Retained Earnings IS included in closing balances
+      // Retained Earnings should NOT be included in Trial Balance closing totals
+      // (It will show in the account row for display, but not affect the totals)
       // Balance = Credit - Debit (negative when debit > credit, positive when credit > debit)
       const totalOpeningBalance = totalOpeningCredit - totalOpeningDebit;
 
-      const finalTotalDebit = accounts.reduce((sum, acc) => sum + acc.debit, 0);
-      const finalTotalCredit = accounts.reduce(
-        (sum, acc) => sum + acc.credit,
-        0,
-      );
+      // Exclude Retained Earnings from closing totals calculation
+      // Retained Earnings should only appear in Balance Sheet, not in Trial Balance totals
+      const finalTotalDebit = accounts
+        .filter(
+          (acc) =>
+            acc.accountName !== 'Retained Earnings / Current Year Profit',
+        )
+        .reduce((sum, acc) => sum + acc.debit, 0);
+      const finalTotalCredit = accounts
+        .filter(
+          (acc) =>
+            acc.accountName !== 'Retained Earnings / Current Year Profit',
+        )
+        .reduce((sum, acc) => sum + acc.credit, 0);
 
-      // Closing totals include Retained Earnings (since it's in accounts array now)
+      // Closing totals EXCLUDE Retained Earnings (for Trial Balance)
+      // Retained Earnings will still show in the account row for display purposes
       const totalClosingDebit = totalOpeningDebit + finalTotalDebit;
       const totalClosingCredit = totalOpeningCredit + finalTotalCredit;
       const totalClosingBalance = totalClosingCredit - totalClosingDebit;
 
-      const calculatedRetainedEarnings = totalClosingBalance;
-      const accountingDifference =
-        calculatedRetainedEarnings - retainedEarningsBalance;
+      // Accounting difference should be 0 when trial balance is balanced
+      // (Retained Earnings is excluded from totals, so it doesn't cause a difference)
+      // The difference is the imbalance in the trial balance excluding retained earnings
+      const accountingDifference = totalClosingBalance;
 
       // Period totals should NOT include Retained Earnings
       // Period difference uses totals calculated BEFORE Retained Earnings was added
       const periodDifference = Math.abs(totalDebit - totalCredit);
-      // Closing difference includes Retained Earnings (finalTotalDebit/Credit include it)
+      // Closing difference EXCLUDES Retained Earnings (for Trial Balance)
+      // Retained Earnings is excluded from finalTotalDebit/Credit above
       const closingDifference = Math.abs(finalTotalDebit - finalTotalCredit);
       const isBalanced = periodDifference < 0.01 && closingDifference < 0.01;
 
@@ -2058,37 +2072,23 @@ export class ReportsService {
         let closingBalance: number;
 
         if (isRetainedEarnings) {
-          // For Retained Earnings: period balance is 0, but closing balance = retained earnings
-          // Check if it's first year (no opening balance) or subsequent year
-          // Use small tolerance for floating point comparison
+          // Retained Earnings should NOT show in Trial Balance closing columns
+          // Period and closing debit/credit should be 0 in Trial Balance
+          // The retained earnings value is only for Balance Sheet calculation
+          // For next year, it will appear in opening balance
           const isFirstYear =
             Math.abs(opening.debit) < 0.01 && Math.abs(opening.credit) < 0.01;
 
           if (isFirstYear) {
-            // First year: closing balance = retained earnings (no opening balance)
-            // For equity accounts: positive balance = credit, negative balance = debit
-            if (retainedEarningsBalance >= 0) {
-              closingDebit = 0;
-              closingCredit = retainedEarningsBalance;
-            } else {
-              closingDebit = Math.abs(retainedEarningsBalance);
-              closingCredit = 0;
-            }
-            closingBalance = retainedEarningsBalance;
+            // First year: Show 0 in Trial Balance closing columns
+            // Retained earnings value is stored in balance field for Balance Sheet use
+            closingDebit = 0;
+            closingCredit = 0;
+            closingBalance = 0; // Show 0 in Trial Balance, but balance field has the actual value
           } else {
-            // Subsequent years: closing = opening + period activity
-            // Period debit/credit are 0 (as per first year logic requirement)
-            // But we need to add the current period's retained earnings to closing
+            // Subsequent years: Show opening balance only, period activity is 0
             closingDebit = opening.debit;
             closingCredit = opening.credit;
-
-            // Add current period retained earnings
-            if (retainedEarningsBalance > 0) {
-              closingCredit += retainedEarningsBalance;
-            } else if (retainedEarningsBalance < 0) {
-              closingDebit += Math.abs(retainedEarningsBalance);
-            }
-
             closingBalance = closingCredit - closingDebit;
           }
         } else {
