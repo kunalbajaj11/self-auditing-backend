@@ -637,7 +637,7 @@ export class ReportsService {
       const unappliedCreditNotesSubqueryEnd = `(
         SELECT COALESCE(SUM(
           cn.total_amount - COALESCE((
-            SELECT COALESCE(SUM(cna2.applied_amount), 0)
+            SELECT COALESCE(SUM(cna2."appliedAmount"), 0)
             FROM credit_note_applications cna2
             WHERE cna2.credit_note_id = cn.id
             AND cna2.organization_id = invoice.organization_id
@@ -660,7 +660,7 @@ export class ReportsService {
       const unappliedCreditNotesSubqueryStart = `(
         SELECT COALESCE(SUM(
           cn.total_amount - COALESCE((
-            SELECT COALESCE(SUM(cna2.applied_amount), 0)
+            SELECT COALESCE(SUM(cna2."appliedAmount"), 0)
             FROM credit_note_applications cna2
             WHERE cna2.credit_note_id = cn.id
             AND cna2.organization_id = invoice.organization_id
@@ -1660,7 +1660,7 @@ export class ReportsService {
       const openingUnappliedCreditNotesSubquery = `(
         SELECT COALESCE(SUM(
           cn.total_amount - COALESCE((
-            SELECT COALESCE(SUM(cna2.applied_amount), 0)
+            SELECT COALESCE(SUM(cna2."appliedAmount"), 0)
             FROM credit_note_applications cna2
             WHERE cna2.credit_note_id = cn.id
             AND cna2.organization_id = invoice.organization_id
@@ -2157,7 +2157,7 @@ export class ReportsService {
       const unappliedCreditNotesSubquery = `(
         SELECT COALESCE(SUM(
           cn.total_amount - COALESCE((
-            SELECT COALESCE(SUM(cna2.applied_amount), 0)
+            SELECT COALESCE(SUM(cna2."appliedAmount"), 0)
             FROM credit_note_applications cna2
             WHERE cna2.credit_note_id = cn.id
             AND cna2.organization_id = invoice.organization_id
@@ -2815,7 +2815,7 @@ export class ReportsService {
       const openingUnappliedCreditNotesSubquery = `(
         SELECT COALESCE(SUM(
           cn.total_amount - COALESCE((
-            SELECT COALESCE(SUM(cna2.applied_amount), 0)
+            SELECT COALESCE(SUM(cna2."appliedAmount"), 0)
             FROM credit_note_applications cna2
             WHERE cna2.credit_note_id = cn.id
             AND cna2.organization_id = invoice.organization_id
@@ -4011,7 +4011,7 @@ export class ReportsService {
     const unappliedCreditNotesSubquery = `(
       SELECT COALESCE(SUM(
         cn.total_amount - COALESCE((
-          SELECT COALESCE(SUM(cna2.applied_amount), 0)
+          SELECT COALESCE(SUM(cna2."appliedAmount"), 0)
           FROM credit_note_applications cna2
           WHERE cna2.credit_note_id = cn.id
           AND cna2.organization_id = invoice.organization_id
@@ -4353,7 +4353,7 @@ export class ReportsService {
       const openingUnappliedCreditNotesSubquery = `(
         SELECT COALESCE(SUM(
           cn.total_amount - COALESCE((
-            SELECT COALESCE(SUM(cna2.applied_amount), 0)
+            SELECT COALESCE(SUM(cna2."appliedAmount"), 0)
             FROM credit_note_applications cna2
             WHERE cna2.credit_note_id = cn.id
             AND cna2.organization_id = invoice.organization_id
