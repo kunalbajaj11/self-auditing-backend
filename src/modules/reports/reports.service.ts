@@ -442,6 +442,8 @@ export class ReportsService {
           .where('cna.organization_id = :organizationId', { organizationId })
           .getQuery();
 
+      // Include DRAFT credit notes that are linked to invoices
+      // DRAFT credit notes represent returns/refunds and should reduce revenue immediately
       const creditNotesQuery = this.creditNotesRepository
         .createQueryBuilder('creditNote')
         .select([
@@ -455,9 +457,10 @@ export class ReportsService {
         .andWhere(
           '(creditNote.status IN (:...statuses) OR creditNote.id IN (' +
             creditNotesWithApplicationsSubquery +
-            '))',
+            ') OR (creditNote.status = :draftStatus AND creditNote.invoice_id IS NOT NULL))',
           {
             statuses: [CreditNoteStatus.ISSUED, CreditNoteStatus.APPLIED],
+            draftStatus: CreditNoteStatus.DRAFT,
           },
         );
 
@@ -879,6 +882,8 @@ export class ReportsService {
       const vatPayableRow = await vatPayableQuery.getRawOne();
       const vatPayableCredit = Number(vatPayableRow?.credit || 0);
 
+      // Include DRAFT credit notes that are linked to invoices
+      // DRAFT credit notes represent returns/refunds and should reduce output VAT immediately
       const vatCreditNotesQuery = this.creditNotesRepository
         .createQueryBuilder('creditNote')
         .select(['SUM(COALESCE(creditNote.vat_amount, 0)) AS debit'])
@@ -887,9 +892,13 @@ export class ReportsService {
         })
         .andWhere('creditNote.credit_note_date >= :startDate', { startDate })
         .andWhere('creditNote.credit_note_date <= :endDate', { endDate })
-        .andWhere('creditNote.status IN (:...statuses)', {
-          statuses: [CreditNoteStatus.ISSUED, CreditNoteStatus.APPLIED],
-        })
+        .andWhere(
+          '(creditNote.status IN (:...statuses) OR (creditNote.status = :draftStatus AND creditNote.invoice_id IS NOT NULL))',
+          {
+            statuses: [CreditNoteStatus.ISSUED, CreditNoteStatus.APPLIED],
+            draftStatus: CreditNoteStatus.DRAFT,
+          },
+        )
         .andWhere('creditNote.vat_amount > 0');
 
       const vatCreditNotesRow = await vatCreditNotesQuery.getRawOne();
@@ -1571,6 +1580,7 @@ export class ReportsService {
           .where('cna.organization_id = :organizationId', { organizationId })
           .getQuery();
 
+      // Include DRAFT credit notes that are linked to invoices in opening balances
       const openingCreditNotesQuery = this.creditNotesRepository
         .createQueryBuilder('creditNote')
         .select([
@@ -1583,9 +1593,10 @@ export class ReportsService {
         .andWhere(
           '(creditNote.status IN (:...statuses) OR creditNote.id IN (' +
             openingCreditNotesWithApplicationsSubquery +
-            '))',
+            ') OR (creditNote.status = :draftStatus AND creditNote.invoice_id IS NOT NULL))',
           {
             statuses: [CreditNoteStatus.ISSUED, CreditNoteStatus.APPLIED],
+            draftStatus: CreditNoteStatus.DRAFT,
           },
         );
 
@@ -1773,6 +1784,7 @@ export class ReportsService {
       const openingVatPayableRow = await openingVatPayableQuery.getRawOne();
       const openingVatPayableCredit = Number(openingVatPayableRow?.credit || 0);
 
+      // Include DRAFT credit notes that are linked to invoices in opening VAT balances
       const openingVatCreditNotesQuery = this.creditNotesRepository
         .createQueryBuilder('creditNote')
         .select(['SUM(COALESCE(creditNote.vat_amount, 0)) AS debit'])
@@ -1780,9 +1792,13 @@ export class ReportsService {
           organizationId,
         })
         .andWhere('creditNote.credit_note_date < :startDate', { startDate })
-        .andWhere('creditNote.status IN (:...statuses)', {
-          statuses: [CreditNoteStatus.ISSUED, CreditNoteStatus.APPLIED],
-        })
+        .andWhere(
+          '(creditNote.status IN (:...statuses) OR (creditNote.status = :draftStatus AND creditNote.invoice_id IS NOT NULL))',
+          {
+            statuses: [CreditNoteStatus.ISSUED, CreditNoteStatus.APPLIED],
+            draftStatus: CreditNoteStatus.DRAFT,
+          },
+        )
         .andWhere('creditNote.vat_amount > 0');
 
       const openingVatCreditNotesRow =
@@ -2491,6 +2507,8 @@ export class ReportsService {
         });
       }
 
+      // Include DRAFT credit notes that are linked to invoices
+      // DRAFT credit notes represent returns/refunds and should reduce output VAT immediately
       const vatCreditNotesQuery = this.creditNotesRepository
         .createQueryBuilder('creditNote')
         .select(['SUM(COALESCE(creditNote.vat_amount, 0)) AS vat'])
@@ -2498,9 +2516,13 @@ export class ReportsService {
           organizationId,
         })
         .andWhere('creditNote.credit_note_date <= :asOfDate', { asOfDate })
-        .andWhere('creditNote.status IN (:...statuses)', {
-          statuses: [CreditNoteStatus.ISSUED, CreditNoteStatus.APPLIED],
-        })
+        .andWhere(
+          '(creditNote.status IN (:...statuses) OR (creditNote.status = :draftStatus AND creditNote.invoice_id IS NOT NULL))',
+          {
+            statuses: [CreditNoteStatus.ISSUED, CreditNoteStatus.APPLIED],
+            draftStatus: CreditNoteStatus.DRAFT,
+          },
+        )
         .andWhere('creditNote.vat_amount > 0');
 
       const vatDebitNotesQuery = this.debitNotesRepository
@@ -2553,6 +2575,8 @@ export class ReportsService {
           .where('cna.organization_id = :organizationId', { organizationId })
           .getQuery();
 
+      // Include DRAFT credit notes that are linked to invoices
+      // DRAFT credit notes represent returns/refunds and should reduce revenue immediately
       const creditNotesQuery = this.creditNotesRepository
         .createQueryBuilder('creditNote')
         .select([
@@ -2565,9 +2589,10 @@ export class ReportsService {
         .andWhere(
           '(creditNote.status IN (:...statuses) OR creditNote.id IN (' +
             balanceSheetCreditNotesWithApplicationsSubquery +
-            '))',
+            ') OR (creditNote.status = :draftStatus AND creditNote.invoice_id IS NOT NULL))',
           {
             statuses: [CreditNoteStatus.ISSUED, CreditNoteStatus.APPLIED],
+            draftStatus: CreditNoteStatus.DRAFT,
           },
         );
 
@@ -3278,6 +3303,7 @@ export class ReportsService {
       const openingAssets =
         openingAssetsBase + openingJournalPrepaid + openingJournalAccruedIncome;
 
+      // Include DRAFT credit notes that are linked to invoices in opening VAT balances
       const openingVatCreditNotesQuery = this.creditNotesRepository
         .createQueryBuilder('creditNote')
         .select(['SUM(COALESCE(creditNote.vat_amount, 0)) AS vat'])
@@ -3285,9 +3311,13 @@ export class ReportsService {
           organizationId,
         })
         .andWhere('creditNote.credit_note_date < :startDate', { startDate })
-        .andWhere('creditNote.status IN (:...statuses)', {
-          statuses: [CreditNoteStatus.ISSUED, CreditNoteStatus.APPLIED],
-        })
+        .andWhere(
+          '(creditNote.status IN (:...statuses) OR (creditNote.status = :draftStatus AND creditNote.invoice_id IS NOT NULL))',
+          {
+            statuses: [CreditNoteStatus.ISSUED, CreditNoteStatus.APPLIED],
+            draftStatus: CreditNoteStatus.DRAFT,
+          },
+        )
         .andWhere('creditNote.vat_amount > 0');
       // Opening customer debit note VAT (for VAT Payable in Balance Sheet)
       // Only include debit notes linked to invoices, not expenses
@@ -4593,6 +4623,8 @@ export class ReportsService {
       .andWhere('CAST(invoice.vat_amount AS DECIMAL) > 0')
       .orderBy('invoice.created_at', 'DESC');
 
+    // Include DRAFT credit notes that are linked to invoices
+    // DRAFT credit notes represent returns/refunds and should reduce output VAT immediately
     const vatCreditNotesQuery = this.creditNotesRepository
       .createQueryBuilder('creditNote')
       .select([
@@ -4609,9 +4641,13 @@ export class ReportsService {
       })
       .andWhere('creditNote.credit_note_date >= :startDate', { startDate })
       .andWhere('creditNote.credit_note_date <= :endDate', { endDate })
-      .andWhere('creditNote.status IN (:...statuses)', {
-        statuses: [CreditNoteStatus.ISSUED, CreditNoteStatus.APPLIED],
-      })
+      .andWhere(
+        '(creditNote.status IN (:...statuses) OR (creditNote.status = :draftStatus AND creditNote.invoice_id IS NOT NULL))',
+        {
+          statuses: [CreditNoteStatus.ISSUED, CreditNoteStatus.APPLIED],
+          draftStatus: CreditNoteStatus.DRAFT,
+        },
+      )
       .andWhere('CAST(creditNote.vat_amount AS DECIMAL) > 0')
       .orderBy('creditNote.created_at', 'DESC');
 
@@ -4708,16 +4744,20 @@ export class ReportsService {
       };
     });
 
+    // Credit notes reduce output VAT, so they should be displayed as negative amounts
     const vatCreditNoteItems = vatCreditNotes.map((creditNote: any) => {
       const vatAmount = parseFloat(
         creditNote.vatamount || creditNote.vatAmount || '0',
       );
       const amount = parseFloat(creditNote.amount || '0');
 
-      const baseAmount = amount;
-      const grossAmount = amount + vatAmount;
+      // Credit notes reduce VAT, so use negative values for display
+      const baseAmount = -Math.abs(amount);
+      const grossAmount = baseAmount - Math.abs(vatAmount);
       const vatRate =
-        baseAmount > 0 ? ((vatAmount / baseAmount) * 100).toFixed(2) : '0';
+        Math.abs(amount) > 0
+          ? ((Math.abs(vatAmount) / Math.abs(amount)) * 100).toFixed(2)
+          : '0';
       const customerName =
         creditNote.customername || creditNote.customerName || 'N/A';
       const trn = creditNote.trn || null;
@@ -4733,10 +4773,10 @@ export class ReportsService {
         creditNoteNumber:
           creditNote.creditnotenumber || creditNote.creditNoteNumber,
         customerName: customerName,
-        amount: Number(baseAmount.toFixed(2)),
-        grossAmount: Number(grossAmount.toFixed(2)),
+        amount: Number(baseAmount.toFixed(2)), // Negative amount
+        grossAmount: Number(grossAmount.toFixed(2)), // Negative gross amount
         vatRate: Number(vatRate),
-        vatAmount: Number(vatAmount.toFixed(2)),
+        vatAmount: Number(-Math.abs(vatAmount).toFixed(2)), // Negative VAT amount
         trn: trn,
         type: 'credit_note',
       };
@@ -4828,17 +4868,21 @@ export class ReportsService {
       (sum, item) => sum + item.vatAmount,
       0,
     );
-    const totalVatCreditNotes = vatCreditNoteItems.reduce(
+    // Credit note items have negative vatAmount for display, so sum will be negative
+    // We calculate the absolute value for the summary, but use the negative sum in calculation
+    const totalVatCreditNotesSum = vatCreditNoteItems.reduce(
       (sum, item) => sum + item.vatAmount,
       0,
     );
+    const totalVatCreditNotes = Math.abs(totalVatCreditNotesSum); // Absolute value for summary
     const totalVatOutputDebitNotes = vatOutputDebitNoteItems.reduce(
       (sum, item) => sum + item.vatAmount,
       0,
     );
 
+    // Since credit note items have negative vatAmount, adding them subtracts from total
     const netVatOutput =
-      totalVatOutput - totalVatCreditNotes + totalVatOutputDebitNotes;
+      totalVatOutput + totalVatCreditNotesSum + totalVatOutputDebitNotes;
     const netVat = netVatOutput - netVatInput;
 
     return {
@@ -4855,7 +4899,7 @@ export class ReportsService {
         vatInputDebitNotes: Number(totalVatInputDebitNotes.toFixed(2)),
         netVatInput: Number(netVatInput.toFixed(2)),
         vatOutput: Number(totalVatOutput.toFixed(2)),
-        vatCreditNotes: Number(totalVatCreditNotes.toFixed(2)),
+        vatCreditNotes: Number(totalVatCreditNotes.toFixed(2)), // Absolute value for summary
         vatOutputDebitNotes: Number(totalVatOutputDebitNotes.toFixed(2)),
         netVatOutput: Number(netVatOutput.toFixed(2)),
         netVat: Number(netVat.toFixed(2)),
