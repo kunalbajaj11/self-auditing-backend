@@ -2644,6 +2644,8 @@ export class ReportsService {
           },
         );
 
+      // Only customer debit notes (linked to invoices) affect revenue
+      // Supplier debit notes (linked to expenses) do not affect revenue
       const debitNotesQuery = this.debitNotesRepository
         .createQueryBuilder('debitNote')
         .select([
@@ -2655,7 +2657,8 @@ export class ReportsService {
         .andWhere('debitNote.debit_note_date <= :asOfDate', { asOfDate })
         .andWhere('debitNote.status IN (:...statuses)', {
           statuses: [DebitNoteStatus.ISSUED, DebitNoteStatus.APPLIED],
-        });
+        })
+        .andWhere('debitNote.invoice_id IS NOT NULL'); // Only customer debit notes
 
       const journalEntriesQuery = this.journalEntriesRepository
         .createQueryBuilder('entry')
@@ -2707,6 +2710,11 @@ export class ReportsService {
       const totalRevenue = Number(revenueRow?.revenue || 0);
       const creditNotesAmount = Number(creditNotesRow?.creditNotes || 0);
       const debitNotesAmount = Number(debitNotesRow?.debitNotes || 0);
+
+      // Debug logging for revenue calculation
+      this.logger.log(
+        `[Balance Sheet] Revenue Calculation: totalRevenue=${totalRevenue}, creditNotesAmount=${creditNotesAmount}, debitNotesAmount=${debitNotesAmount}`,
+      );
 
       // Aggregate journal entries by account
       // For each account, calculate balance based on account type:
@@ -2796,9 +2804,10 @@ export class ReportsService {
 
       // Extract specific account balances for equity calculation
       // Note: accountAmounts contains ALL entries up to asOfDate, not just period entries
+      // Retained Earnings is calculated separately from revenue/expenses, not from journal entries
+      // So exclude RETAINED_EARNINGS from totalJournalEquity to avoid double-counting
       const totalJournalEquity =
-        (accountAmounts.get(JournalEntryAccount.SHARE_CAPITAL) || 0) +
-        (accountAmounts.get(JournalEntryAccount.RETAINED_EARNINGS) || 0);
+        accountAmounts.get(JournalEntryAccount.SHARE_CAPITAL) || 0;
       const totalJournalShareholder =
         accountAmounts.get(JournalEntryAccount.OWNER_SHAREHOLDER_ACCOUNT) || 0;
       const totalJournalPrepaid =
@@ -3228,6 +3237,11 @@ export class ReportsService {
       const openingDebitNotes = Number(openingDebitNotesRow?.debit || 0);
       const openingNetRevenue =
         openingRevenue - openingCreditNotes + openingDebitNotes;
+      
+      // Debug logging for opening calculations
+      this.logger.log(
+        `[Balance Sheet] Opening Calculations: openingRevenue=${openingRevenue}, openingCreditNotes=${openingCreditNotes}, openingDebitNotes=${openingDebitNotes}, openingNetRevenue=${openingNetRevenue}, openingExpenses=${openingExpenses}`,
+      );
 
       // Aggregate opening journal entries by account
       // Use same logic as period aggregation: calculate balance based on account type
@@ -3317,9 +3331,10 @@ export class ReportsService {
       });
 
       // Extract specific account balances
+      // Retained Earnings is calculated separately from revenue/expenses, not from journal entries
+      // So exclude RETAINED_EARNINGS from openingJournalEquity to avoid double-counting
       const openingJournalEquity =
-        (openingAccountAmounts.get(JournalEntryAccount.SHARE_CAPITAL) || 0) +
-        (openingAccountAmounts.get(JournalEntryAccount.RETAINED_EARNINGS) || 0);
+        openingAccountAmounts.get(JournalEntryAccount.SHARE_CAPITAL) || 0;
       const openingJournalShareholder =
         openingAccountAmounts.get(
           JournalEntryAccount.OWNER_SHAREHOLDER_ACCOUNT,
@@ -3405,6 +3420,11 @@ export class ReportsService {
       // Note: netRevenue and totalExpenses contain ALL amounts up to asOfDate, not just period
       const periodRevenue = netRevenue - openingNetRevenue;
       const periodExpenses = totalExpenses - openingExpenses;
+      
+      // Debug logging for period calculations
+      this.logger.log(
+        `[Balance Sheet] Period Calculations: netRevenue=${netRevenue}, openingNetRevenue=${openingNetRevenue}, periodRevenue=${periodRevenue}, totalExpenses=${totalExpenses}, openingExpenses=${openingExpenses}, periodExpenses=${periodExpenses}`,
+      );
       const periodJournalEquity = totalJournalEquity - openingJournalEquity;
       const periodJournalShareholder =
         totalJournalShareholder - openingJournalShareholder;
@@ -3459,6 +3479,15 @@ export class ReportsService {
       const openingRetainedEarnings = openingNetRevenue - openingExpenses;
       const periodNetProfit = periodRevenue - periodExpenses;
       const closingRetainedEarnings = openingRetainedEarnings + periodNetProfit;
+      
+      // Debug logging for retained earnings calculation
+      this.logger.log(
+        `[Balance Sheet] Retained Earnings Calculation: openingNetRevenue=${openingNetRevenue}, openingExpenses=${openingExpenses}, openingRetainedEarnings=${openingRetainedEarnings}, periodRevenue=${periodRevenue}, periodExpenses=${periodExpenses}, periodNetProfit=${periodNetProfit}, closingRetainedEarnings=${closingRetainedEarnings}`,
+      );
+      this.logger.log(
+        `[Balance Sheet] Journal Entries - retained_earnings from journalEquityMap: ${journalEquityMap.get('retained_earnings') || 0}, RETAINED_EARNINGS from accountAmounts: ${accountAmounts.get(JournalEntryAccount.RETAINED_EARNINGS) || 0}`,
+      );
+      
       equityItems.push({
         account: 'Retained Earnings',
         opening: Number(openingRetainedEarnings.toFixed(2)),
@@ -3569,6 +3598,7 @@ export class ReportsService {
         'COUNT(invoice.id) AS count',
       ])
       .where('invoice.organization_id = :organizationId', { organizationId })
+      .andWhere('invoice.is_deleted = false')
       .andWhere('invoice.invoice_date >= :startDate', { startDate })
       .andWhere('invoice.invoice_date <= :endDate', { endDate });
 
@@ -3720,6 +3750,7 @@ export class ReportsService {
       .createQueryBuilder('invoice')
       .select(['SUM(COALESCE(invoice.base_amount, invoice.amount)) AS revenue'])
       .where('invoice.organization_id = :organizationId', { organizationId })
+      .andWhere('invoice.is_deleted = false')
       .andWhere('invoice.invoice_date < :startDate', { startDate });
 
     const openingExpensesQuery = this.expensesRepository

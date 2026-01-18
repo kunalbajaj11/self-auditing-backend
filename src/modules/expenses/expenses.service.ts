@@ -1282,19 +1282,21 @@ export class ExpensesService {
       );
     }
 
-    // Calculate totalAmount correctly based on VAT tax type before saving
+    // Note: totalAmount is a generated column (amount + vat_amount) in the database
+    // We cannot set it directly - it will be automatically calculated by PostgreSQL
+    // For reverse charge cases, the generated column formula may need adjustment
+    // but for now we let the database calculate it
+    const saved = await this.expensesRepository.save(expense);
+
+    // Calculate expected total for payment creation
     const expenseAmountNum = parseFloat(expense.amount || '0');
     const vatAmountNum = parseFloat(expense.vatAmount || '0');
     const calculatedTotalAmount = isReverseCharge
       ? expenseAmountNum // Reverse charge: total = base amount only (VAT not added)
       : expenseAmountNum + vatAmountNum; // Standard: total = base + VAT
 
-    // Set totalAmount explicitly to override generated column calculation
-    expense.totalAmount = this.formatMoney(calculatedTotalAmount);
-    const saved = await this.expensesRepository.save(expense);
-
     // Auto-create payment record if status changed to "Purchase - Cash Paid"
-    // Do this AFTER saving to ensure we use the saved expense's totalAmount
+    // Do this AFTER saving to ensure we use the correct totalAmount
     if (
       dto.purchaseStatus !== undefined &&
       dto.purchaseStatus === 'Purchase - Cash Paid' &&
@@ -1312,32 +1314,21 @@ export class ExpensesService {
 
       // Only create if no payment record exists
       if (existingPayments.length === 0) {
+        // Use calculated total (accounting for reverse charge) or database-generated total
+        const paymentAmount = isReverseCharge 
+          ? calculatedTotalAmount 
+          : (saved.totalAmount ? parseFloat(saved.totalAmount) : calculatedTotalAmount);
+        
         const payment = this.expensePaymentsRepository.create({
           expense: saved,
           organization: { id: organizationId },
           paymentDate: saved.expenseDate, // Use expense date as payment date
-          amount: saved.totalAmount, // Use saved expense's totalAmount (after save)
+          amount: this.formatMoney(paymentAmount),
           paymentMethod: PaymentMethod.CASH,
           notes: `Auto-created payment for cash-paid expense: ${saved.vendorName || 'N/A'}`,
           isDeleted: false, // Explicitly set to ensure it's not filtered out
         });
         await this.expensePaymentsRepository.save(payment);
-      }
-    }
-
-    // Verify totalAmount is correct (especially for reverse charge)
-    // If the generated column still overrides our value, we need to update it
-    if (isReverseCharge) {
-      const savedTotalAmount = parseFloat(saved.totalAmount || '0');
-      const expectedTotalAmount = expenseAmountNum;
-      // Only update if the generated column incorrectly added VAT
-      if (Math.abs(savedTotalAmount - expectedTotalAmount) > 0.01) {
-        await this.expensesRepository
-          .createQueryBuilder()
-          .update(Expense)
-          .set({ totalAmount: this.formatMoney(expenseAmountNum) })
-          .where('id = :id', { id: saved.id })
-          .execute();
       }
     }
 
