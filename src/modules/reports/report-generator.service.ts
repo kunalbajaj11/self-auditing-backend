@@ -2945,7 +2945,7 @@ export class ReportGeneratorService {
 
     const summaryItems = [
       {
-        label: 'Gross Revenue',
+        label: 'Revenue',
         value: data.summary?.grossProfit || data.revenue?.amount || 0,
         color: '#059669',
       },
@@ -5357,7 +5357,7 @@ export class ReportGeneratorService {
       ]);
       summarySheet.addRow([]);
       summarySheet.addRow(['Period Transactions']);
-      summarySheet.addRow(['Gross Profit', data.summary.grossProfit || 0]);
+      summarySheet.addRow(['Revenue', data.summary.grossProfit || 0]);
       summarySheet.addRow(['Total Expenses', data.summary.totalExpenses || 0]);
       summarySheet.addRow(['Net Profit', data.summary.netProfit || 0]);
       if (data.summary.netProfitMargin) {
@@ -6847,7 +6847,7 @@ export class ReportGeneratorService {
             lines.push('');
           }
           lines.push(
-            `Gross Profit,${this.formatCurrency(data.summary.grossProfit || 0, currency)}`,
+            `Revenue,${this.formatCurrency(data.summary.grossProfit || 0, currency)}`,
           );
           lines.push(
             `Total Expenses,${this.formatCurrency(data.summary.totalExpenses || 0, currency)}`,

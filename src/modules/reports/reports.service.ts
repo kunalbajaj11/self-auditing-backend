@@ -2625,6 +2625,8 @@ export class ReportsService {
 
       // Include DRAFT credit notes that are linked to invoices
       // DRAFT credit notes represent returns/refunds and should reduce revenue immediately
+      // For Balance Sheet, we need ALL credit notes up to asOfDate (not just period)
+      // This includes both opening and period credit notes
       const creditNotesQuery = this.creditNotesRepository
         .createQueryBuilder('creditNote')
         .select([
@@ -2634,6 +2636,7 @@ export class ReportsService {
           organizationId,
         })
         .andWhere('creditNote.credit_note_date <= :asOfDate', { asOfDate })
+        .andWhere('creditNote.is_deleted = false')
         .andWhere(
           '(creditNote.status IN (:...statuses) OR creditNote.id IN (' +
             balanceSheetCreditNotesWithApplicationsSubquery +
@@ -2708,8 +2711,13 @@ export class ReportsService {
       ]);
 
       const totalRevenue = Number(revenueRow?.revenue || 0);
-      const creditNotesAmount = Number(creditNotesRow?.creditNotes || 0);
-      const debitNotesAmount = Number(debitNotesRow?.debitNotes || 0);
+      // Handle both camelCase and lowercase property names from database
+      const creditNotesAmount = Number(
+        creditNotesRow?.creditNotes || creditNotesRow?.creditnotes || 0,
+      );
+      const debitNotesAmount = Number(
+        debitNotesRow?.debitNotes || debitNotesRow?.debitnotes || 0,
+      );
 
       // Debug logging for revenue calculation
       this.logger.log(
@@ -3024,6 +3032,8 @@ export class ReportsService {
           .where('cna.organization_id = :organizationId', { organizationId })
           .getQuery();
 
+      // Include DRAFT credit notes that are linked to invoices (same logic as period query)
+      // This ensures consistency between opening and period calculations
       const openingCreditNotesQuery = this.creditNotesRepository
         .createQueryBuilder('creditNote')
         .select([
@@ -3036,9 +3046,10 @@ export class ReportsService {
         .andWhere(
           '(creditNote.status IN (:...statuses) OR creditNote.id IN (' +
             pnlOpeningCreditNotesWithApplicationsSubquery +
-            '))',
+            ') OR (creditNote.status = :draftStatus AND creditNote.invoice_id IS NOT NULL))',
           {
             statuses: [CreditNoteStatus.ISSUED, CreditNoteStatus.APPLIED],
+            draftStatus: CreditNoteStatus.DRAFT,
           },
         );
 
@@ -3237,7 +3248,7 @@ export class ReportsService {
       const openingDebitNotes = Number(openingDebitNotesRow?.debit || 0);
       const openingNetRevenue =
         openingRevenue - openingCreditNotes + openingDebitNotes;
-      
+
       // Debug logging for opening calculations
       this.logger.log(
         `[Balance Sheet] Opening Calculations: openingRevenue=${openingRevenue}, openingCreditNotes=${openingCreditNotes}, openingDebitNotes=${openingDebitNotes}, openingNetRevenue=${openingNetRevenue}, openingExpenses=${openingExpenses}`,
@@ -3420,7 +3431,7 @@ export class ReportsService {
       // Note: netRevenue and totalExpenses contain ALL amounts up to asOfDate, not just period
       const periodRevenue = netRevenue - openingNetRevenue;
       const periodExpenses = totalExpenses - openingExpenses;
-      
+
       // Debug logging for period calculations
       this.logger.log(
         `[Balance Sheet] Period Calculations: netRevenue=${netRevenue}, openingNetRevenue=${openingNetRevenue}, periodRevenue=${periodRevenue}, totalExpenses=${totalExpenses}, openingExpenses=${openingExpenses}, periodExpenses=${periodExpenses}`,
@@ -3479,7 +3490,7 @@ export class ReportsService {
       const openingRetainedEarnings = openingNetRevenue - openingExpenses;
       const periodNetProfit = periodRevenue - periodExpenses;
       const closingRetainedEarnings = openingRetainedEarnings + periodNetProfit;
-      
+
       // Debug logging for retained earnings calculation
       this.logger.log(
         `[Balance Sheet] Retained Earnings Calculation: openingNetRevenue=${openingNetRevenue}, openingExpenses=${openingExpenses}, openingRetainedEarnings=${openingRetainedEarnings}, periodRevenue=${periodRevenue}, periodExpenses=${periodExpenses}, periodNetProfit=${periodNetProfit}, closingRetainedEarnings=${closingRetainedEarnings}`,
@@ -3487,7 +3498,7 @@ export class ReportsService {
       this.logger.log(
         `[Balance Sheet] Journal Entries - retained_earnings from journalEquityMap: ${journalEquityMap.get('retained_earnings') || 0}, RETAINED_EARNINGS from accountAmounts: ${accountAmounts.get(JournalEntryAccount.RETAINED_EARNINGS) || 0}`,
       );
-      
+
       equityItems.push({
         account: 'Retained Earnings',
         opening: Number(openingRetainedEarnings.toFixed(2)),
