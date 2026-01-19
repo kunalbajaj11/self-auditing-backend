@@ -5,7 +5,9 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  IsUUID,
   Min,
+  ValidateIf,
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -17,6 +19,11 @@ export class UpdateExpenseDto {
   @IsOptional()
   @IsEnum(ExpenseType)
   type?: ExpenseType;
+
+  // Custom expense type. If provided, it will be linked via Expense.expenseType relation.
+  @IsOptional()
+  @IsUUID()
+  expenseTypeId?: string;
 
   @IsOptional()
   @IsString()

@@ -73,14 +73,21 @@ export class ExpenseTypesService {
     }
   }
 
-  async findAllByOrganization(organizationId: string): Promise<ExpenseType[]> {
-    return this.expenseTypesRepository.find({
-      where: {
-        organization: { id: organizationId },
-        isDeleted: false,
-      },
-      order: { name: 'ASC' },
-    });
+  async findAllByOrganization(
+    organizationId: string,
+    userId: string,
+  ): Promise<ExpenseType[]> {
+    return this.expenseTypesRepository
+      .createQueryBuilder('expenseType')
+      .where('expenseType.organization_id = :organizationId', { organizationId })
+      .andWhere('expenseType.is_deleted = false')
+      // Scope custom expense types to creator; always include system defaults
+      .andWhere(
+        '(expenseType.is_system_default = true OR expenseType.created_by = :userId)',
+        { userId },
+      )
+      .orderBy('expenseType.name', 'ASC')
+      .getMany();
   }
 
   async create(

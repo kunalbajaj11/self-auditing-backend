@@ -18,6 +18,7 @@ import { LinkAccrualDto } from './dto/link-accrual.dto';
 import { ExpenseType } from '../../common/enums/expense-type.enum';
 import { ExpenseSource } from '../../common/enums/expense-source.enum';
 import { AccrualStatus } from '../../common/enums/accrual-status.enum';
+import { ExpenseType as ExpenseTypeEntity } from '../../entities/expense-type.entity';
 import { NotificationsService } from '../notifications/notifications.service';
 import { NotificationType } from '../../common/enums/notification-type.enum';
 import { NotificationChannel } from '../../common/enums/notification-channel.enum';
@@ -295,6 +296,7 @@ export class ExpensesService {
         'vendor',
         'lineItems',
         'lineItems.product',
+        'expenseType', // Include custom expense type relation
       ],
     });
     if (!expense) {
@@ -318,7 +320,29 @@ export class ExpensesService {
     if (!user) {
       throw new NotFoundException('User not found');
     }
-    if (dto.type === ExpenseType.ACCRUAL && !dto.expectedPaymentDate) {
+
+    const effectiveType: ExpenseType =
+      (dto.type as ExpenseType) ?? ExpenseType.EXPENSE;
+
+    // Resolve custom expense type (optional). This supports user-defined types while keeping `type` enum valid.
+    let customExpenseType: ExpenseTypeEntity | null = null;
+    if (dto.expenseTypeId) {
+      customExpenseType = await this.expensesRepository.manager.findOne(
+        ExpenseTypeEntity,
+        {
+          where: {
+            id: dto.expenseTypeId,
+            organization: { id: organizationId },
+            isDeleted: false,
+          },
+        },
+      );
+      if (!customExpenseType) {
+        throw new NotFoundException('Expense type not found');
+      }
+    }
+
+    if (effectiveType === ExpenseType.ACCRUAL && !dto.expectedPaymentDate) {
       throw new BadRequestException(
         'Accrual expenses require expected payment date',
       );
@@ -527,7 +551,8 @@ export class ExpensesService {
     const expense = this.expensesRepository.create({
       organization,
       user,
-      type: dto.type,
+      type: effectiveType,
+      expenseType: customExpenseType,
       category: category ?? null,
       vendor: vendor,
       amount: this.formatMoney(expenseAmount),
@@ -678,7 +703,7 @@ export class ExpensesService {
 
     // Create accrual if type is ACCRUAL OR purchaseStatus is "Purchase - Accruals"
     if (
-      dto.type === ExpenseType.ACCRUAL ||
+      effectiveType === ExpenseType.ACCRUAL ||
       dto.purchaseStatus === 'Purchase - Accruals'
     ) {
       // Ensure expected payment date is provided for accruals
@@ -745,8 +770,8 @@ export class ExpensesService {
     if (linkedAccrualExpense) {
       await this.linkExpenseToAccrual(saved, linkedAccrualExpense);
     } else if (
-      dto.type !== ExpenseType.ACCRUAL &&
-      (dto.type === ExpenseType.EXPENSE || dto.type === ExpenseType.CREDIT) &&
+      effectiveType !== ExpenseType.ACCRUAL &&
+      (effectiveType === ExpenseType.EXPENSE || effectiveType === ExpenseType.CREDIT) &&
       dto.vendorName &&
       dto.amount
     ) {
@@ -1165,6 +1190,29 @@ export class ExpensesService {
 
     if (dto.type) {
       expense.type = dto.type;
+    }
+
+    // Update custom expense type link if provided
+    if (dto.expenseTypeId !== undefined) {
+      const expenseTypeId = dto.expenseTypeId as string | null;
+      if (expenseTypeId) {
+        const customExpenseType = await this.expensesRepository.manager.findOne(
+          ExpenseTypeEntity,
+          {
+            where: {
+              id: expenseTypeId,
+              organization: { id: organizationId },
+              isDeleted: false,
+            },
+          },
+        );
+        if (!customExpenseType) {
+          throw new NotFoundException('Expense type not found');
+        }
+        expense.expenseType = customExpenseType;
+      } else {
+        expense.expenseType = null;
+      }
     }
 
     // Update VAT tax type if provided

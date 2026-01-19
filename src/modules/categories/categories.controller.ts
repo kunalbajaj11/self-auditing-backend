@@ -38,6 +38,7 @@ export class CategoriesController {
     );
     return this.categoriesService.findAllByOrganization(
       user?.organizationId as string,
+      user?.userId as string,
       expenseType,
     );
   }

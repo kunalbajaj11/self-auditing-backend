@@ -6,7 +6,9 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  IsUUID,
   Min,
+  ValidateIf,
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -17,8 +19,15 @@ import { AttachmentInputDto } from './attachment-input.dto';
 import { PurchaseLineItemDto } from './purchase-line-item.dto';
 
 export class CreateExpenseDto {
+  // System expense type (backward compatible). Required unless a custom expenseTypeId is provided.
+  @ValidateIf((o) => !o.expenseTypeId)
   @IsEnum(ExpenseType)
   type: ExpenseType;
+
+  // Custom expense type (new). If provided, it will be linked via Expense.expenseType relation.
+  @IsOptional()
+  @IsUUID()
+  expenseTypeId?: string;
 
   @IsOptional()
   @IsString()

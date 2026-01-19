@@ -124,24 +124,49 @@ export class CategoriesService {
 
   async findAllByOrganization(
     organizationId: string,
+    userId: string,
     expenseType?: string,
   ): Promise<Category[]> {
     const query = this.categoriesRepository
       .createQueryBuilder('category')
+      .leftJoinAndSelect('category.expenseTypeEntity', 'expenseTypeEntity')
       .where('category.organization_id = :organizationId', { organizationId })
       .andWhere('category.is_deleted = false');
 
+    // Scope custom categories to creator; always include system defaults
+    query.andWhere(
+      '(category.is_system_default = true OR category.created_by = :userId)',
+      { userId },
+    );
+
     // Filter by expense type if provided (for fixed_assets and cost_of_sales)
     if (expenseType) {
-      // Include categories that match the expense type OR have no expense type (general categories)
+      // Include categories that match the expense type (system type) OR 
+      // categories linked to a custom expense type with matching name OR
+      // have no expense type (general categories)
       query.andWhere(
-        '(category.expense_type = :expenseType OR category.expense_type IS NULL)',
+        '(category.expense_type = :expenseType OR expenseTypeEntity.name = :expenseType OR category.expense_type IS NULL)',
         { expenseType },
       );
     }
     // If no expense type specified, return all categories (no filtering)
 
-    return query.orderBy('category.name', 'ASC').getMany();
+    const categories = await query.orderBy('category.name', 'ASC').getMany();
+    
+    // Transform to ensure expenseTypeId is included in response
+    // TypeORM includes the relationship object but we also need the ID field
+    return categories.map((category) => {
+      const result = { ...category } as any;
+      // Set expenseTypeId from the relationship if available
+      if (category.expenseTypeEntity) {
+        result.expenseTypeId = category.expenseTypeEntity.id;
+      } else {
+        result.expenseTypeId = null;
+      }
+      // Remove the full expenseTypeEntity object to avoid confusion (keep only the ID)
+      delete result.expenseTypeEntity;
+      return result;
+    });
   }
 
   async create(

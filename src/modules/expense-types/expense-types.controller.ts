@@ -34,6 +34,7 @@ export class ExpenseTypesController {
     );
     return this.expenseTypesService.findAllByOrganization(
       user?.organizationId as string,
+      user?.userId as string,
     );
   }
 
