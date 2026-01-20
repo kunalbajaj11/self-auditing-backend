@@ -594,9 +594,10 @@ export class ReportsService {
 
       // Subquery to calculate debit notes linked to expense (for end date)
       // Include both applied debit notes and debit notes directly linked to the expense
+      // Use total_amount (base + VAT) because Accounts Payable should reflect the full amount owed/reduced
       // Note: Using string interpolation for status values to avoid parameter binding issues in subqueries
       const debitNotesLinkedToExpenseSubqueryEnd = `(
-        SELECT COALESCE(SUM(COALESCE(dn.base_amount, dn.amount)), 0)
+        SELECT COALESCE(SUM(COALESCE(dn.total_amount, dn.base_amount + dn.vat_amount, dn.amount + dn.vat_amount)), 0)
         FROM debit_notes dn
         WHERE dn.expense_id = expense.id
         AND dn.organization_id = expense.organization_id
@@ -619,9 +620,10 @@ export class ReportsService {
         .getQuery();
 
       // Subquery to calculate debit notes linked to expense (for start date)
+      // Use total_amount (base + VAT) because Accounts Payable should reflect the full amount owed/reduced
       // Note: Using string interpolation for status values to avoid parameter binding issues in subqueries
       const debitNotesLinkedToExpenseSubqueryStart = `(
-        SELECT COALESCE(SUM(COALESCE(dn.base_amount, dn.amount)), 0)
+        SELECT COALESCE(SUM(COALESCE(dn.total_amount, dn.base_amount + dn.vat_amount, dn.amount + dn.vat_amount)), 0)
         FROM debit_notes dn
         WHERE dn.expense_id = expense.id
         AND dn.organization_id = expense.organization_id
