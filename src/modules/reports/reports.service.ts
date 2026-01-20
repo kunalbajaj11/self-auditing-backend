@@ -3068,7 +3068,41 @@ export class ReportsService {
       }
 
       const expensesRow = await expensesQuery.getRawOne();
-      const totalExpenses = Number(expensesRow?.amount || 0);
+      const totalExpensesRaw = Number(expensesRow?.amount || 0);
+
+      // Get supplier debit notes (linked to expenses) to reduce expenses
+      // Supplier debit notes reduce expenses, which increases retained earnings
+      // Include DRAFT debit notes that are linked to expenses
+      const supplierDebitNotesQuery = this.debitNotesRepository
+        .createQueryBuilder('debitNote')
+        .select([
+          'SUM(COALESCE(debitNote.base_amount, debitNote.amount)) AS amount',
+        ])
+        .where('debitNote.organization_id = :organizationId', {
+          organizationId,
+        })
+        .andWhere('debitNote.debit_note_date <= :asOfDate', { asOfDate })
+        .andWhere('debitNote.expense_id IS NOT NULL') // Only supplier debit notes
+        .andWhere('debitNote.is_deleted = false')
+        .andWhere(
+          '(debitNote.status IN (:...statuses) OR (debitNote.status = :draftStatus AND debitNote.expense_id IS NOT NULL))',
+          {
+            statuses: [DebitNoteStatus.ISSUED, DebitNoteStatus.APPLIED],
+            draftStatus: DebitNoteStatus.DRAFT,
+          },
+        );
+
+      const supplierDebitNotesRow = await supplierDebitNotesQuery.getRawOne();
+      const totalSupplierDebitNotes = Number(
+        supplierDebitNotesRow?.amount || 0,
+      );
+
+      // Net expenses = total expenses - supplier debit notes (debit notes reduce expenses)
+      const totalExpenses = totalExpensesRaw - totalSupplierDebitNotes;
+
+      this.logger.debug(
+        `Balance Sheet - Total Expenses Calculation: totalExpensesRaw=${totalExpensesRaw}, totalSupplierDebitNotes=${totalSupplierDebitNotes}, netTotalExpenses=${totalExpenses}`,
+      );
 
       // Calculate period journal amounts for assets (period = total - opening)
       // Note: We'll calculate period amounts for equity after we get opening amounts
@@ -3357,7 +3391,40 @@ export class ReportsService {
         openingBankJournalEntriesQuery.getRawOne(),
       ]);
 
-      const openingExpenses = Number(openingExpensesRow?.amount || 0);
+      const openingExpensesRaw = Number(openingExpensesRow?.amount || 0);
+
+      // Get opening supplier debit notes (linked to expenses) to reduce opening expenses
+      const openingSupplierDebitNotesQuery = this.debitNotesRepository
+        .createQueryBuilder('debitNote')
+        .select([
+          'SUM(COALESCE(debitNote.base_amount, debitNote.amount)) AS amount',
+        ])
+        .where('debitNote.organization_id = :organizationId', {
+          organizationId,
+        })
+        .andWhere('debitNote.debit_note_date < :startDate', { startDate })
+        .andWhere('debitNote.expense_id IS NOT NULL') // Only supplier debit notes
+        .andWhere('debitNote.is_deleted = false')
+        .andWhere(
+          '(debitNote.status IN (:...statuses) OR (debitNote.status = :draftStatus AND debitNote.expense_id IS NOT NULL))',
+          {
+            statuses: [DebitNoteStatus.ISSUED, DebitNoteStatus.APPLIED],
+            draftStatus: DebitNoteStatus.DRAFT,
+          },
+        );
+
+      const openingSupplierDebitNotesRow =
+        await openingSupplierDebitNotesQuery.getRawOne();
+      const openingSupplierDebitNotes = Number(
+        openingSupplierDebitNotesRow?.amount || 0,
+      );
+
+      // Net opening expenses = opening expenses - opening supplier debit notes
+      const openingExpenses = openingExpensesRaw - openingSupplierDebitNotes;
+
+      this.logger.debug(
+        `Balance Sheet - Opening Expenses Calculation: openingExpensesRaw=${openingExpensesRaw}, openingSupplierDebitNotes=${openingSupplierDebitNotes}, netOpeningExpenses=${openingExpenses}`,
+      );
       const openingReceivablesAmount = Number(
         openingReceivablesRow?.amount || 0,
       );
