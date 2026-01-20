@@ -23,8 +23,17 @@ export default registerAs(
         : undefined,
     extra: {
       // Connection pool configuration
-      max: parseInt(process.env.DB_POOL_MAX ?? '20', 10), // Maximum number of connections in the pool
-      min: parseInt(process.env.DB_POOL_MIN ?? '5', 10), // Minimum number of connections in the pool
+      // IMPORTANT: If you are behind PgBouncer in "session" pooling mode, the effective max clients
+      // is limited by PgBouncer `pool_size`. Keep this low (often 5) for production with PgBouncer.
+      // For local development without PgBouncer, use a higher value (20-50) to handle parallel queries.
+      //
+      // Reports service generates complex reports with multiple parallel queries (15+ Promise.all calls).
+      // Each parallel query batch may need connections, so pool size should accommodate peak usage.
+      //
+      // Production with PgBouncer: Set DB_POOL_MAX=5 in environment
+      // Local development: Use DB_POOL_MAX=20 or higher
+      max: parseInt(process.env.DB_POOL_MAX ?? '20', 10), // Max connections per app instance (default: 20 for local)
+      min: parseInt(process.env.DB_POOL_MIN ?? '2', 10), // Min connections to keep alive (default: 2 for better reuse)
       idleTimeoutMillis: parseInt(
         process.env.DB_POOL_IDLE_TIMEOUT ?? '30000',
         10,
@@ -32,7 +41,7 @@ export default registerAs(
       connectionTimeoutMillis: parseInt(
         process.env.DB_POOL_CONNECTION_TIMEOUT ?? '10000',
         10,
-      ), // Connection timeout
+      ), // Connection timeout (10 seconds)
     },
   }),
 );

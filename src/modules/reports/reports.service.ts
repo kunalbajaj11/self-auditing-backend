@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, DataSource } from 'typeorm';
 import { Expense } from '../../entities/expense.entity';
 import { Accrual } from '../../entities/accrual.entity';
 import { Report } from '../../entities/report.entity';
@@ -67,6 +67,7 @@ export class ReportsService {
     @InjectRepository(StockMovement)
     private readonly stockMovementsRepository: Repository<StockMovement>,
     private readonly settingsService: SettingsService,
+    private readonly dataSource: DataSource,
   ) {}
 
   async listHistory(
@@ -259,6 +260,16 @@ export class ReportsService {
     }
   }
 
+  /**
+   * Builds Trial Balance report
+   *
+   * Connection Pool Optimization Notes:
+   * - This method uses multiple parallel queries (Promise.all) for performance
+   * - Each Promise.all batch needs database connections from the pool
+   * - Ensure DB_POOL_MAX is set appropriately (20+ for local, 5 for production with PgBouncer)
+   * - TypeORM connection pool automatically manages connection reuse
+   * - All repository queries share the same DataSource connection pool
+   */
   private async buildTrialBalance(
     organizationId: string,
     filters?: Record<string, any>,
@@ -2306,6 +2317,17 @@ export class ReportsService {
     }
   }
 
+  /**
+   * Builds Balance Sheet report
+   *
+   * Connection Pool Optimization Notes:
+   * - This method has the MOST parallel queries (15+ in a single Promise.all batch)
+   * - Each parallel query requires a database connection from the pool
+   * - The large Promise.all at line ~3291 runs 15 queries simultaneously
+   * - This is the primary cause of connection pool exhaustion
+   * - Ensure DB_POOL_MAX is set to 20+ for local development
+   * - For production with PgBouncer, consider splitting Promise.all batches
+   */
   private async buildBalanceSheet(
     organizationId: string,
     filters?: Record<string, any>,
@@ -3261,33 +3283,46 @@ export class ReportsService {
         .groupBy('entry.debit_account')
         .addGroupBy('entry.credit_account');
 
+      // OPTIMIZATION: Split large Promise.all into smaller batches to reduce connection pool pressure
+      // Batch 1: Core opening balances (5 queries)
+      // Batch 2: Additional opening balances (5 queries)
+      // Batch 3: Remaining queries (5 queries)
+      // This reduces peak connections from 15 to 5 per batch
       const [
         openingExpensesRow,
         openingReceivablesRow,
         openingReceivablesDebitNotesRow,
         openingCashRow,
         openingExpensePaymentsRow,
-        openingVatReceivableRow,
-        openingAccrualsRow,
-        openingVatPayableRow,
-        openingRevenueRow,
-        openingCreditNotesRow,
-        openingDebitNotesRow,
-        openingJournalRows,
-        openingEquityRows,
-        openingCashJournalEntriesRow,
-        openingBankJournalEntriesRow,
       ] = await Promise.all([
         openingExpensesQuery.getRawOne(),
         openingReceivablesQuery.getRawOne(),
         openingReceivablesDebitNotesQuery.getRawOne(),
         openingCashQuery.getRawOne(),
         openingExpensePaymentsQuery.getRawOne(),
+      ]);
+
+      const [
+        openingVatReceivableRow,
+        openingAccrualsRow,
+        openingVatPayableRow,
+        openingRevenueRow,
+        openingCreditNotesRow,
+      ] = await Promise.all([
         openingVatReceivableQuery.getRawOne(),
         openingAccrualsQuery.getRawOne(),
         openingVatPayableQuery.getRawOne(),
         openingRevenueQuery.getRawOne(),
         openingCreditNotesQuery.getRawOne(),
+      ]);
+
+      const [
+        openingDebitNotesRow,
+        openingJournalRows,
+        openingEquityRows,
+        openingCashJournalEntriesRow,
+        openingBankJournalEntriesRow,
+      ] = await Promise.all([
         openingDebitNotesQuery.getRawOne(),
         openingJournalQuery.getRawMany(),
         openingEquityAccountsQuery.getRawMany(),
