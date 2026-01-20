@@ -840,14 +840,12 @@ export class ReportsService {
           statuses: [DebitNoteStatus.ISSUED, DebitNoteStatus.APPLIED],
         });
 
-      const [
-        receivablesAtEndRow,
-        receivablesAtStartRow,
-        debitNotesAtEndRow,
-        debitNotesAtStartRow,
-      ] = await Promise.all([
+      // Split into batches to reduce concurrent connections
+      const [receivablesAtEndRow, receivablesAtStartRow] = await Promise.all([
         receivablesAtEndQuery.getRawOne(),
         receivablesAtStartQuery.getRawOne(),
+      ]);
+      const [debitNotesAtEndRow, debitNotesAtStartRow] = await Promise.all([
         debitNotesAtEndQuery.getRawOne(),
         debitNotesAtStartQuery.getRawOne(),
       ]);
@@ -1160,25 +1158,28 @@ export class ReportsService {
           "(entry.debit_account = 'bank' OR entry.credit_account = 'bank')",
         );
 
-      const [
-        openingExpensePaymentsRow,
-        openingInvoicePaymentsRow,
-        openingCashJournalEntriesRow,
-        openingBankJournalEntriesRow,
-        periodExpensePaymentsRow,
-        periodInvoicePaymentsRow,
-        periodCashJournalEntriesRow,
-        periodBankJournalEntriesRow,
-      ] = await Promise.all([
-        openingExpensePaymentsQuery.getRawOne(),
-        openingInvoicePaymentsQuery.getRawOne(),
-        openingCashJournalEntriesQuery.getRawOne(),
-        openingBankJournalEntriesQuery.getRawOne(),
-        periodExpensePaymentsQuery.getRawOne(),
-        periodInvoicePaymentsQuery.getRawOne(),
-        periodCashJournalEntriesQuery.getRawOne(),
-        periodBankJournalEntriesQuery.getRawOne(),
-      ]);
+      // Split into batches to reduce concurrent connections (8 queries -> 3 batches)
+      const [openingExpensePaymentsRow, openingInvoicePaymentsRow] =
+        await Promise.all([
+          openingExpensePaymentsQuery.getRawOne(),
+          openingInvoicePaymentsQuery.getRawOne(),
+        ]);
+      const [openingCashJournalEntriesRow, openingBankJournalEntriesRow] =
+        await Promise.all([
+          openingCashJournalEntriesQuery.getRawOne(),
+          openingBankJournalEntriesQuery.getRawOne(),
+        ]);
+      // Split the period queries into 2 batches (4 queries -> 2 batches)
+      const [periodExpensePaymentsRow, periodInvoicePaymentsRow] =
+        await Promise.all([
+          periodExpensePaymentsQuery.getRawOne(),
+          periodInvoicePaymentsQuery.getRawOne(),
+        ]);
+      const [periodCashJournalEntriesRow, periodBankJournalEntriesRow] =
+        await Promise.all([
+          periodCashJournalEntriesQuery.getRawOne(),
+          periodBankJournalEntriesQuery.getRawOne(),
+        ]);
 
       // Calculate Cash separately
       // Debug: Check actual field names from query results
@@ -2468,14 +2469,12 @@ export class ReportsService {
           "(entry.debit_account = 'bank' OR entry.credit_account = 'bank')",
         );
 
-      const [
-        invoicePaymentsRow,
-        expensePaymentsRow,
-        cashJournalEntriesRow,
-        bankJournalEntriesRow,
-      ] = await Promise.all([
+      // Split into batches to reduce concurrent connections
+      const [invoicePaymentsRow, expensePaymentsRow] = await Promise.all([
         invoicePaymentsQuery.getRawOne(),
         expensePaymentsQuery.getRawOne(),
+      ]);
+      const [cashJournalEntriesRow, bankJournalEntriesRow] = await Promise.all([
         cashJournalEntriesQuery.getRawOne(),
         bankJournalEntriesQuery.getRawOne(),
       ]);
@@ -2905,16 +2904,13 @@ export class ReportsService {
         .groupBy('entry.debit_account')
         .addGroupBy('entry.credit_account');
 
-      const [
-        revenueRow,
-        creditNotesRow,
-        debitNotesRow,
-        journalRows,
-        equityRows,
-      ] = await Promise.all([
+      // Split into batches to reduce concurrent connections (5 queries -> 2 batches)
+      const [revenueRow, creditNotesRow, debitNotesRow] = await Promise.all([
         revenueQuery.getRawOne(),
         creditNotesQuery.getRawOne(),
         debitNotesQuery.getRawOne(),
+      ]);
+      const [journalRows, equityRows] = await Promise.all([
         journalEntriesQuery.getRawMany(),
         equityAccountsQuery.getRawMany(),
       ]);
@@ -5253,14 +5249,12 @@ export class ReportsService {
       .andWhere('CAST(debitNote.vat_amount AS DECIMAL) > 0')
       .orderBy('debitNote.created_at', 'DESC');
 
-    const [
-      vatOutputInvoices,
-      vatCreditNotes,
-      vatOutputDebitNotes,
-      vatInputDebitNotes,
-    ] = await Promise.all([
+    // Split into batches to reduce concurrent connections
+    const [vatOutputInvoices, vatCreditNotes] = await Promise.all([
       vatOutputQuery.getRawMany(),
       vatCreditNotesQuery.getRawMany(),
+    ]);
+    const [vatOutputDebitNotes, vatInputDebitNotes] = await Promise.all([
       vatOutputDebitNotesQuery.getRawMany(),
       vatInputDebitNotesQuery.getRawMany(),
     ]);

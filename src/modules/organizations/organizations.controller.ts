@@ -177,6 +177,22 @@ export class OrganizationsController {
   @Patch(':id')
   @Roles(UserRole.SUPERADMIN)
   async update(@Param('id') id: string, @Body() dto: UpdateOrganizationDto) {
-    return this.organizationsService.update(id, dto);
+    const updated = await this.organizationsService.update(id, dto);
+    // Return all fields including enablePayroll and enableInventory
+    return {
+      id: updated.id,
+      name: updated.name,
+      currency: updated.currency,
+      status: updated.status,
+      planType: updated.planType,
+      contactPerson: updated.contactPerson,
+      contactEmail: updated.contactEmail,
+      storageQuotaMb: updated.storageQuotaMb,
+      vatNumber: updated.vatNumber,
+      address: updated.address,
+      region: updated.region,
+      enablePayroll: updated.enablePayroll,
+      enableInventory: updated.enableInventory,
+    };
   }
 }

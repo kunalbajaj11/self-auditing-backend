@@ -121,43 +121,49 @@ export class SuperAdminService {
     return Date.now() - cache.timestamp < CACHE_TTL_MS;
   }
 
+  /**
+   * Invalidate the organization usage cache
+   * Call this when organizations are updated to ensure fresh data
+   */
+  invalidateOrganizationUsageCache(): void {
+    this.organizationUsageCache = null;
+  }
+
   async getDashboardMetrics(forceRefresh = false): Promise<DashboardMetrics> {
     // Check cache first
     if (!forceRefresh && this.isCacheValid(this.dashboardMetricsCache)) {
       return this.dashboardMetricsCache!.data;
     }
 
-    const [
-      totalOrganizations,
-      activeOrganizations,
-      totalUsers,
-      totalExpensesProcessed,
-      totalAccruals,
-      pendingAccruals,
-      attachmentsSum,
-      latestAuditLogs,
-    ] = await Promise.all([
-      this.organizationsRepository.count(),
-      this.organizationsRepository.count({
-        where: { status: OrganizationStatus.ACTIVE },
-      }),
-      this.usersRepository.count({
-        where: { isDeleted: false },
-      }),
-      this.expensesRepository.count({
-        where: {
-          isDeleted: false,
-        },
-      }),
-      this.accrualsRepository.count({
-        where: { isDeleted: false },
-      }),
-      this.accrualsRepository.count({
-        where: {
-          status: AccrualStatus.PENDING_SETTLEMENT,
-          isDeleted: false,
-        },
-      }),
+    // Split into batches to reduce concurrent connections (8 queries -> 3 batches)
+    const [totalOrganizations, activeOrganizations, totalUsers] =
+      await Promise.all([
+        this.organizationsRepository.count(),
+        this.organizationsRepository.count({
+          where: { status: OrganizationStatus.ACTIVE },
+        }),
+        this.usersRepository.count({
+          where: { isDeleted: false },
+        }),
+      ]);
+    const [totalExpensesProcessed, totalAccruals, pendingAccruals] =
+      await Promise.all([
+        this.expensesRepository.count({
+          where: {
+            isDeleted: false,
+          },
+        }),
+        this.accrualsRepository.count({
+          where: { isDeleted: false },
+        }),
+        this.accrualsRepository.count({
+          where: {
+            status: AccrualStatus.PENDING_SETTLEMENT,
+            isDeleted: false,
+          },
+        }),
+      ]);
+    const [attachmentsSum, latestAuditLogs] = await Promise.all([
       this.getTotalAttachmentSize(),
       this.getLatestAuditLogs(10),
     ]);
@@ -203,10 +209,18 @@ export class SuperAdminService {
       order: { createdAt: 'DESC' },
     });
 
-    const usage = await Promise.all(
-      organizations.map(async (organization) => {
-        const [userCount, expenseCount, accrualCount, storageMb, license] =
-          await Promise.all([
+    // Process organizations in batches to avoid connection pool exhaustion
+    // If we have many organizations, processing all at once can create
+    // (number of organizations × 5 queries) concurrent connections
+    const BATCH_SIZE = 5; // Process 5 organizations at a time
+    const usage: OrganizationUsageItem[] = [];
+
+    for (let i = 0; i < organizations.length; i += BATCH_SIZE) {
+      const batch = organizations.slice(i, i + BATCH_SIZE);
+      const batchResults = await Promise.all(
+        batch.map(async (organization) => {
+          // Split organization queries into smaller batches (5 queries -> 2 batches)
+          const [userCount, expenseCount] = await Promise.all([
             this.usersRepository.count({
               where: {
                 organization: { id: organization.id },
@@ -219,6 +233,8 @@ export class SuperAdminService {
                 isDeleted: false,
               },
             }),
+          ]);
+          const [accrualCount, storageMb] = await Promise.all([
             this.accrualsRepository.count({
               where: {
                 organization: { id: organization.id },
@@ -226,31 +242,35 @@ export class SuperAdminService {
               },
             }),
             this.getTotalAttachmentSize(organization.id),
-            this.licenseKeysService.findByOrganizationId(organization.id),
           ]);
+          // License query runs separately to avoid overloading
+          const license =
+            await this.licenseKeysService.findByOrganizationId(organization.id);
 
-        // Calculate ranking score: weighted combination of metrics
-        // Formula: (expenseCount * 0.5) + (userCount * 0.3) + (accrualCount * 0.2)
-        const rankingScore =
-          expenseCount * 0.5 + userCount * 0.3 + accrualCount * 0.2;
+          // Calculate ranking score: weighted combination of metrics
+          // Formula: (expenseCount * 0.5) + (userCount * 0.3) + (accrualCount * 0.2)
+          const rankingScore =
+            expenseCount * 0.5 + userCount * 0.3 + accrualCount * 0.2;
 
-        return {
-          id: organization.id,
-          name: organization.name,
-          planType: organization.planType,
-          status: organization.status,
-          userCount,
-          expenseCount,
-          accrualCount,
-          storageUsedMb: storageMb,
-          rankingScore,
-          createdAt: organization.createdAt,
-          licenseExpiresAt: license?.expiresAt ?? null,
-          enablePayroll: organization.enablePayroll,
-          enableInventory: organization.enableInventory,
-        };
-      }),
-    );
+          return {
+            id: organization.id,
+            name: organization.name,
+            planType: organization.planType,
+            status: organization.status,
+            userCount,
+            expenseCount,
+            accrualCount,
+            storageUsedMb: storageMb,
+            rankingScore,
+            createdAt: organization.createdAt,
+            licenseExpiresAt: license?.expiresAt ?? null,
+            enablePayroll: organization.enablePayroll,
+            enableInventory: organization.enableInventory,
+          };
+        }),
+      );
+      usage.push(...batchResults);
+    }
 
     // Cache the result
     this.organizationUsageCache = {

@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { SuperAdminController } from './super-admin.controller';
 import { SuperAdminService } from './super-admin.service';
@@ -26,5 +26,6 @@ import { CategoriesModule } from '../categories/categories.module';
   ],
   controllers: [SuperAdminController],
   providers: [SuperAdminService],
+  exports: [SuperAdminService], // Export so OrganizationsService can inject it
 })
 export class SuperAdminModule {}

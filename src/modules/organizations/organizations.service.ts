@@ -1,7 +1,9 @@
 import {
   ConflictException,
+  Inject,
   Injectable,
   NotFoundException,
+  forwardRef,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -20,6 +22,7 @@ import { ChangePlanTypeDto } from './dto/change-plan-type.dto';
 import { RegionConfigService } from '../region-config/region-config.service';
 import { Region } from '../../common/enums/region.enum';
 import { PlanType } from '../../common/enums/plan-type.enum';
+import { SuperAdminService } from '../super-admin/super-admin.service';
 
 @Injectable()
 export class OrganizationsService {
@@ -31,6 +34,8 @@ export class OrganizationsService {
     private readonly licenseKeysService: LicenseKeysService,
     private readonly auditLogsService: AuditLogsService,
     private readonly regionConfigService: RegionConfigService,
+    @Inject(forwardRef(() => SuperAdminService))
+    private readonly superAdminService: SuperAdminService,
   ) {}
 
   async create(dto: CreateOrganizationDto): Promise<Organization> {
@@ -152,7 +157,18 @@ export class OrganizationsService {
       organization.enableInventory = dto.enableInventory;
     }
 
-    return this.organizationsRepository.save(organization);
+    const saved = await this.organizationsRepository.save(organization);
+    
+    // Invalidate the super admin cache when organization is updated
+    // This ensures the organization usage list shows updated enablePayroll/enableInventory values
+    try {
+      this.superAdminService.invalidateOrganizationUsageCache();
+    } catch (error) {
+      // Ignore errors in cache invalidation - it's not critical
+      console.warn('Failed to invalidate organization usage cache:', error);
+    }
+
+    return saved;
   }
 
   async changeStatus(
