@@ -347,10 +347,13 @@ export class ReportsService {
 
       const expenseRows = await expenseQuery.getRawMany();
       this.logger.debug(
-        `Expense rows retrieved: count=${expenseRows.length}, organizationId=${organizationId}`,
+        `Trial Balance - Expense rows retrieved: count=${expenseRows.length}, organizationId=${organizationId}, startDate=${startDate}, endDate=${endDate}`,
+      );
+      this.logger.debug(
+        `Trial Balance - Expense rows detail: ${JSON.stringify(expenseRows.map((r) => ({ category: r.accountname || r.accountName, debit: r.debit })))}`,
       );
 
-      // Get supplier debit notes (those linked to expenses, not invoices) for this period
+      // Get supplier debit notes grouped by expense category (those linked to expenses, not invoices) for this period
       // Include debit notes that have expense applications, even if in DRAFT status
       const supplierDebitNotesWithApplicationsSubquery =
         this.debitNoteExpenseApplicationsRepository
@@ -359,9 +362,18 @@ export class ReportsService {
           .where('dnea.organization_id = :organizationId', { organizationId })
           .getQuery();
 
-      const supplierDebitNotesQuery = this.debitNotesRepository
+      this.logger.debug(
+        `Trial Balance - Querying supplier debit notes for organizationId=${organizationId}, startDate=${startDate}, endDate=${endDate}`,
+      );
+
+      // Get supplier debit notes grouped by expense category to deduct from respective categories
+      // Include DRAFT debit notes that are linked to expenses (similar to how DRAFT credit notes are included)
+      const supplierDebitNotesByCategoryQuery = this.debitNotesRepository
         .createQueryBuilder('debitNote')
+        .leftJoin('debitNote.expense', 'expense')
+        .leftJoin('expense.category', 'category')
         .select([
+          "COALESCE(category.name, 'Uncategorized Expenses') AS accountName",
           'SUM(COALESCE(debitNote.base_amount, debitNote.amount)) AS amount',
         ])
         .where('debitNote.organization_id = :organizationId', {
@@ -373,40 +385,100 @@ export class ReportsService {
         .andWhere(
           '(debitNote.status IN (:...statuses) OR debitNote.id IN (' +
             supplierDebitNotesWithApplicationsSubquery +
-            '))',
+            ') OR (debitNote.status = :draftStatus AND debitNote.expense_id IS NOT NULL))',
           {
             statuses: [DebitNoteStatus.ISSUED, DebitNoteStatus.APPLIED],
+            draftStatus: DebitNoteStatus.DRAFT,
           },
-        );
+        )
+        .groupBy('category.name');
 
-      const supplierDebitNotesRow = await supplierDebitNotesQuery.getRawOne();
-      const supplierDebitNotesAmount = Number(
-        supplierDebitNotesRow?.amount || 0,
+      const supplierDebitNotesByCategoryRows =
+        await supplierDebitNotesByCategoryQuery.getRawMany();
+
+      this.logger.debug(
+        `Trial Balance - Supplier debit notes query SQL: ${supplierDebitNotesByCategoryQuery.getSql()}`,
+      );
+      this.logger.debug(
+        `Trial Balance - Supplier debit notes by category rows: count=${supplierDebitNotesByCategoryRows.length}, data=${JSON.stringify(supplierDebitNotesByCategoryRows)}, organizationId=${organizationId}`,
       );
 
-      expenseRows.forEach((row) => {
-        const debit = Number(row.debit || 0);
-        if (debit > 0) {
-          accounts.push({
-            accountName: row.accountname || row.accountName,
-            accountType: row.accounttype || row.accountType,
-            debit,
-            credit: 0,
-            balance: debit,
-          });
+      // Create a map of category name to debit note amount for easy lookup
+      const debitNoteDeductionsByCategory = new Map<string, number>();
+      supplierDebitNotesByCategoryRows.forEach((row) => {
+        const categoryName = row.accountname || row.accountName;
+        const amount = Number(row.amount || 0);
+        this.logger.debug(
+          `Trial Balance - Processing debit note row: categoryName=${categoryName}, amount=${amount}, rawRow=${JSON.stringify(row)}`,
+        );
+        if (amount > 0) {
+          const currentAmount =
+            debitNoteDeductionsByCategory.get(categoryName) || 0;
+          const newAmount = currentAmount + amount;
+          debitNoteDeductionsByCategory.set(categoryName, newAmount);
+          this.logger.debug(
+            `Trial Balance - Updated deduction for category: ${categoryName}, previous=${currentAmount}, added=${amount}, total=${newAmount}`,
+          );
         }
       });
 
-      // Add supplier debit notes as a credit to expenses (reduces expenses)
-      if (supplierDebitNotesAmount > 0) {
-        accounts.push({
-          accountName: 'Supplier Debit Notes',
-          accountType: 'Expense',
-          debit: 0,
-          credit: supplierDebitNotesAmount,
-          balance: -supplierDebitNotesAmount,
-        });
-      }
+      this.logger.debug(
+        `Trial Balance - Final debit note deductions by category map: ${JSON.stringify(Array.from(debitNoteDeductionsByCategory.entries()))}, organizationId=${organizationId}`,
+      );
+
+      // Process expense rows and deduct supplier debit notes from their respective categories
+      expenseRows.forEach((row) => {
+        const categoryName = row.accountname || row.accountName;
+        const expenseDebit = Number(row.debit || 0);
+        const debitNoteCredit =
+          debitNoteDeductionsByCategory.get(categoryName) || 0;
+        const netDebit = expenseDebit - debitNoteCredit;
+
+        this.logger.debug(
+          `Trial Balance - Processing expense category: ${categoryName}, expenseDebit=${expenseDebit}, debitNoteCredit=${debitNoteCredit}, netDebit=${netDebit}`,
+        );
+
+        // Only add account if there's a positive balance or debit notes applied
+        if (netDebit > 0 || debitNoteCredit > 0) {
+          accounts.push({
+            accountName: categoryName,
+            accountType: row.accounttype || row.accountType,
+            debit: expenseDebit,
+            credit: debitNoteCredit,
+            balance: netDebit,
+          });
+          this.logger.debug(
+            `Trial Balance - Added account to trial balance: ${categoryName}, debit=${expenseDebit}, credit=${debitNoteCredit}, balance=${netDebit}`,
+          );
+        }
+      });
+
+      // Handle debit notes for categories that don't have expenses in this period
+      // (e.g., if a debit note is for a category with no expenses in the period)
+      debitNoteDeductionsByCategory.forEach((amount, categoryName) => {
+        // Check if this category already exists in expenseRows
+        const existsInExpenses = expenseRows.some(
+          (row) => (row.accountname || row.accountName) === categoryName,
+        );
+
+        this.logger.debug(
+          `Trial Balance - Checking debit note for category without expenses: ${categoryName}, amount=${amount}, existsInExpenses=${existsInExpenses}`,
+        );
+
+        if (!existsInExpenses && amount > 0) {
+          // This category only has debit notes, show it as a credit (reduction)
+          accounts.push({
+            accountName: categoryName,
+            accountType: 'Expense',
+            debit: 0,
+            credit: amount,
+            balance: -amount,
+          });
+          this.logger.debug(
+            `Trial Balance - Added debit note-only category: ${categoryName}, credit=${amount}, balance=${-amount}`,
+          );
+        }
+      });
 
       const revenueQuery = this.salesInvoicesRepository
         .createQueryBuilder('invoice')
@@ -823,6 +895,7 @@ export class ReportsService {
       const vatReceivableDebit = Number(vatReceivableRow?.debit || 0);
 
       // Get supplier debit note VAT for this period
+      // Include DRAFT debit notes that are linked to expenses
       const supplierDebitNoteVatQuery = this.debitNotesRepository
         .createQueryBuilder('debitNote')
         .select(['SUM(COALESCE(debitNote.vat_amount, 0)) AS vat'])
@@ -836,9 +909,10 @@ export class ReportsService {
         .andWhere(
           '(debitNote.status IN (:...statuses) OR debitNote.id IN (' +
             supplierDebitNotesWithApplicationsSubquery +
-            '))',
+            ') OR (debitNote.status = :draftStatus AND debitNote.expense_id IS NOT NULL))',
           {
             statuses: [DebitNoteStatus.ISSUED, DebitNoteStatus.APPLIED],
+            draftStatus: DebitNoteStatus.DRAFT,
           },
         );
 
@@ -847,6 +921,9 @@ export class ReportsService {
       const supplierDebitNoteVat = Number(supplierDebitNoteVatRow?.vat || 0);
 
       const netVatReceivable = vatReceivableDebit - supplierDebitNoteVat;
+      this.logger.debug(
+        `Trial Balance - VAT Receivable calculation: vatReceivableDebit=${vatReceivableDebit}, supplierDebitNoteVat=${supplierDebitNoteVat}, netVatReceivable=${netVatReceivable}`,
+      );
       if (netVatReceivable > 0 || supplierDebitNoteVat > 0) {
         accounts.push({
           accountName: 'VAT Receivable (Input VAT)',
@@ -855,6 +932,9 @@ export class ReportsService {
           credit: supplierDebitNoteVat,
           balance: netVatReceivable,
         });
+        this.logger.debug(
+          `Trial Balance - Added VAT Receivable account: debit=${vatReceivableDebit}, credit=${supplierDebitNoteVat}, balance=${netVatReceivable}`,
+        );
       }
 
       const vatPayableQuery = this.salesInvoicesRepository
@@ -2433,12 +2513,56 @@ export class ReportsService {
 
       const vatReceivableRow = await vatReceivableQuery.getRawOne();
       const vatReceivableAmount = Number(vatReceivableRow?.amount || 0);
-      if (vatReceivableAmount > 0) {
+      this.logger.debug(
+        `Balance Sheet - VAT Receivable from expenses: ${vatReceivableAmount}, organizationId=${organizationId}, asOfDate=${asOfDate}`,
+      );
+
+      // Get supplier debit note VAT amounts to deduct from VAT Receivable
+      // Include DRAFT debit notes that are linked to expenses
+      this.logger.debug(
+        `Balance Sheet - Querying supplier debit note VAT for organizationId=${organizationId}, asOfDate=${asOfDate}`,
+      );
+      const supplierDebitNoteVatQuery = this.debitNotesRepository
+        .createQueryBuilder('debitNote')
+        .select(['SUM(COALESCE(debitNote.vat_amount, 0)) AS vat'])
+        .where('debitNote.organization_id = :organizationId', {
+          organizationId,
+        })
+        .andWhere('debitNote.debit_note_date <= :asOfDate', { asOfDate })
+        .andWhere('debitNote.expense_id IS NOT NULL') // Only supplier debit notes
+        .andWhere('debitNote.vat_amount > 0')
+        .andWhere(
+          '(debitNote.status IN (:...statuses) OR (debitNote.status = :draftStatus AND debitNote.expense_id IS NOT NULL))',
+          {
+            statuses: [DebitNoteStatus.ISSUED, DebitNoteStatus.APPLIED],
+            draftStatus: DebitNoteStatus.DRAFT,
+          },
+        );
+
+      this.logger.debug(
+        `Balance Sheet - Supplier debit note VAT query SQL: ${supplierDebitNoteVatQuery.getSql()}`,
+      );
+      const supplierDebitNoteVatRow =
+        await supplierDebitNoteVatQuery.getRawOne();
+      const supplierDebitNoteVat = Number(supplierDebitNoteVatRow?.vat || 0);
+      this.logger.debug(
+        `Balance Sheet - Supplier debit note VAT: ${supplierDebitNoteVat}, rawRow=${JSON.stringify(supplierDebitNoteVatRow)}`,
+      );
+
+      const netVatReceivableAmount = vatReceivableAmount - supplierDebitNoteVat;
+      this.logger.debug(
+        `Balance Sheet - VAT Receivable calculation: vatReceivableAmount=${vatReceivableAmount}, supplierDebitNoteVat=${supplierDebitNoteVat}, netVatReceivableAmount=${netVatReceivableAmount}`,
+      );
+
+      if (netVatReceivableAmount > 0) {
         assets.push({
           category: 'VAT Receivable (Input VAT)',
-          amount: vatReceivableAmount,
+          amount: netVatReceivableAmount,
         });
-        totalAssets += vatReceivableAmount;
+        totalAssets += netVatReceivableAmount;
+        this.logger.debug(
+          `Balance Sheet - Added VAT Receivable to assets: ${netVatReceivableAmount}`,
+        );
       }
 
       // Calculate Closing Stock (Inventory)
@@ -4778,6 +4902,8 @@ export class ReportsService {
       .orderBy('debitNote.created_at', 'DESC');
 
     // Supplier debit notes (for VAT Receivable - input VAT)
+    // Supplier debit notes (for VAT Input - reduces VAT Receivable)
+    // Include DRAFT debit notes that are linked to expenses
     const vatInputDebitNotesQuery = this.debitNotesRepository
       .createQueryBuilder('debitNote')
       .select([
@@ -4795,9 +4921,13 @@ export class ReportsService {
       .andWhere('debitNote.debit_note_date >= :startDate', { startDate })
       .andWhere('debitNote.debit_note_date <= :endDate', { endDate })
       .andWhere('debitNote.expense_id IS NOT NULL') // Only supplier debit notes
-      .andWhere('debitNote.status IN (:...statuses)', {
-        statuses: [DebitNoteStatus.ISSUED, DebitNoteStatus.APPLIED],
-      })
+      .andWhere(
+        '(debitNote.status IN (:...statuses) OR (debitNote.status = :draftStatus AND debitNote.expense_id IS NOT NULL))',
+        {
+          statuses: [DebitNoteStatus.ISSUED, DebitNoteStatus.APPLIED],
+          draftStatus: DebitNoteStatus.DRAFT,
+        },
+      )
       .andWhere('CAST(debitNote.vat_amount AS DECIMAL) > 0')
       .orderBy('debitNote.created_at', 'DESC');
 
@@ -4812,6 +4942,10 @@ export class ReportsService {
       vatOutputDebitNotesQuery.getRawMany(),
       vatInputDebitNotesQuery.getRawMany(),
     ]);
+
+    this.logger.debug(
+      `VAT Control Account - Supplier debit notes found: count=${vatInputDebitNotes.length}, data=${JSON.stringify(vatInputDebitNotes)}`,
+    );
 
     const vatOutputItems = vatOutputInvoices.map((invoice: any) => {
       const vatAmount = parseFloat(
@@ -4964,6 +5098,9 @@ export class ReportsService {
       0,
     );
     const netVatInput = totalVatInput - totalVatInputDebitNotes;
+    this.logger.debug(
+      `VAT Control Account - VAT Input calculation: totalVatInput=${totalVatInput}, totalVatInputDebitNotes=${totalVatInputDebitNotes}, netVatInput=${netVatInput}`,
+    );
 
     // VAT Output: invoices - credit notes + customer debit notes (increases VAT Payable)
     const totalVatOutput = vatOutputItems.reduce(
