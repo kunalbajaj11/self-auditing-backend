@@ -2648,7 +2648,7 @@ export class ReportsService {
       let totalLiabilities = 0;
 
       // Calculate Accounts Payable based on unpaid expenses linked to accruals
-      // Outstanding = expense.total_amount - payments - debit_note_applications
+      // Outstanding = expense.total_amount - payments - debit_note_applications - debit_notes_linked_via_expense_id
       const expensePaymentsSubquery = this.expensePaymentsRepository
         .createQueryBuilder('payment')
         .select('COALESCE(SUM(payment.amount), 0)')
@@ -2658,13 +2658,33 @@ export class ReportsService {
         .andWhere('payment.is_deleted = false')
         .getQuery();
 
+      // Subquery to calculate debit note applications for each expense
+      // EXCLUDE debit notes that are directly linked to the expense (via expense_id) to avoid double counting
       const debitNoteExpenseApplicationsSubquery =
         this.debitNoteExpenseApplicationsRepository
           .createQueryBuilder('dnea')
+          .leftJoin('dnea.debitNote', 'dn')
           .select('COALESCE(SUM(dnea.appliedAmount), 0)')
           .where('dnea.expense_id = expense.id')
           .andWhere('dnea.organization_id = :organizationId')
+          .andWhere('(dn.expense_id IS NULL OR dn.expense_id != expense.id)') // Exclude debit notes directly linked to this expense
           .getQuery();
+
+      // Subquery to calculate debit notes directly linked to expense (via expense_id)
+      // Use total_amount (base + VAT) because Accounts Payable should reflect the full amount owed/reduced
+      // This matches the logic in Payables report and Trial Balance Accounts Payable calculation
+      const debitNotesLinkedToExpenseSubquery = `(
+        SELECT COALESCE(SUM(COALESCE(dn.total_amount, dn.base_amount + dn.vat_amount, dn.amount + dn.vat_amount)), 0)
+        FROM debit_notes dn
+        WHERE dn.expense_id = expense.id
+        AND dn.organization_id = expense.organization_id
+        AND dn.debit_note_date <= :asOfDate
+        AND dn.is_deleted = false
+        AND (
+          dn.status IN ('${DebitNoteStatus.ISSUED}', '${DebitNoteStatus.APPLIED}')
+          OR (dn.status = '${DebitNoteStatus.DRAFT}' AND dn.expense_id IS NOT NULL)
+        )
+      )`;
 
       const accrualsQuery = this.accrualsRepository
         .createQueryBuilder('accrual')
@@ -2675,6 +2695,7 @@ export class ReportsService {
           'expense.total_amount AS expenseTotalAmount',
           `(${expensePaymentsSubquery}) AS paidAmount`,
           `(${debitNoteExpenseApplicationsSubquery}) AS debitNoteAppliedAmount`,
+          `(${debitNotesLinkedToExpenseSubquery}) AS debitNoteLinkedAmount`,
         ])
         .where('accrual.organization_id = :organizationId', { organizationId })
         .andWhere('accrual.is_deleted = false')
@@ -2696,7 +2717,13 @@ export class ReportsService {
         const debitNoteApplied = Number(
           row.debitnoteappliedamount || row.debitNoteAppliedAmount || 0,
         );
-        const outstanding = expenseTotal - paidAmount - debitNoteApplied;
+        const debitNoteLinked = Number(
+          row.debitnotelinkedamount || row.debitNoteLinkedAmount || 0,
+        );
+        // Deduct both applied debit notes and directly linked debit notes
+        // This matches the logic in Payables report and Trial Balance
+        const outstanding =
+          expenseTotal - paidAmount - debitNoteApplied - debitNoteLinked;
 
         if (outstanding > 0) {
           const vendor = row.vendor || 'N/A';
@@ -4155,13 +4182,33 @@ export class ReportsService {
       .getQuery();
 
     // Subquery to calculate debit note applications for each expense
+    // EXCLUDE debit notes that are directly linked to the expense (via expense_id) to avoid double counting
     const debitNoteExpenseApplicationsSubquery =
       this.debitNoteExpenseApplicationsRepository
         .createQueryBuilder('dnea')
+        .leftJoin('dnea.debitNote', 'dn')
         .select('COALESCE(SUM(dnea.appliedAmount), 0)')
         .where('dnea.expense_id = expense.id')
         .andWhere('dnea.organization_id = :organizationId')
+        .andWhere('(dn.expense_id IS NULL OR dn.expense_id != expense.id)') // Exclude debit notes directly linked to this expense
         .getQuery();
+
+    // Subquery to calculate debit notes directly linked to expense (via expense_id)
+    // Use total_amount (base + VAT) because Accounts Payable should reflect the full amount owed/reduced
+    // This matches the logic in Trial Balance Accounts Payable calculation
+    // Note: Using string interpolation for status values to avoid parameter binding issues in subqueries
+    const debitNotesLinkedToExpenseSubquery = `(
+      SELECT COALESCE(SUM(COALESCE(dn.total_amount, dn.base_amount + dn.vat_amount, dn.amount + dn.vat_amount)), 0)
+      FROM debit_notes dn
+      WHERE dn.expense_id = expense.id
+      AND dn.organization_id = expense.organization_id
+      AND dn.debit_note_date <= :asOfDate
+      AND dn.is_deleted = false
+      AND (
+        dn.status IN ('${DebitNoteStatus.ISSUED}', '${DebitNoteStatus.APPLIED}')
+        OR (dn.status = '${DebitNoteStatus.DRAFT}' AND dn.expense_id IS NOT NULL)
+      )
+    )`;
 
     const query = this.accrualsRepository
       .createQueryBuilder('accrual')
@@ -4174,6 +4221,7 @@ export class ReportsService {
         'expense.total_amount AS expenseTotalAmount',
         `(${expensePaymentsSubquery}) AS paidAmount`,
         `(${debitNoteExpenseApplicationsSubquery}) AS debitNoteAppliedAmount`,
+        `(${debitNotesLinkedToExpenseSubquery}) AS debitNoteLinkedAmount`,
         'accrual.expected_payment_date AS expectedDate',
         'accrual.settlement_date AS settlementDate',
         'accrual.status AS status',
@@ -4224,6 +4272,7 @@ export class ReportsService {
     const rows = await query.getRawMany();
 
     // Calculate outstanding balance for each row
+    // Outstanding = expense.total_amount - payments - debit notes applied via applications - debit notes linked via expense_id
     const payables = rows.map((row) => {
       const expenseTotal = Number(
         row.expensetotalamount || row.expenseTotalAmount || 0,
@@ -4232,11 +4281,17 @@ export class ReportsService {
       const debitNoteApplied = Number(
         row.debitnoteappliedamount || row.debitNoteAppliedAmount || 0,
       );
-      const outstanding = expenseTotal - paidAmount - debitNoteApplied;
+      const debitNoteLinked = Number(
+        row.debitnotelinkedamount || row.debitNoteLinkedAmount || 0,
+      );
+      // Deduct both applied debit notes and directly linked debit notes
+      // Allow negative balances to show credit balances (supplier owes us, not we owe them)
+      const outstanding =
+        expenseTotal - paidAmount - debitNoteApplied - debitNoteLinked;
 
       return {
         ...row,
-        outstandingAmount: outstanding > 0 ? outstanding : 0,
+        outstandingAmount: outstanding, // Show negative if debit note exceeds expense
       };
     });
 
@@ -4248,10 +4303,14 @@ export class ReportsService {
         row.outstandingAmount > 0,
     );
 
+    // Calculate total amount (sum of all outstanding, positive and negative)
+    // Positive = we owe suppliers, Negative = suppliers owe us
     const totalAmount = payables.reduce(
-      (sum, row) => sum + row.outstandingAmount,
+      (sum, row) =>
+        sum + (row.outstandingAmount > 0 ? row.outstandingAmount : 0),
       0,
     );
+    // Overdue only counts positive outstanding amounts
     const overdueAmount = overdueItems.reduce(
       (sum, row) => sum + row.outstandingAmount,
       0,
@@ -4280,11 +4339,26 @@ export class ReportsService {
           .andWhere('dnea.organization_id = :organizationId')
           .getQuery();
 
+      // Subquery to calculate debit notes directly linked to expense (for opening balance)
+      // Use total_amount (base + VAT) to match period calculation
+      const openingDebitNotesLinkedToExpenseSubquery = `(
+        SELECT COALESCE(SUM(COALESCE(dn.total_amount, dn.base_amount + dn.vat_amount, dn.amount + dn.vat_amount)), 0)
+        FROM debit_notes dn
+        WHERE dn.expense_id = expense.id
+        AND dn.organization_id = expense.organization_id
+        AND dn.debit_note_date < :startDate
+        AND dn.is_deleted = false
+        AND (
+          dn.status IN ('${DebitNoteStatus.ISSUED}', '${DebitNoteStatus.APPLIED}')
+          OR (dn.status = '${DebitNoteStatus.DRAFT}' AND dn.expense_id IS NOT NULL)
+        )
+      )`;
+
       const openingQuery = this.accrualsRepository
         .createQueryBuilder('accrual')
         .leftJoin('accrual.expense', 'expense')
         .select([
-          `SUM(GREATEST(0, COALESCE(expense.total_amount, 0) - (${openingExpensePaymentsSubquery}) - (${openingDebitNoteExpenseApplicationsSubquery}))) AS amount`,
+          `SUM(GREATEST(0, COALESCE(expense.total_amount, 0) - (${openingExpensePaymentsSubquery}) - (${openingDebitNoteExpenseApplicationsSubquery}) - (${openingDebitNotesLinkedToExpenseSubquery}))) AS amount`,
         ])
         .where('accrual.organization_id = :organizationId', {
           organizationId,
@@ -4346,8 +4420,16 @@ export class ReportsService {
         overdueCount: 0,
       };
 
-      existing.totalAmount += outstanding;
-      existing.itemCount += 1;
+      // Only add positive outstanding amounts to supplier total
+      // Negative amounts mean supplier owes us (credit balance), which should be shown separately or as 0 in summary
+      // For supplier summary, we show the net payable (positive only)
+      if (outstanding > 0) {
+        existing.totalAmount += outstanding;
+      }
+      // Count all non-zero items (both positive and negative)
+      if (outstanding !== 0) {
+        existing.itemCount += 1;
+      }
       if (isOverdue) {
         existing.overdueAmount += outstanding;
         existing.overdueCount += 1;
@@ -4357,7 +4439,9 @@ export class ReportsService {
     });
 
     // Convert supplier balances to array
+    // Filter out suppliers with 0 pending balance
     const supplierSummary = Array.from(supplierBalances.values())
+      .filter((s) => s.totalAmount > 0) // Only include suppliers with positive pending balance
       .map((s) => ({
         vendor: s.vendor,
         pendingBalance: Number(s.totalAmount.toFixed(2)),
@@ -4370,8 +4454,9 @@ export class ReportsService {
     const result = {
       asOfDate,
       period: startDate ? { startDate, endDate: asOfDate } : undefined,
+      // Include all items with non-zero outstanding (positive = we owe, negative = supplier owes us)
       items: payables
-        .filter((row) => row.outstandingAmount > 0)
+        .filter((row) => row.outstandingAmount !== 0)
         .map((row) => ({
           accrualId: row.accrualid || row.accrualId,
           vendor: row.vendor || 'N/A',
@@ -4393,7 +4478,7 @@ export class ReportsService {
         openingBalance: Number(openingBalance.toFixed(2)),
         periodAmount: Number(periodAmount.toFixed(2)),
         closingBalance: Number(closingBalance.toFixed(2)),
-        totalItems: payables.filter((r) => r.outstandingAmount > 0).length,
+        totalItems: payables.filter((r) => r.outstandingAmount !== 0).length,
         totalAmount: Number(totalAmount.toFixed(2)),
         overdueItems: overdueItems.length,
         overdueAmount: Number(overdueAmount.toFixed(2)),
@@ -5226,16 +5311,22 @@ export class ReportsService {
     );
 
     // Supplier debit notes (for VAT Input - reduces VAT Receivable)
+    // Display as NEGATIVE amounts in VAT Input (Purchases/Expenses)
+    // Example: Debit Note 1,000 base + 50 VAT should show as -1,000 amount and -50 VAT
     const vatInputDebitNoteItems = vatInputDebitNotes.map((debitNote: any) => {
-      const vatAmount = parseFloat(
+      const rawVatAmount = parseFloat(
         debitNote.vatamount || debitNote.vatAmount || '0',
       );
-      const amount = parseFloat(debitNote.amount || '0');
+      const rawAmount = parseFloat(debitNote.amount || '0');
 
-      const baseAmount = amount;
-      const grossAmount = amount + vatAmount;
+      // Use absolute values to ensure correct sign handling
+      const baseAmount = -Math.abs(rawAmount);
+      const vatAmount = -Math.abs(rawVatAmount);
+      const grossAmount = baseAmount + vatAmount;
       const vatRate =
-        baseAmount > 0 ? ((vatAmount / baseAmount) * 100).toFixed(2) : '0';
+        Math.abs(rawAmount) > 0
+          ? ((Math.abs(rawVatAmount) / Math.abs(rawAmount)) * 100).toFixed(2)
+          : '0';
       const vendorName = debitNote.vendorname || debitNote.vendorName || 'N/A';
       const trn = debitNote.trn || null;
 
@@ -5249,10 +5340,10 @@ export class ReportsService {
           'Debit Note',
         debitNoteNumber: debitNote.debitnotenumber || debitNote.debitNoteNumber,
         vendorName: vendorName,
-        amount: Number(baseAmount.toFixed(2)),
+        amount: Number(baseAmount.toFixed(2)), // Negative amount
         grossAmount: Number(grossAmount.toFixed(2)),
         vatRate: Number(vatRate),
-        vatAmount: Number(vatAmount.toFixed(2)),
+        vatAmount: Number(vatAmount.toFixed(2)), // Negative VAT
         trn: trn,
         type: 'debit_note',
       };
@@ -5264,7 +5355,7 @@ export class ReportsService {
       0,
     );
     const totalVatInputDebitNotes = vatInputDebitNoteItems.reduce(
-      (sum, item) => sum + item.vatAmount,
+      (sum, item) => sum + Math.abs(item.vatAmount), // use absolute since items are negative for display
       0,
     );
     const netVatInput = totalVatInput - totalVatInputDebitNotes;
