@@ -21,5 +21,18 @@ export default registerAs(
             rejectUnauthorized: false,
           }
         : undefined,
+    extra: {
+      // Connection pool configuration
+      max: parseInt(process.env.DB_POOL_MAX ?? '20', 10), // Maximum number of connections in the pool
+      min: parseInt(process.env.DB_POOL_MIN ?? '5', 10), // Minimum number of connections in the pool
+      idleTimeoutMillis: parseInt(
+        process.env.DB_POOL_IDLE_TIMEOUT ?? '30000',
+        10,
+      ), // Close idle connections after 30 seconds
+      connectionTimeoutMillis: parseInt(
+        process.env.DB_POOL_CONNECTION_TIMEOUT ?? '10000',
+        10,
+      ), // Connection timeout
+    },
   }),
 );
