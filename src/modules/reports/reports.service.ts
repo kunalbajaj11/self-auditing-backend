@@ -1332,24 +1332,25 @@ export class ReportsService {
         `Trial Balance - Supplier debit note VAT found: ${supplierDebitNoteVat}, rawRow=${JSON.stringify(supplierDebitNoteVatRow)}`,
       );
 
-      const netVatReceivable = vatReceivableDebit - supplierDebitNoteVat;
+      // Note: VAT from journal entries will be added after journal entries are processed
+      // We'll merge it with the existing VAT Receivable entry if it exists
+      const initialVatReceivableDebit = vatReceivableDebit;
+      const initialNetVatReceivable = vatReceivableDebit - supplierDebitNoteVat;
+
       this.logger.debug(
-        `Trial Balance - VAT Receivable calculation: vatReceivableDebit=${vatReceivableDebit}, supplierDebitNoteVat=${supplierDebitNoteVat}, netVatReceivable=${netVatReceivable}`,
-      );
-      this.logger.debug(
-        `Trial Balance - VAT Receivable breakdown: Original VAT from expenses=${vatReceivableDebit}, Debit Note VAT deduction=${supplierDebitNoteVat}, Net VAT Receivable (balance)=${netVatReceivable}`,
+        `Trial Balance - Initial VAT Receivable calculation: vatReceivableDebit=${vatReceivableDebit}, supplierDebitNoteVat=${supplierDebitNoteVat}, netVatReceivable=${initialNetVatReceivable}`,
       );
 
-      if (netVatReceivable > 0 || supplierDebitNoteVat > 0) {
+      if (initialNetVatReceivable > 0 || supplierDebitNoteVat > 0) {
         accounts.push({
           accountName: 'VAT Receivable (Input VAT)',
           accountType: 'Asset',
-          debit: vatReceivableDebit, // Original VAT from expenses
+          debit: initialVatReceivableDebit, // Original VAT from expenses
           credit: supplierDebitNoteVat, // Deduction from debit notes
-          balance: netVatReceivable, // Net VAT after deduction (this is what should show in Trial Balance)
+          balance: initialNetVatReceivable, // Net VAT after deduction
         });
         this.logger.debug(
-          `Trial Balance - Added VAT Receivable account: debit=${vatReceivableDebit} (original), credit=${supplierDebitNoteVat} (deduction), balance=${netVatReceivable} (net - this is the final amount shown)`,
+          `Trial Balance - Added VAT Receivable account: debit=${initialVatReceivableDebit} (original), credit=${supplierDebitNoteVat} (deduction), balance=${initialNetVatReceivable} (net - this is the final amount shown)`,
         );
       }
 
@@ -1691,12 +1692,14 @@ export class ReportsService {
       // Note: We do NOT exclude entries that touch Cash/Bank here; instead we skip posting to Cash/Bank
       // in the aggregation (Cash/Bank are handled separately). This avoids missing the non-cash side
       // of cash/bank journal entries (e.g., custom expense paid in cash).
+      // IMPORTANT: VAT should be posted separately to VAT Receivable, not included in asset/expense accounts
       const journalEntriesQuery = this.journalEntriesRepository
         .createQueryBuilder('entry')
         .select([
           'entry.debit_account AS debitAccount',
           'entry.credit_account AS creditAccount',
           'SUM(entry.amount) AS amount',
+          'SUM(COALESCE(entry.vat_amount, 0)) AS vatAmount',
         ])
         .where('entry.organization_id = :organizationId', { organizationId })
         .andWhere('entry.entry_date >= :startDate', { startDate })
@@ -1707,11 +1710,14 @@ export class ReportsService {
       const journalRows = await journalEntriesQuery.getRawMany();
 
       // Aggregate by account (debit side and credit side separately)
+      // Also track VAT separately to post to VAT Receivable
       const accountMap = new Map<string, { debit: number; credit: number }>();
+      const journalEntryVatReceivable = { amount: 0 }; // Track VAT from journal entries
       const customLedgerIds: string[] = [];
 
       journalRows.forEach((row) => {
         const amount = Number(row.amount || 0);
+        const vatAmount = Number(row.vatamount || row.vatAmount || 0);
         const debitAccount = row.debitaccount || row.debitAccount;
         const creditAccount = row.creditaccount || row.creditAccount;
 
@@ -1720,8 +1726,9 @@ export class ReportsService {
         const creditLedgerId = this.parseLedgerAccountId(creditAccount);
         if (creditLedgerId) customLedgerIds.push(creditLedgerId);
 
-        // Add to debit account (including liability accounts when they are debited)
-        // This ensures liability accounts appear on the debit side when debited
+        // Add base amount to debit account
+        // If credit account is Accounts Payable, VAT is part of what you owe (not a receivable)
+        // Otherwise, VAT goes to VAT Receivable (Input VAT)
         if (
           debitAccount &&
           debitAccount !== 'cash' &&
@@ -1733,9 +1740,18 @@ export class ReportsService {
           };
           existing.debit += amount;
           accountMap.set(debitAccount, existing);
+
+          // If there's VAT on the debit side AND credit account is NOT Accounts Payable,
+          // add it to VAT Receivable (Input VAT)
+          // If credit account IS Accounts Payable, VAT is already included in AP (what you owe)
+          if (vatAmount > 0 && creditAccount !== 'accounts_payable') {
+            journalEntryVatReceivable.amount += vatAmount;
+          }
         }
 
-        // Add to credit account (including liability accounts when they are credited)
+        // Add amount to credit account
+        // For Accounts Payable: include VAT (you owe the total including VAT)
+        // For other accounts: base amount only (VAT handled separately)
         if (
           creditAccount &&
           creditAccount !== 'cash' &&
@@ -1745,8 +1761,17 @@ export class ReportsService {
             debit: 0,
             credit: 0,
           };
-          existing.credit += amount;
+
+          // If this is Accounts Payable, include VAT (total amount owed)
+          // Otherwise, just base amount
+          const isAccountsPayable = creditAccount === 'accounts_payable';
+          const creditAmount = isAccountsPayable ? amount + vatAmount : amount;
+
+          existing.credit += creditAmount;
           accountMap.set(creditAccount, existing);
+
+          // If credit account is NOT Accounts Payable and has VAT, it might be Output VAT
+          // But typically journal entries don't have VAT on credit side for expenses/assets
         }
       });
 
@@ -1761,6 +1786,18 @@ export class ReportsService {
       // that was added earlier from invoices/debit notes.
       const existingARIndex = accounts.findIndex(
         (acc) => acc.accountName === 'Accounts Receivable',
+      );
+      const existingAPIndex = accounts.findIndex(
+        (acc) => acc.accountName === 'Accounts Payable',
+      );
+      const existingRevenueIndex = accounts.findIndex(
+        (acc) => acc.accountName === 'Sales Revenue',
+      );
+      const existingVatPayableIndex = accounts.findIndex(
+        (acc) => acc.accountName === 'VAT Payable (Output VAT)',
+      );
+      const existingVatReceivableIndex = accounts.findIndex(
+        (acc) => acc.accountName === 'VAT Receivable (Input VAT)',
       );
 
       accountMap.forEach((balances, accountCode) => {
@@ -1812,6 +1849,39 @@ export class ReportsService {
             return; // Skip adding duplicate entry
           }
 
+          // Merge common system accounts that can be produced by both the main TB logic
+          // (invoices/expenses/accruals) and the journal-entry aggregation.
+          const existingSystemIndex =
+            accountName === 'Accounts Payable'
+              ? existingAPIndex
+              : accountName === 'Sales Revenue'
+                ? existingRevenueIndex
+                : accountName === 'VAT Payable (Output VAT)'
+                  ? existingVatPayableIndex
+                  : accountName === 'VAT Receivable (Input VAT)'
+                    ? existingVatReceivableIndex
+                    : -1;
+
+          if (existingSystemIndex >= 0) {
+            const existing = accounts[existingSystemIndex];
+            existing.debit += balances.debit;
+            existing.credit += balances.credit;
+
+            const isCreditAccount =
+              existing.accountType === 'Equity' ||
+              existing.accountType === 'Revenue' ||
+              existing.accountType === 'Liability';
+            existing.balance = isCreditAccount
+              ? existing.credit - existing.debit
+              : existing.debit - existing.credit;
+
+            this.logger.debug(
+              `Merged journal entry ${accountName}: debit=${balances.debit}, credit=${balances.credit}, ` +
+                `into existing entry, organizationId=${organizationId}`,
+            );
+            return; // Skip adding duplicate entry
+          }
+
           const isCreditAccount =
             accountType === 'Equity' ||
             accountType === 'Revenue' ||
@@ -1829,6 +1899,37 @@ export class ReportsService {
           });
         }
       });
+
+      // Now add VAT from journal entries to VAT Receivable (Input VAT)
+      // VAT should be posted separately, not included in asset/expense accounts
+      if (journalEntryVatReceivable.amount > 0) {
+        const existingVatReceivableIndex = accounts.findIndex(
+          (acc) => acc.accountName === 'VAT Receivable (Input VAT)',
+        );
+
+        if (existingVatReceivableIndex >= 0) {
+          // Merge journal entry VAT with existing VAT Receivable
+          const existing = accounts[existingVatReceivableIndex];
+          existing.debit += journalEntryVatReceivable.amount;
+          existing.balance = existing.debit - existing.credit;
+          this.logger.debug(
+            `Merged journal entry VAT into VAT Receivable: added ${journalEntryVatReceivable.amount}, ` +
+              `new debit=${existing.debit}, new balance=${existing.balance}, organizationId=${organizationId}`,
+          );
+        } else {
+          // Create new VAT Receivable entry if it doesn't exist
+          accounts.push({
+            accountName: 'VAT Receivable (Input VAT)',
+            accountType: 'Asset',
+            debit: journalEntryVatReceivable.amount,
+            credit: 0,
+            balance: journalEntryVatReceivable.amount,
+          });
+          this.logger.debug(
+            `Added VAT Receivable from journal entries: ${journalEntryVatReceivable.amount}, organizationId=${organizationId}`,
+          );
+        }
+      }
 
       // For liability accounts that only have credits (no debits),
       // also add them to the debit list with debit: 0 so they appear in both lists
@@ -1916,20 +2017,38 @@ export class ReportsService {
         shareCapitalOpening + shareCapitalPeriodAmount;
 
       // Always add Share Capital if there's any balance
+      // Check if it already exists from journal entries to avoid duplicates
+      const existingShareCapitalIndex = accounts.findIndex(
+        (acc) => acc.accountName === 'Share Capital',
+      );
       if (
         shareCapitalOpening > 0 ||
         shareCapitalPeriodAmount > 0 ||
         shareCapitalClosing > 0
       ) {
-        accounts.push({
-          accountName: 'Share Capital',
-          accountType: 'Equity',
-          debit: 0,
-          // Credit column should only show period transactions, not opening balance
-          // Opening balance is tracked separately in openingBalances map
-          credit: shareCapitalPeriodAmount,
-          balance: shareCapitalClosing, // Closing balance (positive = credit for equity)
-        });
+        if (existingShareCapitalIndex >= 0) {
+          // Merge with existing entry from journal entries
+          const existing = accounts[existingShareCapitalIndex];
+          // IMPORTANT: the existing row already contains the period credit from the JE aggregation.
+          // Do NOT add `shareCapitalPeriodAmount` again, otherwise closing totals double count.
+          // We only ensure the closing balance reflects opening + period.
+          existing.accountType = 'Equity';
+          existing.balance = shareCapitalClosing;
+          this.logger.debug(
+            `Merged Share Capital: periodAmount=${shareCapitalPeriodAmount}, ` +
+              `closingBalance=${shareCapitalClosing}, organizationId=${organizationId}`,
+          );
+        } else {
+          accounts.push({
+            accountName: 'Share Capital',
+            accountType: 'Equity',
+            debit: 0,
+            // Credit column should only show period transactions, not opening balance
+            // Opening balance is tracked separately in openingBalances map
+            credit: shareCapitalPeriodAmount,
+            balance: shareCapitalClosing, // Closing balance (positive = credit for equity)
+          });
+        }
       }
 
       // Add Owner/Shareholder Account if it exists (always show if there's any balance)
@@ -1946,20 +2065,36 @@ export class ReportsService {
         ownerAccountOpening + ownerAccountPeriodAmount;
 
       // Always add Owner/Shareholder Account if there's any balance
+      // Check if it already exists from journal entries to avoid duplicates
+      const existingOwnerAccountIndex = accounts.findIndex(
+        (acc) => acc.accountName === 'Owner/Shareholder Account',
+      );
       if (
         ownerAccountOpening > 0 ||
         ownerAccountPeriodAmount > 0 ||
         ownerAccountClosing > 0
       ) {
-        accounts.push({
-          accountName: 'Owner/Shareholder Account',
-          accountType: 'Equity',
-          debit: 0,
-          // Credit column should only show period transactions, not opening balance
-          // Opening balance is tracked separately in openingBalances map
-          credit: ownerAccountPeriodAmount,
-          balance: ownerAccountClosing, // Closing balance (positive = credit for equity)
-        });
+        if (existingOwnerAccountIndex >= 0) {
+          // Merge with existing entry from journal entries
+          const existing = accounts[existingOwnerAccountIndex];
+          // Same reasoning as Share Capital: JE aggregation already includes period credit.
+          existing.accountType = 'Equity';
+          existing.balance = ownerAccountClosing;
+          this.logger.debug(
+            `Merged Owner/Shareholder Account: periodAmount=${ownerAccountPeriodAmount}, ` +
+              `closingBalance=${ownerAccountClosing}, organizationId=${organizationId}`,
+          );
+        } else {
+          accounts.push({
+            accountName: 'Owner/Shareholder Account',
+            accountType: 'Equity',
+            debit: 0,
+            // Credit column should only show period transactions, not opening balance
+            // Opening balance is tracked separately in openingBalances map
+            credit: ownerAccountPeriodAmount,
+            balance: ownerAccountClosing, // Closing balance (positive = credit for equity)
+          });
+        }
       }
 
       const openingBalances = new Map<
