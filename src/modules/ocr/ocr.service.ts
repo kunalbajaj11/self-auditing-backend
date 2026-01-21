@@ -3,7 +3,11 @@ import { ConfigService } from '@nestjs/config';
 import { ImageAnnotatorClient } from '@google-cloud/vision';
 import * as path from 'path';
 import * as fs from 'fs';
+import { exec } from 'child_process';
+import { promisify } from 'util';
 import { CategoryDetectionService } from './category-detection.service';
+
+const execAsync = promisify(exec);
 
 export interface OcrResult {
   vendorName?: string;
@@ -1089,8 +1093,8 @@ export class OcrService {
 
   /**
    * Convert PDF pages to image buffers
-   * Uses pdf2pic (GraphicsMagick/ImageMagick) for reliable PDF to image conversion
-   * Falls back to pdfjs-dist if pdf2pic is not available
+   * Uses Poppler's pdftoppm for reliable PDF to image conversion
+   * Falls back to pdfjs-dist if pdftoppm is not available
    */
   private async convertPdfPagesToImages(
     pdfBuffer: Buffer,
@@ -1101,17 +1105,17 @@ export class OcrService {
       `[OCR] [PDF-TO-IMAGE] PDF buffer size: ${(pdfBuffer.length / 1024).toFixed(2)} KB`,
     );
 
-    // Try pdf2pic first (most reliable - uses GraphicsMagick/ImageMagick)
-    // Note: pdf2pic requires GraphicsMagick or ImageMagick to be installed on the system
+    // Try Poppler's pdftoppm first (most reliable - uses Poppler library)
+    // Note: pdftoppm requires poppler-utils to be installed on the system
     try {
       console.log(
-        '[OCR] [PDF-TO-IMAGE] Attempting conversion with pdf2pic (GraphicsMagick/ImageMagick)...',
+        '[OCR] [PDF-TO-IMAGE] Attempting conversion with Poppler (pdftoppm)...',
       );
       console.log(
-        '[OCR] [PDF-TO-IMAGE] Note: Requires GraphicsMagick or ImageMagick to be installed',
+        '[OCR] [PDF-TO-IMAGE] Note: Requires poppler-utils to be installed',
       );
 
-      // pdf2pic requires a file path, so we need to save the buffer temporarily
+      // pdftoppm requires a file path, so we need to save the buffer temporarily
       const debugDir = this.getOcrDebugDir();
       const tempPdfPath = path.join(
         debugDir,
@@ -1125,150 +1129,118 @@ export class OcrService {
       );
 
       try {
-        // Import pdf2pic
-        const pdf2picModule = await import('pdf2pic');
-        const { fromPath } = pdf2picModule.default || pdf2picModule;
-
-        // Configure pdf2pic with high quality settings for OCR
-        const baseFilename = originalFileName
-          ? originalFileName.replace(/\.pdf$/i, '')
-          : 'document';
-
-        // pdf2pic configuration - don't use responseType: 'buffer' as it may return empty buffers
-        // Instead, let it save to file and read the file
-        const convert = fromPath(tempPdfPath, {
-          density: 300, // 300 DPI for high quality OCR
-          saveFilename: baseFilename,
-          savePath: debugDir,
-          format: 'png',
-          width: 2550, // High resolution
-          height: 3300,
-          // Don't use responseType: 'buffer' - read from file instead
-        });
-
+        // Use pdftoppm with high quality settings for OCR
+        // pdftoppm creates files like: output-01.png, output-02.png, etc.
+        const outputPrefix = path.join(debugDir, `page_${Date.now()}`);
+        
         console.log(
-          '[OCR] [PDF-TO-IMAGE] Converting PDF pages with pdf2pic...',
+          '[OCR] [PDF-TO-IMAGE] Converting PDF pages with pdftoppm...',
+        );
+        console.log(
+          `[OCR] [PDF-TO-IMAGE] Command: pdftoppm -r 300 -png -aa yes -aaVector yes "${tempPdfPath}" "${outputPrefix}"`,
         );
 
-        // Convert first 5 pages (limit for performance)
-        const imageBuffers: Buffer[] = [];
-        const maxPages = 5;
-        const tempImageFiles: string[] = [];
-
-        for (let pageNum = 1; pageNum <= maxPages; pageNum++) {
-          try {
-            console.log(`[OCR] [PDF-TO-IMAGE] Converting page ${pageNum}...`);
-
-            // pdf2pic can return buffer or path depending on configuration
-            // Try to get buffer first, fallback to reading file
-            let imageBuffer: Buffer;
-            let imagePath: string | null = null;
-
-            // pdf2pic returns file path, not buffer (even with responseType: 'buffer' it may be empty)
-            // So we always read from the file path
-            const result: any = await convert(pageNum);
-
-            console.log(
-              `[OCR] [PDF-TO-IMAGE] pdf2pic result for page ${pageNum}:`,
-              {
-                hasResult: !!result,
-                hasPath: !!(result && result.path),
-                path: result?.path,
-                resultKeys: result ? Object.keys(result) : [],
-              },
+        // Execute pdftoppm command
+        // -r 300: 300 DPI resolution for high quality OCR
+        // -png: Output PNG format
+        // -aa yes: Enable anti-aliasing
+        // -aaVector yes: Enable vector anti-aliasing
+        // Output will be: outputPrefix-01.png, outputPrefix-02.png, etc.
+        let stdout = '';
+        let stderr = '';
+        let commandSucceeded = false;
+        try {
+          const result = await execAsync(
+            `pdftoppm -r 300 -png -aa yes -aaVector yes "${tempPdfPath}" "${outputPrefix}"`,
+          );
+          stdout = result.stdout || '';
+          stderr = result.stderr || '';
+          commandSucceeded = true;
+        } catch (execError: any) {
+          // execAsync throws on non-zero exit code, but pdftoppm might still create files
+          stdout = execError.stdout || '';
+          stderr = execError.stderr || '';
+          console.warn(
+            `[OCR] [PDF-TO-IMAGE] pdftoppm command failed: ${execError.message}`,
+          );
+          if (stderr) {
+            console.warn(
+              `[OCR] [PDF-TO-IMAGE] pdftoppm stderr: ${stderr}`,
             );
+          }
+        }
 
-            // pdf2pic typically returns { path: string } or saves to expected location
-            let imageFilePath: string | null = null;
+        if (stderr && !stderr.includes('Writing')) {
+          console.warn(
+            `[OCR] [PDF-TO-IMAGE] pdftoppm stderr: ${stderr}`,
+          );
+        }
 
-            if (result && result.path && typeof result.path === 'string') {
-              imageFilePath = result.path;
-            } else {
-              // Try expected file path
-              const expectedPath = path.join(
-                debugDir,
-                `${baseFilename}.${pageNum}.png`,
-              );
-              if (fs.existsSync(expectedPath)) {
-                imageFilePath = expectedPath;
-              }
-            }
+        console.log(
+          `[OCR] [PDF-IMAGE] pdftoppm stdout: ${stdout || '(no output)'}`,
+        );
 
-            if (imageFilePath && fs.existsSync(imageFilePath)) {
-              // Read the image file
-              imageBuffer = await fs.promises.readFile(imageFilePath);
-              imagePath = imageFilePath;
-              tempImageFiles.push(imageFilePath);
+        // Wait a moment for files to be written to disk
+        await new Promise((resolve) => setTimeout(resolve, 200));
+
+        // List directory to see what files were actually created
+        const outputBaseName = path.basename(outputPrefix);
+        let matchingFiles: string[] = [];
+        try {
+          const dirFiles = await fs.promises.readdir(debugDir);
+          matchingFiles = dirFiles
+            .filter((f) => f.startsWith(outputBaseName) && f.endsWith('.png'))
+            .sort((a, b) => {
+              // Natural sort: extract page numbers and compare
+              const numA = parseInt(a.match(/-(\d+)\.png$/)?.[1] || '0');
+              const numB = parseInt(b.match(/-(\d+)\.png$/)?.[1] || '0');
+              return numA - numB;
+            });
+          console.log(
+            `[OCR] [PDF-TO-IMAGE] Files in directory matching prefix "${outputBaseName}": ${matchingFiles.length > 0 ? matchingFiles.join(', ') : '(none)'}`,
+          );
+          
+          // If we found files but they don't match our expected pattern, try to use them
+          if (matchingFiles.length > 0 && !commandSucceeded) {
+            console.log(
+              `[OCR] [PDF-TO-IMAGE] Found ${matchingFiles.length} file(s) despite command error, attempting to use them`,
+            );
+          }
+        } catch (dirError: any) {
+          console.warn(
+            `[OCR] [PDF-TO-IMAGE] Could not list directory: ${dirError.message}`,
+          );
+        }
+
+        // pdftoppm creates files with pattern: prefix-01.png, prefix-02.png, or prefix-1.png, prefix-2.png
+        // Find all generated image files
+        const imageBuffers: Buffer[] = [];
+        const tempImageFiles: string[] = [];
+        const maxPages = 5; // Limit to first 5 pages for performance
+
+        // If we found files from directory listing, use those directly
+        if (matchingFiles.length > 0) {
+          console.log(
+            `[OCR] [PDF-TO-IMAGE] Using ${matchingFiles.length} file(s) found in directory listing`,
+          );
+          for (let i = 0; i < Math.min(matchingFiles.length, maxPages); i++) {
+            const fileName = matchingFiles[i];
+            const imagePath = path.join(debugDir, fileName);
+            const pageNum = i + 1;
+
+            try {
               console.log(
-                `[OCR] [PDF-TO-IMAGE] Read image from file: ${imageFilePath} (${(imageBuffer.length / 1024).toFixed(2)} KB)`,
+                `[OCR] [PDF-TO-IMAGE] Reading page ${pageNum} from: ${imagePath}`,
               );
-            } else if (result && result.buffer && result.buffer.length > 0) {
-              // Fallback: if buffer is provided and not empty
-              const bufferData = result.buffer;
-              if (Buffer.isBuffer(bufferData)) {
-                imageBuffer = bufferData;
-              } else if (bufferData instanceof Uint8Array) {
-                imageBuffer = Buffer.from(bufferData);
-              } else {
-                imageBuffer = Buffer.from(bufferData);
-              }
-              console.log(
-                `[OCR] [PDF-TO-IMAGE] Got buffer from pdf2pic: ${imageBuffer.length} bytes`,
-              );
-            } else {
-              throw new Error(
-                `No image data returned for page ${pageNum}. Result: ${JSON.stringify(result)}`,
-              );
-            }
 
-            if (imageBuffer && imageBuffer.length > 0) {
-              // Got file path, read the file
-              imagePath = result.path;
-              imageBuffer = await fs.promises.readFile(result.path);
-              tempImageFiles.push(result.path); // Track for cleanup
-              console.log(
-                `[OCR] [PDF-TO-IMAGE] Read image from file: ${result.path}`,
-              );
-            } else if (
-              result &&
-              typeof result === 'object' &&
-              'base64' in result &&
-              typeof result.base64 === 'string'
-            ) {
-              // Got base64, convert to buffer
-              imageBuffer = Buffer.from(result.base64, 'base64');
-              console.log(
-                `[OCR] [PDF-TO-IMAGE] Got base64 from pdf2pic, converted to buffer`,
-              );
-            } else {
-              // Try to find the file with expected name
-              const expectedPath = path.join(
-                debugDir,
-                `${baseFilename}.${pageNum}.png`,
-              );
-              if (fs.existsSync(expectedPath)) {
-                imagePath = expectedPath;
-                imageBuffer = await fs.promises.readFile(expectedPath);
-                tempImageFiles.push(expectedPath);
-                console.log(
-                  `[OCR] [PDF-TO-IMAGE] Found image at expected path: ${expectedPath}`,
-                );
-              } else {
-                throw new Error(`No image data returned for page ${pageNum}`);
-              }
-            }
+              const imageBuffer = await fs.promises.readFile(imagePath);
+              tempImageFiles.push(imagePath);
 
-            if (imageBuffer) {
               console.log(
                 `[OCR] [PDF-TO-IMAGE] ✓ Page ${pageNum} converted: ${(imageBuffer.length / 1024).toFixed(2)} KB`,
               );
-              if (imagePath) {
-                console.log(
-                  `[OCR] [PDF-TO-IMAGE] Image saved to: ${imagePath}`,
-                );
-              }
 
-              // Verify image is not blank by checking PNG header and sample pixels
+              // Verify image is not blank by checking PNG header
               let hasContent = true;
               if (imageBuffer.length > 8) {
                 // Check PNG header
@@ -1279,12 +1251,16 @@ export class OcrService {
                   imageBuffer[3] === 0x47;
 
                 if (isPng) {
-                  // Sample first 1000 bytes (excluding header) for non-white content
+                  // Sample pixels for non-white content
                   const sampleStart = Math.min(100, imageBuffer.length);
                   const sampleEnd = Math.min(1100, imageBuffer.length);
                   const sample = imageBuffer.slice(sampleStart, sampleEnd);
                   hasContent = sample.some(
                     (byte: number) => byte !== 0xff && byte !== 0x00,
+                  );
+                } else {
+                  console.warn(
+                    `[OCR] [PDF-TO-IMAGE] ⚠️ Warning: Page ${pageNum} may not be a valid PNG`,
                   );
                 }
               }
@@ -1310,10 +1286,10 @@ export class OcrService {
                 {
                   pageNumber: pageNum,
                   sizeKB: imageBuffer.length / 1024,
-                  method: 'pdf2pic',
+                  method: 'pdftoppm',
                   hasContent: hasContent,
                   originalFileName: originalFileName,
-                  tempPath: imagePath || undefined,
+                  tempPath: imagePath,
                 },
               );
 
@@ -1324,39 +1300,187 @@ export class OcrService {
               }
 
               imageBuffers.push(imageBuffer);
-            } else {
+            } catch (readError: any) {
               console.warn(
-                `[OCR] [PDF-TO-IMAGE] Page ${pageNum} conversion returned no path`,
+                `[OCR] [PDF-TO-IMAGE] Failed to read page ${pageNum}: ${readError.message}`,
               );
-              // Try to check if file exists with expected name
-              const expectedPath = path.join(
-                debugDir,
-                `${baseFilename}.${pageNum}.png`,
+              // Continue to next page
+            }
+          }
+        } else {
+          // Fallback: try to find files by pattern (for backwards compatibility)
+          for (let pageNum = 1; pageNum <= maxPages; pageNum++) {
+          // pdftoppm may use either zero-padded (01, 02) or single-digit (1, 2) page numbers
+          // Try both patterns
+          const pageNumberZeroPadded = pageNum.toString().padStart(2, '0');
+          const pageNumberSingle = pageNum.toString();
+          const imagePathZeroPadded = `${outputPrefix}-${pageNumberZeroPadded}.png`;
+          const imagePathSingle = `${outputPrefix}-${pageNumberSingle}.png`;
+
+          // Check which pattern exists
+          let imagePath: string | null = null;
+          if (fs.existsSync(imagePathZeroPadded)) {
+            imagePath = imagePathZeroPadded;
+            console.log(
+              `[OCR] [PDF-TO-IMAGE] Found page ${pageNum} with zero-padded pattern: ${imagePath}`,
+            );
+          } else if (fs.existsSync(imagePathSingle)) {
+            imagePath = imagePathSingle;
+            console.log(
+              `[OCR] [PDF-TO-IMAGE] Found page ${pageNum} with single-digit pattern: ${imagePath}`,
+            );
+          } else {
+            console.log(
+              `[OCR] [PDF-TO-IMAGE] Checking for page ${pageNum} at: ${imagePathZeroPadded} or ${imagePathSingle}`,
+            );
+          }
+
+          if (imagePath) {
+            try {
+              console.log(
+                `[OCR] [PDF-TO-IMAGE] Reading page ${pageNum} from: ${imagePath}`,
               );
-              if (fs.existsSync(expectedPath)) {
-                const imageBuffer = await fs.promises.readFile(expectedPath);
-                tempImageFiles.push(expectedPath);
-                imageBuffers.push(imageBuffer);
-                console.log(
-                  `[OCR] [PDF-TO-IMAGE] ✓ Found page ${pageNum} at expected path`,
+
+              const imageBuffer = await fs.promises.readFile(imagePath);
+              tempImageFiles.push(imagePath);
+
+              console.log(
+                `[OCR] [PDF-TO-IMAGE] ✓ Page ${pageNum} converted: ${(imageBuffer.length / 1024).toFixed(2)} KB`,
+              );
+
+              // Verify image is not blank by checking PNG header
+              let hasContent = true;
+              if (imageBuffer.length > 8) {
+                // Check PNG header
+                const isPng =
+                  imageBuffer[0] === 0x89 &&
+                  imageBuffer[1] === 0x50 &&
+                  imageBuffer[2] === 0x4e &&
+                  imageBuffer[3] === 0x47;
+
+                if (isPng) {
+                  // Sample pixels for non-white content
+                  const sampleStart = Math.min(100, imageBuffer.length);
+                  const sampleEnd = Math.min(1100, imageBuffer.length);
+                  const sample = imageBuffer.slice(sampleStart, sampleEnd);
+                  hasContent = sample.some(
+                    (byte: number) => byte !== 0xff && byte !== 0x00,
+                  );
+                } else {
+                  console.warn(
+                    `[OCR] [PDF-TO-IMAGE] ⚠️ Warning: Page ${pageNum} may not be a valid PNG`,
+                  );
+                }
+              }
+
+              if (!hasContent) {
+                console.warn(
+                  `[OCR] [PDF-TO-IMAGE] ⚠️ Warning: Page ${pageNum} may be blank`,
                 );
               } else {
-                break; // Stop if no more pages
+                console.log(
+                  `[OCR] [PDF-TO-IMAGE] ✓ Page ${pageNum} has content`,
+                );
+              }
+
+              // Copy to final debug location with better naming
+              const imageFilename = originalFileName
+                ? `${originalFileName.replace(/\.pdf$/i, '')}_page_${pageNum}.png`
+                : `page_${pageNum}.png`;
+
+              const finalDebugPath = await this.saveDebugImage(
+                imageBuffer,
+                imageFilename,
+                {
+                  pageNumber: pageNum,
+                  sizeKB: imageBuffer.length / 1024,
+                  method: 'pdftoppm',
+                  hasContent: hasContent,
+                  originalFileName: originalFileName,
+                  tempPath: imagePath,
+                },
+              );
+
+              if (finalDebugPath) {
+                console.log(
+                  `[OCR] [PDF-TO-IMAGE] ✓ Saved debug image: ${finalDebugPath}`,
+                );
+              }
+
+              imageBuffers.push(imageBuffer);
+            } catch (readError: any) {
+              console.warn(
+                `[OCR] [PDF-TO-IMAGE] Failed to read page ${pageNum}: ${readError.message}`,
+              );
+              // Continue to next page
+            }
+          } else {
+            // No more pages found
+            if (pageNum === 1 && imageBuffers.length === 0) {
+              // First page not found - try simpler command as fallback
+              console.log(
+                `[OCR] [PDF-TO-IMAGE] No files found with complex flags, trying simpler command...`,
+              );
+              try {
+                const simpleResult = await execAsync(
+                  `pdftoppm -png "${tempPdfPath}" "${outputPrefix}"`,
+                );
+                console.log(
+                  `[OCR] [PDF-TO-IMAGE] Simple command stdout: ${simpleResult.stdout || '(no output)'}`,
+                );
+                if (simpleResult.stderr) {
+                  console.log(
+                    `[OCR] [PDF-TO-IMAGE] Simple command stderr: ${simpleResult.stderr}`,
+                  );
+                }
+                // Wait for files
+                await new Promise((resolve) => setTimeout(resolve, 200));
+                // Check again for page 1 - try both patterns
+                const simpleImagePathZeroPadded = `${outputPrefix}-01.png`;
+                const simpleImagePathSingle = `${outputPrefix}-1.png`;
+                let simpleImagePath: string | null = null;
+                
+                if (fs.existsSync(simpleImagePathZeroPadded)) {
+                  simpleImagePath = simpleImagePathZeroPadded;
+                } else if (fs.existsSync(simpleImagePathSingle)) {
+                  simpleImagePath = simpleImagePathSingle;
+                }
+                
+                if (simpleImagePath) {
+                  console.log(
+                    `[OCR] [PDF-TO-IMAGE] ✓ Simple command worked! Reading page 1 from: ${simpleImagePath}`,
+                  );
+                  try {
+                    const imageBuffer = await fs.promises.readFile(simpleImagePath);
+                    tempImageFiles.push(simpleImagePath);
+                    console.log(
+                      `[OCR] [PDF-TO-IMAGE] ✓ Page 1 converted: ${(imageBuffer.length / 1024).toFixed(2)} KB`,
+                    );
+                    imageBuffers.push(imageBuffer);
+                    // Continue to check for more pages
+                    continue;
+                  } catch (readError: any) {
+                    console.warn(
+                      `[OCR] [PDF-TO-IMAGE] Failed to read page 1: ${readError.message}`,
+                    );
+                  }
+                }
+              } catch (simpleError: any) {
+                console.warn(
+                  `[OCR] [PDF-TO-IMAGE] Simple command also failed: ${simpleError.message}`,
+                );
               }
             }
-          } catch (pageError: any) {
-            console.warn(
-              `[OCR] [PDF-TO-IMAGE] Failed to convert page ${pageNum}: ${pageError.message}`,
+            // No more pages found
+            console.log(
+              `[OCR] [PDF-TO-IMAGE] No more pages found after page ${pageNum - 1}`,
             );
-            // If first page fails, it might mean pdf2pic isn't working
-            if (pageNum === 1) {
-              throw pageError; // If first page fails, throw error
-            }
-            break; // Stop if a page fails
+            break;
           }
         }
+        } // End of else block for fallback pattern matching
 
-        // Clean up temporary image files created by pdf2pic
+        // Clean up temporary image files created by pdftoppm
         for (const tempFile of tempImageFiles) {
           try {
             await fs.promises.unlink(tempFile);
@@ -1382,14 +1506,16 @@ export class OcrService {
 
         if (imageBuffers.length > 0) {
           console.log(
-            `[OCR] [PDF-TO-IMAGE] ✓ Successfully converted ${imageBuffers.length} page(s) using pdf2pic`,
+            `[OCR] [PDF-TO-IMAGE] ✓ Successfully converted ${imageBuffers.length} page(s) using pdftoppm`,
           );
           return imageBuffers;
+        } else {
+          throw new Error('No pages were converted by pdftoppm');
         }
-      } catch (pdf2picError: any) {
-        const errorMessage = pdf2picError.message || String(pdf2picError);
+      } catch (pdftoppmError: any) {
+        const errorMessage = pdftoppmError.message || String(pdftoppmError);
         console.error(
-          `[OCR] [PDF-TO-IMAGE] pdf2pic conversion error: ${errorMessage}`,
+          `[OCR] [PDF-TO-IMAGE] pdftoppm conversion error: ${errorMessage}`,
         );
         // Clean up temp file on error
         try {
@@ -1397,68 +1523,50 @@ export class OcrService {
         } catch {
           // Ignore cleanup errors
         }
-        throw pdf2picError;
+        throw pdftoppmError;
       }
-    } catch (pdf2picError: any) {
-      const errorMessage = pdf2picError.message || String(pdf2picError);
-      console.error(`[OCR] [PDF-TO-IMAGE] pdf2pic failed: ${errorMessage}`);
+    } catch (pdftoppmError: any) {
+      const errorMessage = pdftoppmError.message || String(pdftoppmError);
+      console.error(`[OCR] [PDF-TO-IMAGE] pdftoppm failed: ${errorMessage}`);
 
-      // Check for common GraphicsMagick/ImageMagick errors
-      const isGraphicsMagickError =
-        errorMessage.includes('GraphicsMagick') ||
-        errorMessage.includes('ImageMagick') ||
-        errorMessage.includes('gm') ||
-        errorMessage.includes('convert') ||
+      // Check for common Poppler errors
+      const isPopplerError =
+        errorMessage.includes('pdftoppm') ||
         errorMessage.includes('not found') ||
         errorMessage.includes('ENOENT') ||
         errorMessage.includes('spawn') ||
-        errorMessage.includes('command not found');
+        errorMessage.includes('command not found') ||
+        errorMessage.includes('No such file or directory');
 
-      // Check for Ghostscript errors
-      const isGhostscriptError =
-        errorMessage.includes('gs') ||
-        errorMessage.includes('Ghostscript') ||
-        errorMessage.includes('Postscript delegate') ||
-        errorMessage.includes('Postscript delegate failed');
-
-      if (isGraphicsMagickError || isGhostscriptError) {
+      if (isPopplerError) {
         console.error(
           `[OCR] [PDF-TO-IMAGE] ========================================`,
         );
-        console.error(`[OCR] [PDF-TO-IMAGE] Missing system dependencies!`);
+        console.error(`[OCR] [PDF-TO-IMAGE] Missing system dependency!`);
         console.error(
           `[OCR] [PDF-TO-IMAGE] ========================================`,
         );
         console.error(
-          `[OCR] [PDF-TO-IMAGE] Required system dependencies (NOT npm packages):`,
+          `[OCR] [PDF-TO-IMAGE] Required system dependency (NOT npm package):`,
         );
         console.error(
-          `[OCR] [PDF-TO-IMAGE]   1. GraphicsMagick - for PDF conversion`,
-        );
-        console.error(
-          `[OCR] [PDF-TO-IMAGE]   2. Ghostscript - required by GraphicsMagick for PDFs`,
+          `[OCR] [PDF-TO-IMAGE]   poppler-utils - for PDF to image conversion`,
         );
         console.error(
           `[OCR] [PDF-TO-IMAGE] ========================================`,
         );
         console.error(`[OCR] [PDF-TO-IMAGE] Installation commands:`);
         console.error(
-          `[OCR] [PDF-TO-IMAGE]   macOS: brew install graphicsmagick ghostscript`,
+          `[OCR] [PDF-TO-IMAGE]   macOS: brew install poppler`,
         );
         console.error(
-          `[OCR] [PDF-TO-IMAGE]   Ubuntu/Debian: sudo apt-get install graphicsmagick ghostscript`,
+          `[OCR] [PDF-TO-IMAGE]   Ubuntu/Debian: sudo apt-get install poppler-utils`,
         );
         console.error(
-          `[OCR] [PDF-TO-IMAGE]   CentOS/RHEL: sudo yum install GraphicsMagick ghostscript`,
+          `[OCR] [PDF-TO-IMAGE]   CentOS/RHEL: sudo yum install poppler-utils`,
         );
         console.error(
-          `[OCR] [PDF-TO-IMAGE]   Alpine (Docker): apk add graphicsmagick ghostscript`,
-        );
-        console.error(
-          `[OCR] [PDF-TO-IMAGE] ========================================`,
-        );
-        console.error(
-          `[OCR] [PDF-TO-IMAGE] See SETUP.md for detailed installation instructions`,
+          `[OCR] [PDF-TO-IMAGE]   Alpine (Docker): apk add poppler-utils`,
         );
         console.error(
           `[OCR] [PDF-TO-IMAGE] ========================================`,
@@ -1468,7 +1576,7 @@ export class OcrService {
         );
       } else {
         console.warn(
-          `[OCR] [PDF-TO-IMAGE] pdf2pic error (may need GraphicsMagick/ImageMagick): ${errorMessage}`,
+          `[OCR] [PDF-TO-IMAGE] pdftoppm error: ${errorMessage}`,
         );
         console.log(
           `[OCR] [PDF-TO-IMAGE] Falling back to pdfjs-dist method...`,
