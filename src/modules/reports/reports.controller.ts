@@ -62,6 +62,19 @@ export class ReportsController {
     return this.reportsService.getFilterOptions(user?.organizationId as string);
   }
 
+  @Get('dashboard-summary')
+  @Roles(UserRole.ADMIN, UserRole.ACCOUNTANT)
+  async getDashboardSummary(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
+  ) {
+    return this.reportsService.getDashboardSummary(
+      user?.organizationId as string,
+      { startDate, endDate },
+    );
+  }
+
   @Post('generate')
   @Roles(UserRole.ADMIN, UserRole.ACCOUNTANT)
   async generate(

@@ -289,6 +289,349 @@ export class ReportsService {
   }
 
   /**
+   * Lightweight dashboard summary - returns only essential metrics without generating full reports
+   * This is optimized to reduce SQL queries and improve dashboard load time
+   */
+  async getDashboardSummary(
+    organizationId: string,
+    filters?: { startDate?: string; endDate?: string },
+  ): Promise<{
+    profitAndLoss: {
+      revenue: { netAmount: number; netVat: number };
+      expenses: { total: number; vat: number };
+      summary: { netProfit: number };
+    };
+    payables: {
+      summary: {
+        totalAmount: number;
+        pendingItems: number;
+        paidItems: number;
+      };
+    };
+    receivables: {
+      summary: {
+        totalOutstanding: number;
+        unpaidInvoices: number;
+        partialInvoices: number;
+        overdueInvoices: number;
+      };
+    };
+  }> {
+    const startDate =
+      filters?.['startDate'] ||
+      new Date(new Date().getFullYear(), 0, 1).toISOString().split('T')[0];
+    const endDate =
+      filters?.['endDate'] || new Date().toISOString().split('T')[0];
+
+    this.logger.log(
+      `Getting dashboard summary: organizationId=${organizationId}, startDate=${startDate}, endDate=${endDate}`,
+    );
+
+    try {
+      // Optimized queries for dashboard - only fetch summary metrics
+      const [
+        revenueResult,
+        expenseResult,
+        journalRevenueResult,
+        journalExpenseResult,
+        payablesSummary,
+        receivablesSummary,
+      ] = await Promise.all([
+        // Revenue from invoices (net of credit notes)
+        this.salesInvoicesRepository
+          .createQueryBuilder('invoice')
+          .leftJoin('invoice.creditNoteApplications', 'cna')
+          .leftJoin('cna.creditNote', 'cn')
+          .select([
+            'SUM(COALESCE(invoice.base_amount, invoice.amount)) AS revenue',
+            'SUM(invoice.vat_amount) AS vat',
+          ])
+          .addSelect(
+            'COALESCE(SUM(CASE WHEN cn.status != :draftStatus THEN cna."appliedAmount" ELSE 0 END), 0)',
+            'creditNoteApplied',
+          )
+          .addSelect(
+            'COALESCE(SUM(CASE WHEN cn.status != :draftStatus AND cn.total_amount > 0 THEN (cna."appliedAmount" / cn.total_amount) * cn.vat_amount ELSE 0 END), 0)',
+            'creditNoteVat',
+          )
+          .where('invoice.organization_id = :organizationId', {
+            organizationId,
+          })
+          .andWhere('invoice.is_deleted = false')
+          .andWhere('invoice.invoice_date >= :startDate', { startDate })
+          .andWhere('invoice.invoice_date <= :endDate', { endDate })
+          .setParameter('draftStatus', CreditNoteStatus.DRAFT)
+          .getRawOne(),
+
+        // Expenses
+        this.expensesRepository
+          .createQueryBuilder('expense')
+          .select([
+            'SUM(COALESCE(expense.base_amount, expense.amount)) AS total',
+            'SUM(expense.vat_amount) AS vat',
+          ])
+          .where('expense.organization_id = :organizationId', {
+            organizationId,
+          })
+          .andWhere('expense.is_deleted = false')
+          .andWhere('expense.expense_date >= :startDate', { startDate })
+          .andWhere('expense.expense_date <= :endDate', { endDate })
+          .andWhere("(expense.type IS NULL OR expense.type != 'credit')")
+          .getRawOne(),
+
+        // Journal entry revenue (custom ledger accounts with Revenue category)
+        this.journalEntriesRepository
+          .createQueryBuilder('entry')
+          .leftJoin('entry.organization', 'org')
+          .select([
+            "SUM(CASE WHEN entry.credit_account = 'sales_revenue' THEN entry.amount ELSE 0 END) AS revenueCredit",
+            "SUM(CASE WHEN entry.debit_account = 'sales_revenue' THEN entry.amount ELSE 0 END) AS revenueDebit",
+            "SUM(CASE WHEN entry.credit_account = 'sales_revenue' THEN COALESCE(entry.vat_amount, 0) ELSE 0 END) AS revenueVatCredit",
+            "SUM(CASE WHEN entry.debit_account = 'sales_revenue' THEN COALESCE(entry.vat_amount, 0) ELSE 0 END) AS revenueVatDebit",
+          ])
+          .where('entry.organization_id = :organizationId', { organizationId })
+          .andWhere('entry.is_deleted = false')
+          .andWhere('entry.entry_date >= :startDate', { startDate })
+          .andWhere('entry.entry_date <= :endDate', { endDate })
+          .getRawOne(),
+
+        // Journal entry expenses (custom ledger accounts with Expense category)
+        this.journalEntriesRepository
+          .createQueryBuilder('entry')
+          .select([
+            "SUM(CASE WHEN entry.debit_account = 'general_expense' THEN entry.amount ELSE 0 END) AS expenseDebit",
+            "SUM(CASE WHEN entry.credit_account = 'general_expense' THEN entry.amount ELSE 0 END) AS expenseCredit",
+            "SUM(CASE WHEN entry.debit_account = 'general_expense' THEN COALESCE(entry.vat_amount, 0) ELSE 0 END) AS expenseVatDebit",
+            "SUM(CASE WHEN entry.credit_account = 'general_expense' THEN COALESCE(entry.vat_amount, 0) ELSE 0 END) AS expenseVatCredit",
+          ])
+          .where('entry.organization_id = :organizationId', { organizationId })
+          .andWhere('entry.is_deleted = false')
+          .andWhere('entry.entry_date >= :startDate', { startDate })
+          .andWhere('entry.entry_date <= :endDate', { endDate })
+          .getRawOne(),
+
+        // Payables summary (simplified - using subquery for payments)
+        this.dataSource
+          .query(
+            `
+            SELECT 
+              COUNT(DISTINCT a.id) FILTER (WHERE a.status = $2) AS pending_items,
+              COUNT(DISTINCT a.id) FILTER (WHERE a.status = $3) AS paid_items,
+              COALESCE(SUM(
+                GREATEST(0, 
+                  COALESCE(e.total_amount, 0) - 
+                  COALESCE((
+                    SELECT SUM(ep.amount) 
+                    FROM expense_payments ep 
+                    WHERE ep.expense_id = e.id 
+                    AND ep.is_deleted = false
+                    AND ep.payment_date <= $4
+                  ), 0)
+                )
+              ) FILTER (WHERE a.status = $2), 0) AS total_amount
+            FROM accruals a
+            INNER JOIN expenses e ON a.expense_id = e.id
+            WHERE a.organization_id = $1
+            AND a.is_deleted = false
+            AND e.is_deleted = false
+            `,
+            [
+              organizationId,
+              AccrualStatus.PENDING_SETTLEMENT,
+              AccrualStatus.SETTLED,
+              endDate,
+            ],
+          )
+          .then((rows) => {
+            const row = rows[0] || {};
+            return {
+              totalAmount: Number(row.total_amount || 0),
+              pendingItems: Number(row.pending_items || 0),
+              paidItems: Number(row.paid_items || 0),
+            };
+          }),
+
+        // Receivables summary (simplified - using subquery for payments and credit notes)
+        this.dataSource
+          .query(
+            `
+            SELECT 
+              COUNT(DISTINCT i.id) FILTER (WHERE COALESCE((
+                SELECT SUM(ip.amount) 
+                FROM invoice_payments ip 
+                WHERE ip.invoice_id = i.id 
+                AND ip.is_deleted = false
+              ), 0) = 0) AS unpaid_invoices,
+              COUNT(DISTINCT i.id) FILTER (WHERE COALESCE((
+                SELECT SUM(ip.amount) 
+                FROM invoice_payments ip 
+                WHERE ip.invoice_id = i.id 
+                AND ip.is_deleted = false
+              ), 0) > 0 AND COALESCE((
+                SELECT SUM(ip.amount) 
+                FROM invoice_payments ip 
+                WHERE ip.invoice_id = i.id 
+                AND ip.is_deleted = false
+              ), 0) < i.total_amount) AS partial_invoices,
+              COALESCE(SUM(
+                GREATEST(0, 
+                  i.total_amount - 
+                  COALESCE((
+                    SELECT SUM(ip.amount) 
+                    FROM invoice_payments ip 
+                    WHERE ip.invoice_id = i.id 
+                    AND ip.is_deleted = false
+                  ), 0) -
+                  COALESCE((
+                    SELECT SUM(cna."appliedAmount") 
+                    FROM credit_note_applications cna
+                    INNER JOIN credit_notes cn ON cna.credit_note_id = cn.id
+                    WHERE cna.invoice_id = i.id 
+                    AND cn.status != $2
+                  ), 0)
+                )
+              ), 0) AS total_outstanding,
+              COUNT(DISTINCT i.id) FILTER (WHERE i.due_date < CURRENT_DATE AND COALESCE((
+                SELECT SUM(ip.amount) 
+                FROM invoice_payments ip 
+                WHERE ip.invoice_id = i.id 
+                AND ip.is_deleted = false
+              ), 0) < i.total_amount) AS overdue_invoices
+            FROM sales_invoices i
+            WHERE i.organization_id = $1
+            AND i.is_deleted = false
+            AND i.invoice_date <= $3
+            `,
+            [organizationId, CreditNoteStatus.DRAFT, endDate],
+          )
+          .then((rows) => {
+            const row = rows[0] || {};
+            return {
+              totalOutstanding: Number(row.total_outstanding || 0),
+              unpaidInvoices: Number(row.unpaid_invoices || 0),
+              partialInvoices: Number(row.partial_invoices || 0),
+              overdueInvoices: Number(row.overdue_invoices || 0),
+            };
+          }),
+      ]);
+
+      // Calculate revenue (net of credit notes)
+      const revenueAmount =
+        Number(revenueResult?.revenue || 0) -
+        Number(
+          revenueResult?.creditnoteapplied ||
+            revenueResult?.creditNoteApplied ||
+            0,
+        );
+      const revenueVat =
+        Number(revenueResult?.vat || 0) -
+        Number(
+          revenueResult?.creditnotevat || revenueResult?.creditNoteVat || 0,
+        );
+
+      // Add journal entry revenue
+      const journalRevenue =
+        Number(
+          journalRevenueResult?.revenuecredit ||
+            journalRevenueResult?.revenueCredit ||
+            0,
+        ) -
+        Number(
+          journalRevenueResult?.revenuedebit ||
+            journalRevenueResult?.revenueDebit ||
+            0,
+        );
+      const journalRevenueVat =
+        Number(
+          journalRevenueResult?.revenuevatcredit ||
+            journalRevenueResult?.revenueVatCredit ||
+            0,
+        ) -
+        Number(
+          journalRevenueResult?.revenuevatdebit ||
+            journalRevenueResult?.revenueVatDebit ||
+            0,
+        );
+
+      const netRevenue = revenueAmount + journalRevenue;
+      const netRevenueVat = revenueVat + journalRevenueVat;
+
+      // Calculate expenses
+      const expenseTotal = Number(expenseResult?.total || 0);
+      const expenseVat = Number(expenseResult?.vat || 0);
+
+      // Add journal entry expenses
+      const journalExpense =
+        Number(
+          journalExpenseResult?.expensedebit ||
+            journalExpenseResult?.expenseDebit ||
+            0,
+        ) -
+        Number(
+          journalExpenseResult?.expensecredit ||
+            journalExpenseResult?.expenseCredit ||
+            0,
+        );
+      const journalExpenseVat =
+        Number(
+          journalExpenseResult?.expensevatdebit ||
+            journalExpenseResult?.expenseVatDebit ||
+            0,
+        ) -
+        Number(
+          journalExpenseResult?.expensevatcredit ||
+            journalExpenseResult?.expenseVatCredit ||
+            0,
+        );
+
+      const totalExpenses = expenseTotal + journalExpense;
+      const totalExpenseVat = expenseVat + journalExpenseVat;
+
+      // Calculate net profit
+      const netProfit = netRevenue - totalExpenses;
+
+      return {
+        profitAndLoss: {
+          revenue: {
+            netAmount: Number(netRevenue.toFixed(2)),
+            netVat: Number(netRevenueVat.toFixed(2)),
+          },
+          expenses: {
+            total: Number(totalExpenses.toFixed(2)),
+            vat: Number(totalExpenseVat.toFixed(2)),
+          },
+          summary: {
+            netProfit: Number(netProfit.toFixed(2)),
+          },
+        },
+        payables: {
+          summary: {
+            totalAmount: Number((payablesSummary?.totalAmount || 0).toFixed(2)),
+            pendingItems: payablesSummary?.pendingItems || 0,
+            paidItems: payablesSummary?.paidItems || 0,
+          },
+        },
+        receivables: {
+          summary: {
+            totalOutstanding: Number(
+              (receivablesSummary?.totalOutstanding || 0).toFixed(2),
+            ),
+            unpaidInvoices: receivablesSummary?.unpaidInvoices || 0,
+            partialInvoices: receivablesSummary?.partialInvoices || 0,
+            overdueInvoices: receivablesSummary?.overdueInvoices || 0,
+          },
+        },
+      };
+    } catch (error) {
+      this.logger.error(
+        `Error getting dashboard summary: organizationId=${organizationId}, error=${error.message}`,
+        error.stack,
+      );
+      throw error;
+    }
+  }
+
+  /**
    * Builds Trial Balance report
    *
    * Connection Pool Optimization Notes:
