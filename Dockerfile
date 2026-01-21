@@ -1,7 +1,7 @@
 # Multi-stage build for NestJS application
 
 # Stage 1: Build stage
-FROM node:20-alpine AS builder
+FROM node:20-bookworm-slim AS builder
 
 WORKDIR /app
 
@@ -17,24 +17,32 @@ COPY . .
 # Build the application
 RUN npm run build
 
+
 # Stage 2: Production stage
-FROM node:20-alpine AS production
+FROM node:20-bookworm-slim AS production
 
 WORKDIR /app
 
-# Install CA certificates for SSL/TLS (required for Cloudflare R2)
-RUN apk add --no-cache ca-certificates && \
-    update-ca-certificates
+# Install system dependencies (SSL + OCR stack)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    ghostscript \
+    graphicsmagick \
+    poppler-utils \
+    tesseract-ocr \
+    tesseract-ocr-eng \
+  && update-ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user
-RUN addgroup -g 1001 -S nodejs && \
-    adduser -S nestjs -u 1001
+RUN groupadd -g 1001 nodejs && \
+    useradd -m -u 1001 -g nodejs nestjs
 
 # Copy package files
 COPY package*.json ./
 
 # Install only production dependencies
-RUN npm ci --only=production && \
+RUN npm ci --omit=dev && \
     npm cache clean --force
 
 # Copy built application from builder stage
@@ -55,5 +63,3 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=40s --retries=3 \
 
 # Start the application
 CMD ["node", "dist/main.js"]
-
-
