@@ -26,6 +26,7 @@ import { SalesInvoice } from './sales-invoice.entity';
 import { CreditNote } from './credit-note.entity';
 import { DebitNote } from './debit-note.entity';
 import { JournalEntry } from './journal-entry.entity';
+import { LedgerAccount } from './ledger-account.entity';
 
 @Entity({ name: 'organizations' })
 @Unique(['name'])
@@ -161,4 +162,7 @@ export class Organization extends AbstractEntity {
 
   @OneToMany(() => JournalEntry, (journalEntry) => journalEntry.organization)
   journalEntries: JournalEntry[];
+
+  @OneToMany(() => LedgerAccount, (ledgerAccount) => ledgerAccount.organization)
+  ledgerAccounts: LedgerAccount[];
 }

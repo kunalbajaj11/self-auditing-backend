@@ -2,7 +2,6 @@ import { Column, Entity, JoinColumn, ManyToOne } from 'typeorm';
 import { AbstractEntity } from './abstract.entity';
 import { Organization } from './organization.entity';
 import { User } from './user.entity';
-import { JournalEntryAccount } from '../common/enums/journal-entry-account.enum';
 
 @Entity({ name: 'journal_entries' })
 export class JournalEntry extends AbstractEntity {
@@ -19,20 +18,20 @@ export class JournalEntry extends AbstractEntity {
   user: User;
 
   @Column({
-    type: 'enum',
-    enum: JournalEntryAccount,
+    type: 'varchar',
+    length: 100,
     name: 'debit_account',
-    nullable: true, // Temporarily nullable for migration
+    nullable: true, // Temporarily nullable for migration, will be made NOT NULL after data migration
   })
-  debitAccount?: JournalEntryAccount | null;
+  debitAccount?: string | null; // Can be enum value (e.g., 'cash') or custom ledger account (e.g., 'ledger:{id}')
 
   @Column({
-    type: 'enum',
-    enum: JournalEntryAccount,
+    type: 'varchar',
+    length: 100,
     name: 'credit_account',
-    nullable: true, // Temporarily nullable for migration
+    nullable: true, // Temporarily nullable for migration, will be made NOT NULL after data migration
   })
-  creditAccount?: JournalEntryAccount | null;
+  creditAccount?: string | null; // Can be enum value (e.g., 'cash') or custom ledger account (e.g., 'ledger:{id}')
 
   @Column({ type: 'decimal', precision: 12, scale: 2 })
   amount: string;

@@ -21,6 +21,7 @@ import { SalesInvoice } from './sales-invoice.entity';
 import { CreditNote } from './credit-note.entity';
 import { DebitNote } from './debit-note.entity';
 import { JournalEntry } from './journal-entry.entity';
+import { LedgerAccount } from './ledger-account.entity';
 
 @Index('idx_users_email', ['email'], { unique: true })
 @Entity({ name: 'users' })
@@ -104,4 +105,7 @@ export class User extends AbstractEntity {
 
   @OneToMany(() => JournalEntry, (journalEntry) => journalEntry.user)
   journalEntries: JournalEntry[];
+
+  @OneToMany(() => LedgerAccount, (ledgerAccount) => ledgerAccount.createdBy)
+  createdLedgerAccounts: LedgerAccount[];
 }

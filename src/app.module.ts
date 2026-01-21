@@ -10,6 +10,7 @@ import { UsersModule } from './modules/users/users.module';
 import { OrganizationsModule } from './modules/organizations/organizations.module';
 import { CategoriesModule } from './modules/categories/categories.module';
 import { ExpenseTypesModule } from './modules/expense-types/expense-types.module';
+import { LedgerAccountsModule } from './modules/ledger-accounts/ledger-accounts.module';
 import { ExpensesModule } from './modules/expenses/expenses.module';
 import { AccrualsModule } from './modules/accruals/accruals.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
@@ -62,6 +63,7 @@ import { SanitizeAttachmentsInterceptor } from './common/interceptors/sanitize-a
     OrganizationsModule,
     CategoriesModule,
     ExpenseTypesModule,
+    LedgerAccountsModule,
     ExpensesModule,
     AccrualsModule,
     NotificationsModule,

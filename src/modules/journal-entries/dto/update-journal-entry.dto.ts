@@ -1,21 +1,26 @@
 import {
   IsDateString,
-  IsEnum,
   IsNumber,
   IsOptional,
   IsString,
   Min,
   ValidateIf,
+  Matches,
 } from 'class-validator';
-import { JournalEntryAccount } from '../../../common/enums/journal-entry-account.enum';
 
 export class UpdateJournalEntryDto {
   @IsOptional()
-  @IsEnum(JournalEntryAccount)
-  debitAccount?: JournalEntryAccount;
+  @IsString()
+  @Matches(/^(ledger:[a-f0-9-]+|cash|bank|accounts_receivable|vat_receivable|prepaid_expenses|accounts_payable|vat_payable|customer_advances|share_capital|owner_shareholder_account|retained_earnings|sales_revenue|general_expense)$/, {
+    message: 'Debit account must be a valid account code',
+  })
+  debitAccount?: string; // Can be enum value (e.g., 'cash') or custom ledger account (e.g., 'ledger:{id}')
 
   @IsOptional()
-  @IsEnum(JournalEntryAccount)
+  @IsString()
+  @Matches(/^(ledger:[a-f0-9-]+|cash|bank|accounts_receivable|vat_receivable|prepaid_expenses|accounts_payable|vat_payable|customer_advances|share_capital|owner_shareholder_account|retained_earnings|sales_revenue|general_expense)$/, {
+    message: 'Credit account must be a valid account code',
+  })
   @ValidateIf(
     (o) =>
       o.debitAccount && o.creditAccount && o.debitAccount !== o.creditAccount,
@@ -23,7 +28,7 @@ export class UpdateJournalEntryDto {
       message: 'Debit account and credit account cannot be the same',
     },
   )
-  creditAccount?: JournalEntryAccount;
+  creditAccount?: string; // Can be enum value (e.g., 'cash') or custom ledger account (e.g., 'ledger:{id}')
 
   @IsOptional()
   @IsNumber()
