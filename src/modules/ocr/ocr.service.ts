@@ -30,23 +30,124 @@ export class OcrService {
     file: Express.Multer.File,
     organizationId?: string,
   ): Promise<OcrResult> {
+    const startTime = Date.now();
     const provider = this.configService.get<string>('OCR_PROVIDER', 'mock');
+
+    console.log('='.repeat(80));
+    console.log('[OCR] ========== STARTING OCR PROCESS ==========');
+    console.log(`[OCR] File: ${file.originalname}`);
+    console.log(`[OCR] Size: ${(file.size / 1024).toFixed(2)} KB`);
+    console.log(`[OCR] MIME Type: ${file.mimetype}`);
+    console.log(`[OCR] Provider: ${provider}`);
+    console.log(`[OCR] Organization ID: ${organizationId || 'N/A'}`);
+    console.log('='.repeat(80));
 
     // Check if file is PDF
     const isPdf =
       file.mimetype === 'application/pdf' ||
       file.originalname.toLowerCase().endsWith('.pdf');
 
-    switch (provider.toLowerCase()) {
-      case 'google':
-        if (isPdf) {
-          return this.processPdfWithGoogleVision(file, organizationId);
-        }
-        return this.processWithGoogleVision(file, organizationId);
-      case 'azure':
-        return this.processWithAzureFormRecognizer(file, organizationId);
-      default:
-        return this.processMock(file, organizationId);
+    console.log(`[OCR] File type detection: ${isPdf ? 'PDF' : 'Image'}`);
+
+    let result: OcrResult;
+    try {
+      switch (provider.toLowerCase()) {
+        case 'google':
+          console.log('[OCR] Using Google Vision provider');
+          if (isPdf) {
+            result = await this.processPdfWithGoogleVision(
+              file,
+              organizationId,
+            );
+          } else {
+            result = await this.processWithGoogleVision(file, organizationId);
+          }
+          break;
+        case 'azure':
+          console.log('[OCR] Using Azure Form Recognizer provider');
+          result = await this.processWithAzureFormRecognizer(
+            file,
+            organizationId,
+          );
+          break;
+        default:
+          console.log('[OCR] Using mock provider');
+          result = await this.processMock(file, organizationId);
+      }
+
+      const duration = Date.now() - startTime;
+      console.log('='.repeat(80));
+      console.log('[OCR] ========== OCR PROCESS COMPLETED ==========');
+      console.log(`[OCR] Duration: ${duration}ms`);
+      console.log(`[OCR] Vendor: ${result.vendorName || 'N/A'}`);
+      console.log(`[OCR] Invoice Number: ${result.invoiceNumber || 'N/A'}`);
+      console.log(`[OCR] Amount: ${result.amount || 0}`);
+      console.log(`[OCR] VAT Amount: ${result.vatAmount || 0}`);
+      console.log(`[OCR] Date: ${result.expenseDate || 'N/A'}`);
+      console.log(`[OCR] Confidence: ${result.confidence}`);
+      console.log(
+        `[OCR] Provider Used: ${result.fields?.provider || 'unknown'}`,
+      );
+      console.log('='.repeat(80));
+
+      return result;
+    } catch (error: any) {
+      const duration = Date.now() - startTime;
+      console.error('='.repeat(80));
+      console.error('[OCR] ========== OCR PROCESS FAILED ==========');
+      console.error(`[OCR] Duration: ${duration}ms`);
+      console.error(`[OCR] Error: ${error.message}`);
+      console.error(`[OCR] Stack: ${error.stack}`);
+      console.error('='.repeat(80));
+      throw error;
+    }
+  }
+
+  /**
+   * Get or create OCR debug directory for saving images
+   */
+  private getOcrDebugDir(): string {
+    const debugDir = path.join(process.cwd(), 'ocr-debug');
+    if (!fs.existsSync(debugDir)) {
+      fs.mkdirSync(debugDir, { recursive: true });
+      console.log(`[OCR] Created debug directory: ${debugDir}`);
+    }
+    return debugDir;
+  }
+
+  /**
+   * Save image buffer to disk for debugging
+   */
+  private async saveDebugImage(
+    imageBuffer: Buffer,
+    filename: string,
+    metadata?: Record<string, any>,
+  ): Promise<string> {
+    try {
+      const debugDir = this.getOcrDebugDir();
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const safeFilename = filename.replace(/[^a-zA-Z0-9.-]/g, '_');
+      const filepath = path.join(debugDir, `${timestamp}_${safeFilename}`);
+
+      await fs.promises.writeFile(filepath, imageBuffer);
+      console.log(
+        `[OCR] Saved debug image: ${filepath} (${(imageBuffer.length / 1024).toFixed(2)} KB)`,
+      );
+
+      // Save metadata if provided
+      if (metadata) {
+        const metadataPath = filepath + '.json';
+        await fs.promises.writeFile(
+          metadataPath,
+          JSON.stringify(metadata, null, 2),
+        );
+        console.log(`[OCR] Saved debug metadata: ${metadataPath}`);
+      }
+
+      return filepath;
+    } catch (error: any) {
+      console.warn(`[OCR] Failed to save debug image: ${error.message}`);
+      return '';
     }
   }
 
@@ -54,11 +155,111 @@ export class OcrService {
     file: Express.Multer.File,
     organizationId?: string,
   ): Promise<OcrResult> {
+    console.log('[OCR] [MOCK] Starting mock provider processing');
     // Mock implementation for development/testing
     // In production, replace with actual OCR service
     const now = new Date();
 
-    // Try to extract basic info from filename
+    // Check if file is PDF and try to extract text
+    const isPdf =
+      file.mimetype === 'application/pdf' ||
+      file.originalname.toLowerCase().endsWith('.pdf');
+
+    console.log(`[OCR] [MOCK] File is PDF: ${isPdf}`);
+
+    // For PDFs, try to extract text using pdf-parse (even in mock mode)
+    if (isPdf) {
+      try {
+        console.log(
+          '[OCR] [MOCK] Attempting to extract text from PDF using pdf-parse...',
+        );
+        const pdfText = await this.extractTextFromPdf(file.buffer);
+        console.log(
+          `[OCR] [MOCK] Extracted text length: ${pdfText?.length || 0} characters`,
+        );
+
+        if (pdfText && pdfText.trim().length > 50) {
+          // Check if the extracted text is meaningful (not just page markers)
+          const trimmedText = pdfText.trim();
+          const isOnlyPageMarkers = this.isOnlyPageMarkers(trimmedText);
+
+          console.log(
+            `[OCR] [MOCK] Text is only page markers: ${isOnlyPageMarkers}`,
+          );
+          console.log(
+            `[OCR] [MOCK] First 200 chars: ${pdfText.substring(0, 200)}`,
+          );
+
+          if (!isOnlyPageMarkers) {
+            console.log(
+              '[OCR] [MOCK] ✓ Successfully extracted meaningful text from PDF using pdf-parse',
+            );
+            // Parse the extracted text
+            console.log('[OCR] [MOCK] Parsing extracted text...');
+            const parsed = this.parseOcrText(pdfText);
+            console.log(
+              `[OCR] [MOCK] Parsed vendor: ${parsed.vendorName || 'N/A'}`,
+            );
+            console.log(
+              `[OCR] [MOCK] Parsed invoice: ${parsed.invoiceNumber || 'N/A'}`,
+            );
+            console.log(`[OCR] [MOCK] Parsed amount: ${parsed.amount || 0}`);
+            console.log(
+              `[OCR] [MOCK] Parsed date: ${parsed.expenseDate || 'N/A'}`,
+            );
+
+            // Detect category if organizationId is provided
+            let suggestedCategoryId: string | undefined;
+            if (organizationId) {
+              const detectedCategory =
+                await this.categoryDetectionService.detectCategoryWithAI(
+                  pdfText,
+                  parsed.vendorName,
+                  organizationId,
+                );
+              if (detectedCategory) {
+                suggestedCategoryId = detectedCategory.id;
+              }
+            }
+
+            // Create description from full text
+            const description = this.buildDescription(pdfText, parsed);
+
+            return {
+              vendorName: parsed.vendorName || 'Unknown Vendor',
+              vendorTrn: parsed.vendorTrn,
+              invoiceNumber: parsed.invoiceNumber || `INV-${now.getTime()}`,
+              amount: parsed.amount || 0,
+              vatAmount: parsed.vatAmount,
+              expenseDate:
+                parsed.expenseDate || now.toISOString().substring(0, 10),
+              description: description || `Uploaded file: ${file.originalname}`,
+              suggestedCategoryId,
+              confidence: 0.75, // Higher confidence when text is extracted
+              fields: {
+                fullText: pdfText.substring(0, 500),
+                originalFileName: file.originalname,
+                mimeType: file.mimetype,
+                size: file.size,
+                provider: 'mock-pdf-parse',
+                extractionMethod: 'pdf-parse',
+                note: 'Using pdf-parse for text extraction. Configure GOOGLE_VISION_API_KEY or AZURE_FORM_RECOGNIZER_KEY for better OCR results.',
+              },
+            };
+          }
+        }
+      } catch (pdfError: any) {
+        console.warn(
+          '[OCR] [MOCK] ✗ Failed to extract text from PDF:',
+          pdfError.message,
+        );
+        console.warn(`[OCR] [MOCK] Error stack: ${pdfError.stack}`);
+        // Fall through to filename-based extraction
+      }
+    }
+
+    // Fallback: Try to extract basic info from filename
+    console.log('[OCR] [MOCK] Falling back to filename-based extraction');
     const fileName = file.originalname.toLowerCase();
     let vendorName = 'Unknown Vendor';
     let amount = 0;
@@ -232,6 +433,17 @@ export class OcrService {
         });
       }
 
+      // Validate image buffer before sending to Google Vision
+      if (!file.buffer || file.buffer.length === 0) {
+        throw new Error('Image buffer is empty');
+      }
+
+      // Log image info for debugging
+      const imageSizeKB = (file.buffer.length / 1024).toFixed(2);
+      console.log(
+        `[OCR] Processing image with Google Vision: ${file.originalname}, ${imageSizeKB} KB, type: ${file.mimetype}`,
+      );
+
       // Perform text detection on the image or PDF
       // Note: Google Vision API textDetection supports both images and PDFs
       // For PDFs, it processes the first page or converts PDF to images
@@ -242,9 +454,20 @@ export class OcrService {
       const detections = result.textAnnotations;
       if (!detections || detections.length === 0) {
         const fileType = file.mimetype === 'application/pdf' ? 'PDF' : 'image';
-        console.warn(`No text detected in ${fileType}. Falling back to mock.`);
+        console.warn(
+          `[OCR] No text detected in ${fileType} (${imageSizeKB} KB). This could indicate:\n` +
+            '  1. The image quality is too low\n' +
+            '  2. The image is corrupted\n' +
+            '  3. The document is blank or unreadable\n' +
+            '  4. Google Vision API configuration issue\n' +
+            'Falling back to mock provider.',
+        );
         return this.processMock(file, organizationId);
       }
+
+      console.log(
+        `[OCR] Google Vision detected ${detections.length} text annotation(s)`,
+      );
 
       // Extract full text (first detection contains all text)
       const fullText = detections[0]?.description || '';
@@ -328,7 +551,35 @@ export class OcrService {
     file: Express.Multer.File,
     organizationId?: string,
   ): Promise<OcrResult> {
-    console.log('[OCR] Processing PDF file');
+    console.log('[OCR] Processing PDF file with Google Vision provider');
+
+    // Check if Google credentials are configured
+    const credentialsBase64 = this.configService.get<string>(
+      'GOOGLE_CREDENTIALS_BASE64',
+    );
+    const credentialsJson = this.configService.get<string>(
+      'GOOGLE_CREDENTIALS_JSON',
+    );
+    const credentialsPath = this.configService.get<string>(
+      'GOOGLE_APPLICATION_CREDENTIALS',
+    );
+    const defaultCredsPath = path.join(
+      process.cwd(),
+      'google-credentials.json',
+    );
+
+    const hasCredentials =
+      credentialsBase64 ||
+      credentialsJson ||
+      (credentialsPath && fs.existsSync(credentialsPath)) ||
+      fs.existsSync(defaultCredsPath);
+
+    if (!hasCredentials) {
+      console.warn(
+        '[OCR] Google Vision credentials not configured. Falling back to improved mock provider with pdf-parse.',
+      );
+      return this.processMock(file, organizationId);
+    }
 
     // First, try to extract text directly from PDF using pdf-parse
     let pdfText = '';
@@ -450,14 +701,28 @@ export class OcrService {
     file: Express.Multer.File,
     organizationId?: string,
   ): Promise<OcrResult> {
+    console.log('[OCR] [SCANNED-PDF] Processing scanned PDF');
+    console.log(
+      `[OCR] [SCANNED-PDF] File: ${file.originalname}, Size: ${(file.buffer.length / 1024).toFixed(2)} KB`,
+    );
+
     // Convert PDF pages to images
-    const pageImages = await this.convertPdfPagesToImages(file.buffer);
+    console.log('[OCR] [SCANNED-PDF] Converting PDF pages to images...');
+    const pageImages = await this.convertPdfPagesToImages(
+      file.buffer,
+      file.originalname,
+    );
 
     if (pageImages.length === 0) {
+      console.error(
+        '[OCR] [SCANNED-PDF] ✗ Failed to convert PDF pages to images',
+      );
       throw new Error('Failed to convert PDF pages to images');
     }
 
-    console.log(`[OCR] Converted ${pageImages.length} PDF page(s) to images`);
+    console.log(
+      `[OCR] [SCANNED-PDF] ✓ Converted ${pageImages.length} PDF page(s) to images`,
+    );
 
     // Step 1: Identify which page is the invoice/tax invoice
     const invoicePageIndex = await this.identifyInvoicePage(
@@ -503,24 +768,53 @@ export class OcrService {
           stream: null as any,
         };
 
-        primaryResult = await this.processWithGoogleVision(
-          imageFile,
-          organizationId,
-        );
-        primaryText = primaryResult.fields?.fullText || '';
-        totalConfidence = primaryResult.confidence || 0;
-        processedPages.add(invoicePageIndex);
+        // Validate image before processing
+        if (imageBuffer.length < 1000) {
+          console.warn(
+            `[OCR] Page ${invoicePageIndex + 1} image is too small (${imageBuffer.length} bytes). Skipping.`,
+          );
+          // Skip this page - don't process it
+        } else {
+          primaryResult = await this.processWithGoogleVision(
+            imageFile,
+            organizationId,
+          );
+          primaryText = primaryResult.fields?.fullText || '';
+          totalConfidence = primaryResult.confidence || 0;
+          processedPages.add(invoicePageIndex);
 
-        allDetections.push({
-          page: invoicePageIndex + 1,
-          confidence: primaryResult.confidence,
-          pageType: 'invoice',
-          isPrimary: true,
-        });
+          // Check if we got meaningful text (not just from mock fallback)
+          const hasText = primaryText && primaryText.trim().length > 50;
+          const isMockResult =
+            primaryResult.fields?.provider === 'mock' ||
+            primaryResult.fields?.provider === 'mock-pdf-parse';
 
-        console.log(
-          `[OCR] Successfully processed invoice page with ${primaryText.length} characters`,
-        );
+          if (!hasText && isMockResult) {
+            console.warn(
+              `[OCR] Google Vision failed and mock provider also couldn't extract text from page ${invoicePageIndex + 1}. ` +
+                `Image size: ${(imageBuffer.length / 1024).toFixed(2)} KB`,
+            );
+          } else if (hasText) {
+            console.log(
+              `[OCR] Successfully extracted ${primaryText.length} characters from page ${invoicePageIndex + 1}`,
+            );
+          }
+
+          allDetections.push({
+            page: invoicePageIndex + 1,
+            confidence: primaryResult.confidence,
+            pageType: 'invoice',
+            isPrimary: true,
+            hasText: hasText,
+            provider: primaryResult.fields?.provider,
+          });
+
+          if (hasText) {
+            console.log(
+              `[OCR] Successfully processed invoice page with ${primaryText.length} characters`,
+            );
+          }
+        }
       } catch (pageError: any) {
         console.warn(
           `[OCR] Failed to process invoice page:`,
@@ -589,11 +883,29 @@ export class OcrService {
     }
 
     if (!primaryText || primaryText.trim().length === 0) {
-      throw new Error('No text extracted from PDF pages');
+      // Check if Google Vision was attempted but failed
+      const attemptedGoogleVision = allDetections.some(
+        (d) => d.provider === 'google' || d.provider === 'mock',
+      );
+      const errorMessage = attemptedGoogleVision
+        ? 'No text extracted from PDF pages. Google Vision API may not be properly configured or the PDF image quality is too low. Falling back to basic extraction.'
+        : 'No text extracted from PDF pages. This appears to be a scanned PDF that requires OCR. Please configure Google Vision API or Azure Form Recognizer for scanned documents.';
+      console.error(`[OCR] ${errorMessage}`);
+      throw new Error(errorMessage);
     }
 
     // Parse the text (prioritizing invoice page if available)
+    console.log(`[OCR] Parsing OCR text (length: ${primaryText.length} chars)`);
+    console.log(
+      `[OCR] First 200 chars of OCR text: ${primaryText.substring(0, 200)}`,
+    );
     const parsed = this.parseOcrText(primaryText);
+    console.log(`[OCR] Parsed results:`, {
+      vendorName: parsed.vendorName,
+      vendorTrn: parsed.vendorTrn,
+      invoiceNumber: parsed.invoiceNumber,
+      amount: parsed.amount,
+    });
 
     // Detect category if organizationId is provided
     let suggestedCategoryId: string | undefined;
@@ -776,18 +1088,423 @@ export class OcrService {
   }
 
   /**
-   * Convert PDF pages to image buffers using pdfjs-dist
+   * Convert PDF pages to image buffers
+   * Uses pdf2pic (GraphicsMagick/ImageMagick) for reliable PDF to image conversion
+   * Falls back to pdfjs-dist if pdf2pic is not available
    */
-  private async convertPdfPagesToImages(pdfBuffer: Buffer): Promise<Buffer[]> {
+  private async convertPdfPagesToImages(
+    pdfBuffer: Buffer,
+    originalFileName?: string,
+  ): Promise<Buffer[]> {
+    console.log('[OCR] [PDF-TO-IMAGE] Starting PDF to image conversion');
+    console.log(
+      `[OCR] [PDF-TO-IMAGE] PDF buffer size: ${(pdfBuffer.length / 1024).toFixed(2)} KB`,
+    );
+
+    // Try pdf2pic first (most reliable - uses GraphicsMagick/ImageMagick)
+    // Note: pdf2pic requires GraphicsMagick or ImageMagick to be installed on the system
     try {
-      // Dynamically import pdfjs-dist
+      console.log(
+        '[OCR] [PDF-TO-IMAGE] Attempting conversion with pdf2pic (GraphicsMagick/ImageMagick)...',
+      );
+      console.log(
+        '[OCR] [PDF-TO-IMAGE] Note: Requires GraphicsMagick or ImageMagick to be installed',
+      );
+
+      // pdf2pic requires a file path, so we need to save the buffer temporarily
+      const debugDir = this.getOcrDebugDir();
+      const tempPdfPath = path.join(
+        debugDir,
+        `temp_${Date.now()}_${originalFileName || 'document.pdf'}`,
+      );
+
+      // Save PDF buffer to temporary file
+      await fs.promises.writeFile(tempPdfPath, pdfBuffer);
+      console.log(
+        `[OCR] [PDF-TO-IMAGE] Saved PDF to temporary file: ${tempPdfPath}`,
+      );
+
+      try {
+        // Import pdf2pic
+        const pdf2picModule = await import('pdf2pic');
+        const { fromPath } = pdf2picModule.default || pdf2picModule;
+
+        // Configure pdf2pic with high quality settings for OCR
+        const baseFilename = originalFileName
+          ? originalFileName.replace(/\.pdf$/i, '')
+          : 'document';
+
+        // pdf2pic configuration - don't use responseType: 'buffer' as it may return empty buffers
+        // Instead, let it save to file and read the file
+        const convert = fromPath(tempPdfPath, {
+          density: 300, // 300 DPI for high quality OCR
+          saveFilename: baseFilename,
+          savePath: debugDir,
+          format: 'png',
+          width: 2550, // High resolution
+          height: 3300,
+          // Don't use responseType: 'buffer' - read from file instead
+        });
+
+        console.log(
+          '[OCR] [PDF-TO-IMAGE] Converting PDF pages with pdf2pic...',
+        );
+
+        // Convert first 5 pages (limit for performance)
+        const imageBuffers: Buffer[] = [];
+        const maxPages = 5;
+        const tempImageFiles: string[] = [];
+
+        for (let pageNum = 1; pageNum <= maxPages; pageNum++) {
+          try {
+            console.log(`[OCR] [PDF-TO-IMAGE] Converting page ${pageNum}...`);
+
+            // pdf2pic can return buffer or path depending on configuration
+            // Try to get buffer first, fallback to reading file
+            let imageBuffer: Buffer;
+            let imagePath: string | null = null;
+
+            // pdf2pic returns file path, not buffer (even with responseType: 'buffer' it may be empty)
+            // So we always read from the file path
+            const result: any = await convert(pageNum);
+
+            console.log(
+              `[OCR] [PDF-TO-IMAGE] pdf2pic result for page ${pageNum}:`,
+              {
+                hasResult: !!result,
+                hasPath: !!(result && result.path),
+                path: result?.path,
+                resultKeys: result ? Object.keys(result) : [],
+              },
+            );
+
+            // pdf2pic typically returns { path: string } or saves to expected location
+            let imageFilePath: string | null = null;
+
+            if (result && result.path && typeof result.path === 'string') {
+              imageFilePath = result.path;
+            } else {
+              // Try expected file path
+              const expectedPath = path.join(
+                debugDir,
+                `${baseFilename}.${pageNum}.png`,
+              );
+              if (fs.existsSync(expectedPath)) {
+                imageFilePath = expectedPath;
+              }
+            }
+
+            if (imageFilePath && fs.existsSync(imageFilePath)) {
+              // Read the image file
+              imageBuffer = await fs.promises.readFile(imageFilePath);
+              imagePath = imageFilePath;
+              tempImageFiles.push(imageFilePath);
+              console.log(
+                `[OCR] [PDF-TO-IMAGE] Read image from file: ${imageFilePath} (${(imageBuffer.length / 1024).toFixed(2)} KB)`,
+              );
+            } else if (result && result.buffer && result.buffer.length > 0) {
+              // Fallback: if buffer is provided and not empty
+              const bufferData = result.buffer;
+              if (Buffer.isBuffer(bufferData)) {
+                imageBuffer = bufferData;
+              } else if (bufferData instanceof Uint8Array) {
+                imageBuffer = Buffer.from(bufferData);
+              } else {
+                imageBuffer = Buffer.from(bufferData);
+              }
+              console.log(
+                `[OCR] [PDF-TO-IMAGE] Got buffer from pdf2pic: ${imageBuffer.length} bytes`,
+              );
+            } else {
+              throw new Error(
+                `No image data returned for page ${pageNum}. Result: ${JSON.stringify(result)}`,
+              );
+            }
+
+            if (imageBuffer && imageBuffer.length > 0) {
+              // Got file path, read the file
+              imagePath = result.path;
+              imageBuffer = await fs.promises.readFile(result.path);
+              tempImageFiles.push(result.path); // Track for cleanup
+              console.log(
+                `[OCR] [PDF-TO-IMAGE] Read image from file: ${result.path}`,
+              );
+            } else if (
+              result &&
+              typeof result === 'object' &&
+              'base64' in result &&
+              typeof result.base64 === 'string'
+            ) {
+              // Got base64, convert to buffer
+              imageBuffer = Buffer.from(result.base64, 'base64');
+              console.log(
+                `[OCR] [PDF-TO-IMAGE] Got base64 from pdf2pic, converted to buffer`,
+              );
+            } else {
+              // Try to find the file with expected name
+              const expectedPath = path.join(
+                debugDir,
+                `${baseFilename}.${pageNum}.png`,
+              );
+              if (fs.existsSync(expectedPath)) {
+                imagePath = expectedPath;
+                imageBuffer = await fs.promises.readFile(expectedPath);
+                tempImageFiles.push(expectedPath);
+                console.log(
+                  `[OCR] [PDF-TO-IMAGE] Found image at expected path: ${expectedPath}`,
+                );
+              } else {
+                throw new Error(`No image data returned for page ${pageNum}`);
+              }
+            }
+
+            if (imageBuffer) {
+              console.log(
+                `[OCR] [PDF-TO-IMAGE] ✓ Page ${pageNum} converted: ${(imageBuffer.length / 1024).toFixed(2)} KB`,
+              );
+              if (imagePath) {
+                console.log(
+                  `[OCR] [PDF-TO-IMAGE] Image saved to: ${imagePath}`,
+                );
+              }
+
+              // Verify image is not blank by checking PNG header and sample pixels
+              let hasContent = true;
+              if (imageBuffer.length > 8) {
+                // Check PNG header
+                const isPng =
+                  imageBuffer[0] === 0x89 &&
+                  imageBuffer[1] === 0x50 &&
+                  imageBuffer[2] === 0x4e &&
+                  imageBuffer[3] === 0x47;
+
+                if (isPng) {
+                  // Sample first 1000 bytes (excluding header) for non-white content
+                  const sampleStart = Math.min(100, imageBuffer.length);
+                  const sampleEnd = Math.min(1100, imageBuffer.length);
+                  const sample = imageBuffer.slice(sampleStart, sampleEnd);
+                  hasContent = sample.some(
+                    (byte: number) => byte !== 0xff && byte !== 0x00,
+                  );
+                }
+              }
+
+              if (!hasContent) {
+                console.warn(
+                  `[OCR] [PDF-TO-IMAGE] ⚠️ Warning: Page ${pageNum} may be blank`,
+                );
+              } else {
+                console.log(
+                  `[OCR] [PDF-TO-IMAGE] ✓ Page ${pageNum} has content`,
+                );
+              }
+
+              // Copy to final debug location with better naming
+              const imageFilename = originalFileName
+                ? `${originalFileName.replace(/\.pdf$/i, '')}_page_${pageNum}.png`
+                : `page_${pageNum}.png`;
+
+              const finalDebugPath = await this.saveDebugImage(
+                imageBuffer,
+                imageFilename,
+                {
+                  pageNumber: pageNum,
+                  sizeKB: imageBuffer.length / 1024,
+                  method: 'pdf2pic',
+                  hasContent: hasContent,
+                  originalFileName: originalFileName,
+                  tempPath: imagePath || undefined,
+                },
+              );
+
+              if (finalDebugPath) {
+                console.log(
+                  `[OCR] [PDF-TO-IMAGE] ✓ Saved debug image: ${finalDebugPath}`,
+                );
+              }
+
+              imageBuffers.push(imageBuffer);
+            } else {
+              console.warn(
+                `[OCR] [PDF-TO-IMAGE] Page ${pageNum} conversion returned no path`,
+              );
+              // Try to check if file exists with expected name
+              const expectedPath = path.join(
+                debugDir,
+                `${baseFilename}.${pageNum}.png`,
+              );
+              if (fs.existsSync(expectedPath)) {
+                const imageBuffer = await fs.promises.readFile(expectedPath);
+                tempImageFiles.push(expectedPath);
+                imageBuffers.push(imageBuffer);
+                console.log(
+                  `[OCR] [PDF-TO-IMAGE] ✓ Found page ${pageNum} at expected path`,
+                );
+              } else {
+                break; // Stop if no more pages
+              }
+            }
+          } catch (pageError: any) {
+            console.warn(
+              `[OCR] [PDF-TO-IMAGE] Failed to convert page ${pageNum}: ${pageError.message}`,
+            );
+            // If first page fails, it might mean pdf2pic isn't working
+            if (pageNum === 1) {
+              throw pageError; // If first page fails, throw error
+            }
+            break; // Stop if a page fails
+          }
+        }
+
+        // Clean up temporary image files created by pdf2pic
+        for (const tempFile of tempImageFiles) {
+          try {
+            await fs.promises.unlink(tempFile);
+            console.log(
+              `[OCR] [PDF-TO-IMAGE] Cleaned up temp image: ${tempFile}`,
+            );
+          } catch (cleanupError: any) {
+            console.warn(
+              `[OCR] [PDF-TO-IMAGE] Failed to cleanup temp image: ${cleanupError.message}`,
+            );
+          }
+        }
+
+        // Clean up temporary PDF file
+        try {
+          await fs.promises.unlink(tempPdfPath);
+          console.log(`[OCR] [PDF-TO-IMAGE] Cleaned up temporary PDF file`);
+        } catch (cleanupError: any) {
+          console.warn(
+            `[OCR] [PDF-TO-IMAGE] Failed to cleanup temp file: ${cleanupError.message}`,
+          );
+        }
+
+        if (imageBuffers.length > 0) {
+          console.log(
+            `[OCR] [PDF-TO-IMAGE] ✓ Successfully converted ${imageBuffers.length} page(s) using pdf2pic`,
+          );
+          return imageBuffers;
+        }
+      } catch (pdf2picError: any) {
+        const errorMessage = pdf2picError.message || String(pdf2picError);
+        console.error(
+          `[OCR] [PDF-TO-IMAGE] pdf2pic conversion error: ${errorMessage}`,
+        );
+        // Clean up temp file on error
+        try {
+          await fs.promises.unlink(tempPdfPath);
+        } catch {
+          // Ignore cleanup errors
+        }
+        throw pdf2picError;
+      }
+    } catch (pdf2picError: any) {
+      const errorMessage = pdf2picError.message || String(pdf2picError);
+      console.error(`[OCR] [PDF-TO-IMAGE] pdf2pic failed: ${errorMessage}`);
+
+      // Check for common GraphicsMagick/ImageMagick errors
+      const isGraphicsMagickError =
+        errorMessage.includes('GraphicsMagick') ||
+        errorMessage.includes('ImageMagick') ||
+        errorMessage.includes('gm') ||
+        errorMessage.includes('convert') ||
+        errorMessage.includes('not found') ||
+        errorMessage.includes('ENOENT') ||
+        errorMessage.includes('spawn') ||
+        errorMessage.includes('command not found');
+
+      // Check for Ghostscript errors
+      const isGhostscriptError =
+        errorMessage.includes('gs') ||
+        errorMessage.includes('Ghostscript') ||
+        errorMessage.includes('Postscript delegate') ||
+        errorMessage.includes('Postscript delegate failed');
+
+      if (isGraphicsMagickError || isGhostscriptError) {
+        console.error(
+          `[OCR] [PDF-TO-IMAGE] ========================================`,
+        );
+        console.error(`[OCR] [PDF-TO-IMAGE] Missing system dependencies!`);
+        console.error(
+          `[OCR] [PDF-TO-IMAGE] ========================================`,
+        );
+        console.error(
+          `[OCR] [PDF-TO-IMAGE] Required system dependencies (NOT npm packages):`,
+        );
+        console.error(
+          `[OCR] [PDF-TO-IMAGE]   1. GraphicsMagick - for PDF conversion`,
+        );
+        console.error(
+          `[OCR] [PDF-TO-IMAGE]   2. Ghostscript - required by GraphicsMagick for PDFs`,
+        );
+        console.error(
+          `[OCR] [PDF-TO-IMAGE] ========================================`,
+        );
+        console.error(`[OCR] [PDF-TO-IMAGE] Installation commands:`);
+        console.error(
+          `[OCR] [PDF-TO-IMAGE]   macOS: brew install graphicsmagick ghostscript`,
+        );
+        console.error(
+          `[OCR] [PDF-TO-IMAGE]   Ubuntu/Debian: sudo apt-get install graphicsmagick ghostscript`,
+        );
+        console.error(
+          `[OCR] [PDF-TO-IMAGE]   CentOS/RHEL: sudo yum install GraphicsMagick ghostscript`,
+        );
+        console.error(
+          `[OCR] [PDF-TO-IMAGE]   Alpine (Docker): apk add graphicsmagick ghostscript`,
+        );
+        console.error(
+          `[OCR] [PDF-TO-IMAGE] ========================================`,
+        );
+        console.error(
+          `[OCR] [PDF-TO-IMAGE] See SETUP.md for detailed installation instructions`,
+        );
+        console.error(
+          `[OCR] [PDF-TO-IMAGE] ========================================`,
+        );
+        console.error(
+          `[OCR] [PDF-TO-IMAGE] Falling back to pdfjs-dist method (may produce blank images)...`,
+        );
+      } else {
+        console.warn(
+          `[OCR] [PDF-TO-IMAGE] pdf2pic error (may need GraphicsMagick/ImageMagick): ${errorMessage}`,
+        );
+        console.log(
+          `[OCR] [PDF-TO-IMAGE] Falling back to pdfjs-dist method...`,
+        );
+      }
+    }
+
+    // Fallback to pdfjs-dist method
+    try {
+      console.log('[OCR] [PDF-TO-IMAGE] Using fallback: pdfjs-dist method');
+      // Dynamically import pdfjs-dist - use legacy build for Node.js
+      console.log(
+        '[OCR] [PDF-TO-IMAGE] Loading pdfjs-dist/legacy build (recommended for Node.js)...',
+      );
       let pdfjsLib: any;
       try {
-        const pdfjsModule = await import('pdfjs-dist');
+        // Try legacy build first (recommended for Node.js)
+        const pdfjsModule = await import('pdfjs-dist/legacy/build/pdf.mjs');
         pdfjsLib = pdfjsModule.default || pdfjsModule;
-      } catch {
-        // eslint-disable-next-line @typescript-eslint/no-require-imports
-        pdfjsLib = require('pdfjs-dist');
+        console.log('[OCR] [PDF-TO-IMAGE] ✓ Loaded pdfjs-dist legacy build');
+      } catch (legacyError: any) {
+        console.warn(
+          `[OCR] [PDF-TO-IMAGE] Legacy build failed: ${legacyError.message}`,
+        );
+        try {
+          // Fallback to regular build
+          const pdfjsModule = await import('pdfjs-dist');
+          pdfjsLib = pdfjsModule.default || pdfjsModule;
+          console.log(
+            '[OCR] [PDF-TO-IMAGE] Using regular pdfjs-dist build (may have issues)',
+          );
+        } catch {
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          pdfjsLib = require('pdfjs-dist');
+          console.log('[OCR] [PDF-TO-IMAGE] Using pdfjs-dist via require');
+        }
       }
 
       // Import canvas for rendering (@napi-rs/canvas is available via pdfjs-dist dependency)
@@ -814,6 +1531,16 @@ export class OcrService {
         throw new Error(
           'Canvas library not available for PDF rendering. Please ensure @napi-rs/canvas is installed.',
         );
+      }
+
+      // Import Sharp for image optimization
+      let sharp: any;
+      try {
+        const sharpModule = await import('sharp');
+        sharp = sharpModule.default || sharpModule;
+      } catch {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        sharp = require('sharp');
       }
 
       // Set up pdfjs-dist worker (required for Node.js)
@@ -849,32 +1576,292 @@ export class OcrService {
       const maxPages = Math.min(numPages, 5);
       for (let pageNum = 1; pageNum <= maxPages; pageNum++) {
         const page = await pdfDocument.getPage(pageNum);
-        const viewport = page.getViewport({ scale: 2.0 }); // 2x scale for better OCR quality
 
-        // Create canvas
+        // Use higher scale (3.0 instead of 2.0) for better OCR quality
+        // This increases resolution which helps with text detection
+        const scale = 3.0;
+        const viewport = page.getViewport({ scale });
+
+        // Create canvas with white background for better contrast
         const canvas = createCanvas(viewport.width, viewport.height);
         const context = canvas.getContext('2d');
 
+        // Fill with white background (important for scanned documents)
+        context.fillStyle = 'white';
+        context.fillRect(0, 0, viewport.width, viewport.height);
+        console.log(
+          `[OCR] [PDF-TO-IMAGE] Canvas created: ${viewport.width}x${viewport.height}, white background filled`,
+        );
+
+        // Get page info for debugging
+        try {
+          const pageInfo = {
+            rotate: page.rotate,
+            viewBox: page.view,
+          };
+          console.log(
+            `[OCR] [PDF-TO-IMAGE] Page ${pageNum} info:`,
+            JSON.stringify(pageInfo),
+          );
+        } catch (infoError: any) {
+          console.warn(
+            `[OCR] [PDF-TO-IMAGE] Could not get page info: ${infoError.message}`,
+          );
+        }
+
         // Render PDF page to canvas
+        // Try with explicit transform matrix to ensure proper rendering
         const renderContext = {
           canvasContext: context,
           viewport: viewport,
+          // Don't set transform - let pdfjs handle it
         };
 
-        await page.render(renderContext).promise;
+        // Render the page and wait for completion
+        console.log(
+          `[OCR] [PDF-TO-IMAGE] Starting render task for page ${pageNum}...`,
+        );
+        const renderTask = page.render(renderContext);
 
-        // Convert canvas to buffer
-        const imageBuffer = canvas.toBuffer('image/png');
-        imageBuffers.push(imageBuffer);
+        // Add error handling
+        let renderError: any = null;
+        renderTask.promise.catch((err: any) => {
+          renderError = err;
+          console.error(
+            `[OCR] [PDF-TO-IMAGE] Render task error for page ${pageNum}:`,
+            err.message,
+          );
+        });
+
+        await renderTask.promise;
+
+        if (renderError) {
+          throw renderError;
+        }
 
         console.log(
-          `[OCR] Converted page ${pageNum} to image (${imageBuffer.length} bytes)`,
+          `[OCR] [PDF-TO-IMAGE] Page ${pageNum} render task completed successfully`,
         );
+
+        // Verify rendering by checking a sample of pixels
+        // Check top-left 100x100 area for non-white pixels
+        let nonWhitePixels = 0;
+        let blankDetectionError: any = null;
+
+        try {
+          const sampleWidth = Math.min(100, viewport.width);
+          const sampleHeight = Math.min(100, viewport.height);
+          console.log(
+            `[OCR] [PDF-TO-IMAGE] Checking blank detection for page ${pageNum} (sample: ${sampleWidth}x${sampleHeight})...`,
+          );
+
+          const imageData = context.getImageData(
+            0,
+            0,
+            sampleWidth,
+            sampleHeight,
+          );
+          console.log(
+            `[OCR] [PDF-TO-IMAGE] Got image data: ${imageData.data.length} bytes`,
+          );
+
+          for (let i = 0; i < imageData.data.length; i += 4) {
+            const r = imageData.data[i];
+            const g = imageData.data[i + 1];
+            const b = imageData.data[i + 2];
+            // Check if pixel is not white (allowing for slight variations)
+            if (r < 250 || g < 250 || b < 250) {
+              nonWhitePixels++;
+            }
+          }
+
+          console.log(
+            `[OCR] [PDF-TO-IMAGE] Page ${pageNum} sample area (${sampleWidth}x${sampleHeight}): ${nonWhitePixels} non-white pixels found`,
+          );
+        } catch (blankCheckError: any) {
+          blankDetectionError = blankCheckError;
+          console.error(
+            `[OCR] [PDF-TO-IMAGE] Error during blank detection: ${blankCheckError.message}`,
+          );
+          console.error(`[OCR] [PDF-TO-IMAGE] Stack: ${blankCheckError.stack}`);
+        }
+
+        if (blankDetectionError) {
+          console.warn(
+            `[OCR] [PDF-TO-IMAGE] Could not verify if page ${pageNum} is blank due to error`,
+          );
+        } else if (nonWhitePixels === 0) {
+          console.error(
+            `[OCR] [PDF-TO-IMAGE] ⚠️ CRITICAL: Page ${pageNum} is BLANK after rendering!`,
+          );
+          console.error(
+            `[OCR] [PDF-TO-IMAGE] ========================================`,
+          );
+          console.error(
+            `[OCR] [PDF-TO-IMAGE] This indicates pdfjs-dist failed to render the PDF content.`,
+          );
+          console.error(
+            `[OCR] [PDF-TO-IMAGE] Known limitation: pdfjs-dist has issues rendering image-based PDFs in Node.js.`,
+          );
+          console.error(
+            `[OCR] [PDF-TO-IMAGE] ========================================`,
+          );
+          console.error(
+            `[OCR] [PDF-TO-IMAGE] WORKAROUND: Since direct image upload works perfectly:`,
+          );
+          console.error(
+            `[OCR] [PDF-TO-IMAGE]   1. Convert PDF pages to images manually (Preview, Adobe, online tools)`,
+          );
+          console.error(
+            `[OCR] [PDF-TO-IMAGE]   2. Upload the images directly - they will be processed successfully`,
+          );
+          console.error(
+            `[OCR] [PDF-TO-IMAGE] ========================================`,
+          );
+          console.error(
+            `[OCR] [PDF-TO-IMAGE] The blank image will be saved to ocr-debug/ for verification.`,
+          );
+        } else {
+          console.log(
+            `[OCR] [PDF-TO-IMAGE] ✓ Page ${pageNum} rendering verified - ${nonWhitePixels} non-white pixels detected`,
+          );
+        }
+
+        // Small delay to ensure rendering is complete (some PDFs need this)
+        await new Promise((resolve) => setTimeout(resolve, 200));
+
+        // Convert canvas to PNG buffer
+        // Note: @napi-rs/canvas toBuffer() doesn't support options, use default method
+        console.log(
+          `[OCR] [PDF-TO-IMAGE] Converting page ${pageNum} canvas to PNG buffer...`,
+        );
+        let imageBuffer: Buffer;
+        try {
+          imageBuffer = canvas.toBuffer('image/png');
+          console.log(
+            `[OCR] [PDF-TO-IMAGE] Page ${pageNum} canvas converted: ${(imageBuffer.length / 1024).toFixed(2)} KB`,
+          );
+        } catch (bufferError: any) {
+          console.error(
+            `[OCR] [PDF-TO-IMAGE] Failed to convert canvas to PNG for page ${pageNum}: ${bufferError.message}`,
+          );
+          throw new Error(
+            `Failed to convert canvas to PNG buffer: ${bufferError.message}`,
+          );
+        }
+
+        // Optimize image with Sharp for better OCR results
+        if (sharp) {
+          try {
+            console.log(
+              `[OCR] [PDF-TO-IMAGE] Optimizing page ${pageNum} image with Sharp...`,
+            );
+            // Enhance image for OCR:
+            // - Ensure minimum DPI (300 DPI is good for OCR)
+            // - Convert to grayscale (can improve OCR accuracy)
+            // - Increase contrast slightly
+            // - Ensure proper PNG format
+            const originalSize = imageBuffer.length;
+            imageBuffer = await sharp(imageBuffer)
+              .greyscale(false) // Keep color for now, some invoices have colored text
+              .normalize() // Enhance contrast
+              .png({ quality: 100, compressionLevel: 1 }) // High quality PNG
+              .toBuffer();
+
+            console.log(
+              `[OCR] [PDF-TO-IMAGE] Page ${pageNum} optimized: ${(originalSize / 1024).toFixed(2)} KB -> ${(imageBuffer.length / 1024).toFixed(2)} KB (${viewport.width}x${viewport.height}px)`,
+            );
+          } catch (sharpError: any) {
+            console.warn(
+              `[OCR] [PDF-TO-IMAGE] Sharp optimization failed for page ${pageNum}, using original:`,
+              sharpError.message,
+            );
+            // Continue with original buffer if Sharp fails
+          }
+        } else {
+          console.log(
+            `[OCR] [PDF-TO-IMAGE] Page ${pageNum} converted: ${(imageBuffer.length / 1024).toFixed(2)} KB (${viewport.width}x${viewport.height}px)`,
+          );
+        }
+
+        // Validate image buffer
+        if (!imageBuffer || imageBuffer.length === 0) {
+          throw new Error(
+            `Failed to generate image buffer for page ${pageNum}`,
+          );
+        }
+
+        // Basic PNG header validation (PNG files start with specific bytes: 89 50 4E 47)
+        const pngHeader = imageBuffer.slice(0, 4);
+        const isValidPng =
+          imageBuffer.length >= 8 &&
+          imageBuffer[0] === 0x89 &&
+          imageBuffer[1] === 0x50 &&
+          imageBuffer[2] === 0x4e &&
+          imageBuffer[3] === 0x47;
+
+        if (!isValidPng) {
+          console.warn(
+            `[OCR] [PDF-TO-IMAGE] ⚠️ Warning: Page ${pageNum} image buffer may not be a valid PNG. ` +
+              `First 4 bytes: ${Array.from(pngHeader)
+                .map((b) => '0x' + b.toString(16).padStart(2, '0'))
+                .join(' ')}. ` +
+              `Size: ${imageBuffer.length} bytes`,
+          );
+        } else {
+          console.log(
+            `[OCR] [PDF-TO-IMAGE] ✓ Page ${pageNum} PNG header validated`,
+          );
+        }
+
+        // Warn if image is suspiciously small (might indicate rendering issue)
+        const imageSizeKB = imageBuffer.length / 1024;
+        if (imageSizeKB < 10) {
+          console.warn(
+            `[OCR] [PDF-TO-IMAGE] ⚠️ Warning: Page ${pageNum} image is very small (${imageSizeKB.toFixed(2)} KB). This might indicate a rendering problem.`,
+          );
+        }
+
+        // Save image for debugging
+        const imageFilename = originalFileName
+          ? `${originalFileName.replace(/\.pdf$/i, '')}_page_${pageNum}.png`
+          : `page_${pageNum}.png`;
+
+        const savedPath = await this.saveDebugImage(
+          imageBuffer,
+          imageFilename,
+          {
+            pageNumber: pageNum,
+            width: viewport.width,
+            height: viewport.height,
+            scale: 3.0,
+            sizeKB: imageSizeKB,
+            isValidPng: isValidPng,
+            originalFileName: originalFileName,
+          },
+        );
+
+        if (savedPath) {
+          console.log(
+            `[OCR] [PDF-TO-IMAGE] ✓ Saved debug image for page ${pageNum}: ${savedPath}`,
+          );
+        }
+
+        imageBuffers.push(imageBuffer);
       }
+
+      if (imageBuffers.length === 0) {
+        throw new Error('No images were generated from PDF pages');
+      }
+
+      console.log(
+        `[OCR] Successfully converted ${imageBuffers.length} page(s) to images`,
+      );
 
       return imageBuffers;
     } catch (error: any) {
       console.error('[OCR] Error converting PDF to images:', error.message);
+      console.error('[OCR] Stack trace:', error.stack);
       throw new Error(
         `Failed to convert PDF pages to images: ${error.message}`,
       );
@@ -986,6 +1973,9 @@ export class OcrService {
         /(LLC|L\.L\.C\.|LTD|L\.T\.D\.|INC|INC\.|CORP|CORP\.|CO\.|COMPANY)/i,
       ];
 
+      // Try to find full company name first (lines with LLC, LTD, etc.)
+      let fullCompanyName: string | null = null; // eslint-disable-line prefer-const
+
       for (const line of searchLines) {
         const trimmed = line.trim();
         // Skip if matches skip patterns
@@ -1001,23 +1991,39 @@ export class OcrService {
         const reasonableLength = trimmed.length >= 3 && trimmed.length <= 100;
         const hasLetters = /[A-Za-z]/.test(trimmed);
 
+        // Additional check: if it's a short name (1-4 words) and appears early, it might be the vendor
+        const wordCount = trimmed.split(/\s+/).length;
+        const isShortName = wordCount >= 1 && wordCount <= 4;
+        const isEarlyLine = searchLines.indexOf(line) < 5; // First 5 lines
+        const isAllCapsOrTitleCase =
+          /^[A-Z][A-Z\s]+$/.test(trimmed) ||
+          /^[A-Z][a-z]+(\s+[A-Z][a-z]+)*$/.test(trimmed);
+
         // If it has company indicators or looks like a business name
+        // Also accept short names that appear early (likely vendor name like "BEST GRID")
         if (
           hasLetters &&
           reasonableLength &&
-          (hasCompanyIndicator || hasMultipleWords)
+          (hasCompanyIndicator ||
+            hasMultipleWords ||
+            (isShortName && isEarlyLine && isAllCapsOrTitleCase))
         ) {
           // Clean up the vendor name
           let vendorName = trimmed
             .replace(/\s+/g, ' ') // Normalize whitespace
             .substring(0, 100);
 
-          // Remove common suffixes that might be OCR errors
+          // Remove common suffixes that might be OCR errors (but keep if it's part of the name)
           vendorName = vendorName.replace(/\s+(LLC|LTD|INC|CORP|CO)\.?$/i, '');
 
           result.vendorName = vendorName;
           break;
         }
+      }
+
+      // Use full company name if found, otherwise use the short name we found
+      if (fullCompanyName && !result.vendorName) {
+        result.vendorName = fullCompanyName;
       }
 
       // Priority 2: If no company name found, take first substantial line
@@ -1034,7 +2040,20 @@ export class OcrService {
           const hasSubstance =
             trimmed.split(/\s+/).length >= 1 && trimmed.length >= 5;
 
-          if (hasLetters && reasonableLength && hasSubstance) {
+          // Don't skip lines that are just vendor names (like "BEST GRID")
+          // All caps with spaces (common for company names in invoices)
+          const isLikelyVendorName =
+            trimmed.length >= 5 &&
+            trimmed.length <= 50 &&
+            /^[A-Z\s]+$/.test(trimmed) && // All caps with spaces
+            trimmed.split(/\s+/).length >= 1 &&
+            trimmed.split(/\s+/).length <= 5;
+
+          if (
+            hasLetters &&
+            reasonableLength &&
+            (hasSubstance || isLikelyVendorName)
+          ) {
             result.vendorName = trimmed.substring(0, 100);
             break;
           }
@@ -1042,27 +2061,29 @@ export class OcrService {
       }
     }
 
-    // Extract invoice number (look for patterns like INV-123, #12345, BILL ID, etc.)
+    // Extract invoice number (look for patterns like INV-123, #12345, BILL ID, TI/BG/L2163-23/YI, etc.)
     const invoicePatterns = [
-      /(?:invoice|inv|receipt|bill)[\s#:]*([A-Z0-9\-]+)/i,
-      /(?:bill\s*id|invoice\s*no|receipt\s*no)[\s:]*([A-Z0-9\-]+)/i,
-      /#\s*([A-Z0-9\-]+)/i,
-      /(?:no|number)[\s:]*([A-Z0-9\-]+)/i,
+      /(?:invoice\s*reference\s*no\.?|invoice\s*ref\s*no\.?)[\s:]*([A-Z0-9\/\-]+)/i,
+      /(?:invoice|inv|receipt|bill)[\s#:]*([A-Z0-9\/\-]+)/i,
+      /(?:bill\s*id|invoice\s*no\.?|receipt\s*no\.?)[\s:]*([A-Z0-9\/\-]+)/i,
+      /#\s*([A-Z0-9\/\-]+)/i,
+      /(?:no\.?|number)[\s:]*([A-Z0-9\/\-]+)/i,
     ];
     for (const pattern of invoicePatterns) {
       const match = text.match(pattern);
       if (match && match[1]) {
-        result.invoiceNumber = match[1];
+        result.invoiceNumber = match[1].trim();
         break;
       }
     }
 
     // Extract TRN (Tax Registration Number) - UAE format is typically 15 digits
     const trnPatterns = [
-      /(?:trn|tax\s*registration\s*number|vat\s*number|tax\s*id)[\s:]*([A-Z0-9]{10,20})/i,
+      /(?:trn|tax\s*registration\s*number|vat\s*number|tax\s*id)[\s:#]*([A-Z0-9]{10,20})/i,
       /(?:registration\s*no|reg\s*no)[\s:]*([A-Z0-9]{10,20})/i,
-      /\b([0-Z]{15})\b/, // UAE TRN is typically 15 alphanumeric characters
-      /TRN[\s:]*([A-Z0-9]{10,20})/i,
+      /\b([A-Z0-9]{15})\b/, // UAE TRN is typically 15 alphanumeric characters (fixed: was 0-Z, should be A-Z0-9)
+      /TRN[\s:#]*([A-Z0-9]{10,20})/i, // Added # to handle "TRN#"
+      /TRN#\s*([A-Z0-9]{10,20})/i, // Explicit pattern for "TRN#"
     ];
     for (const pattern of trnPatterns) {
       const match = text.match(pattern);
