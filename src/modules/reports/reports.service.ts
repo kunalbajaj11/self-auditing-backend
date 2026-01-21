@@ -2543,6 +2543,7 @@ export class ReportsService {
           'entry.debit_account AS debitAccount',
           'entry.credit_account AS creditAccount',
           'SUM(entry.amount) AS amount',
+          'SUM(COALESCE(entry.vat_amount, 0)) AS vatAmount',
         ])
         .where('entry.organization_id = :organizationId', { organizationId })
         .andWhere('entry.entry_date < :startDate', { startDate })
@@ -3464,28 +3465,10 @@ export class ReportsService {
           'entry.debit_account AS debitAccount',
           'entry.credit_account AS creditAccount',
           'SUM(entry.amount) AS amount',
+          'SUM(COALESCE(entry.vat_amount, 0)) AS vatAmount',
         ])
         .where('entry.organization_id = :organizationId', { organizationId })
         .andWhere('entry.entry_date <= :asOfDate', { asOfDate })
-        .groupBy('entry.debit_account')
-        .addGroupBy('entry.credit_account');
-
-      // Separate query for equity accounts to include entries even when debit is Cash/Bank
-      // This ensures Share Capital entries are captured even if they're debited to Cash/Bank
-      // Only query entries where debit is Cash/Bank (since main query excludes these)
-      const equityAccountsQuery = this.journalEntriesRepository
-        .createQueryBuilder('entry')
-        .select([
-          'entry.debit_account AS debitAccount',
-          'entry.credit_account AS creditAccount',
-          'SUM(entry.amount) AS amount',
-        ])
-        .where('entry.organization_id = :organizationId', { organizationId })
-        .andWhere('entry.entry_date <= :asOfDate', { asOfDate })
-        .andWhere(
-          "entry.credit_account IN ('share_capital', 'retained_earnings', 'owner_shareholder_account')",
-        )
-        .andWhere("entry.debit_account IN ('cash', 'bank')")
         .groupBy('entry.debit_account')
         .addGroupBy('entry.credit_account');
 
@@ -3495,10 +3478,7 @@ export class ReportsService {
         creditNotesQuery.getRawOne(),
         debitNotesQuery.getRawOne(),
       ]);
-      const [journalRows, equityRows] = await Promise.all([
-        journalEntriesQuery.getRawMany(),
-        equityAccountsQuery.getRawMany(),
-      ]);
+      const journalRows = await journalEntriesQuery.getRawMany();
 
       const totalRevenue = Number(revenueRow?.revenue || 0);
       // Handle both camelCase and lowercase property names from database
@@ -3525,6 +3505,7 @@ export class ReportsService {
 
       journalRows.forEach((row) => {
         const amount = Number(row.amount || 0);
+        const vatAmount = Number(row.vatamount || row.vatAmount || 0);
         const debitAccount = row.debitaccount || row.debitAccount;
         const creditAccount = row.creditaccount || row.creditAccount;
 
@@ -3548,34 +3529,9 @@ export class ReportsService {
           creditAccount !== 'bank'
         ) {
           const existing = accountCredits.get(creditAccount as string) || 0;
-          accountCredits.set(creditAccount as string, existing + amount);
-        }
-      });
-
-      // Add equity account entries (including those with Cash/Bank as debit)
-      // This ensures Share Capital entries are captured even when debited to Cash/Bank
-      equityRows.forEach((row) => {
-        const amount = Number(row.amount || 0);
-        const debitAccount = row.debitaccount || row.debitAccount;
-        const creditAccount = row.creditaccount || row.creditAccount;
-
-        // Only process if credit account is an equity account
-        if (
-          creditAccount &&
-          [
-            'share_capital',
-            'retained_earnings',
-            'owner_shareholder_account',
-          ].includes(creditAccount)
-        ) {
-          // Track debits (even if to Cash/Bank) for equity accounts
-          if (debitAccount) {
-            const existing = accountDebits.get(debitAccount as string) || 0;
-            accountDebits.set(debitAccount as string, existing + amount);
-          }
-          // Track credits for equity accounts
-          const existing = accountCredits.get(creditAccount as string) || 0;
-          accountCredits.set(creditAccount as string, existing + amount);
+          const creditAmount =
+            creditAccount === 'accounts_payable' ? amount + vatAmount : amount;
+          accountCredits.set(creditAccount as string, existing + creditAmount);
         }
       });
 
@@ -3741,6 +3697,146 @@ export class ReportsService {
           amount: journalAccruedIncome,
         });
         totalAssets += journalAccruedIncome;
+      }
+
+      // Add all custom ledger accounts that are assets (including prepaid rent, etc.)
+      accountAmounts.forEach((balance, accountCode) => {
+        if (balance > 0) {
+          const ledgerId = this.parseLedgerAccountId(accountCode);
+          const ledgerAccount = ledgerId
+            ? ledgerAccountsById.get(ledgerId)
+            : null;
+          const category =
+            ledgerAccount?.category ||
+            ACCOUNT_METADATA[accountCode as JournalEntryAccount]?.category;
+
+          // Only add asset accounts that are not already added (exclude fixed enum accounts)
+          if (
+            category === 'asset' &&
+            accountCode !== JournalEntryAccount.PREPAID_EXPENSES &&
+            accountCode !== JournalEntryAccount.ACCOUNTS_RECEIVABLE &&
+            accountCode !== JournalEntryAccount.CASH &&
+            accountCode !== JournalEntryAccount.BANK &&
+            accountCode !== JournalEntryAccount.VAT_RECEIVABLE
+          ) {
+            const accountName = ledgerAccount?.name || accountCode;
+            assets.push({
+              category: accountName,
+              amount: balance,
+            });
+            totalAssets += balance;
+            this.logger.debug(
+              `Balance Sheet - Added custom asset account: ${accountName}, amount=${balance}, organizationId=${organizationId}`,
+            );
+          }
+        }
+      });
+
+      // Add VAT Receivable from journal entries
+      const journalVatReceivableQuery = this.journalEntriesRepository
+        .createQueryBuilder('entry')
+        .select(['SUM(COALESCE(entry.vat_amount, 0)) AS vatAmount'])
+        .where('entry.organization_id = :organizationId', { organizationId })
+        .andWhere('entry.entry_date <= :asOfDate', { asOfDate })
+        .andWhere('CAST(entry.vat_amount AS DECIMAL) > 0')
+        .andWhere(
+          "(entry.vat_tax_type IS NULL OR entry.vat_tax_type != 'reverse_charge')",
+        );
+
+      const journalVatReceivableRow =
+        await journalVatReceivableQuery.getRawOne();
+      const journalVatReceivableAmount = Number(
+        journalVatReceivableRow?.vatamount ||
+          journalVatReceivableRow?.vatAmount ||
+          0,
+      );
+
+      if (journalVatReceivableAmount > 0) {
+        // Check if VAT Receivable already exists in assets (from expenses)
+        const existingVatReceivableIndex = assets.findIndex(
+          (asset) => asset.category === 'VAT Receivable (Input VAT)',
+        );
+        if (existingVatReceivableIndex >= 0) {
+          // Add journal entry VAT to existing VAT Receivable
+          assets[existingVatReceivableIndex].amount +=
+            journalVatReceivableAmount;
+          totalAssets += journalVatReceivableAmount;
+          this.logger.debug(
+            `Balance Sheet - Added journal entry VAT to existing VAT Receivable: ${journalVatReceivableAmount}, organizationId=${organizationId}`,
+          );
+        } else {
+          // Add new VAT Receivable entry
+          assets.push({
+            category: 'VAT Receivable (Input VAT)',
+            amount: journalVatReceivableAmount,
+          });
+          totalAssets += journalVatReceivableAmount;
+          this.logger.debug(
+            `Balance Sheet - Added VAT Receivable from journal entries: ${journalVatReceivableAmount}, organizationId=${organizationId}`,
+          );
+        }
+      }
+
+      // Add Accounts Payable from journal entries to liabilities
+      if (totalJournalOutstanding > 0) {
+        liabilities.push({
+          vendor: 'Accounts Payable (Journal Entries)',
+          amount: totalJournalOutstanding,
+          status: 'Unpaid',
+          category: 'Accounts Payable',
+        });
+        totalLiabilities += totalJournalOutstanding;
+        this.logger.debug(
+          `Balance Sheet - Added Accounts Payable from journal entries: ${totalJournalOutstanding}, organizationId=${organizationId}`,
+        );
+      }
+
+      // Add all custom ledger accounts that are liabilities (including Salary Payables, etc.)
+      accountAmounts.forEach((balance, accountCode) => {
+        if (balance > 0) {
+          const ledgerId = this.parseLedgerAccountId(accountCode);
+          const ledgerAccount = ledgerId
+            ? ledgerAccountsById.get(ledgerId)
+            : null;
+          const category =
+            ledgerAccount?.category ||
+            ACCOUNT_METADATA[accountCode as JournalEntryAccount]?.category;
+
+          // Only add liability accounts that are not already added (exclude fixed enum accounts)
+          if (
+            category === 'liability' &&
+            accountCode !== JournalEntryAccount.ACCOUNTS_PAYABLE &&
+            accountCode !== JournalEntryAccount.VAT_PAYABLE &&
+            accountCode !== JournalEntryAccount.CUSTOMER_ADVANCES
+          ) {
+            const accountName = ledgerAccount?.name || accountCode;
+            liabilities.push({
+              vendor: accountName,
+              amount: balance,
+              status: 'Liability',
+              category: accountName,
+            });
+            totalLiabilities += balance;
+            this.logger.debug(
+              `Balance Sheet - Added custom liability account: ${accountName}, amount=${balance}, organizationId=${organizationId}`,
+            );
+          }
+        }
+      });
+
+      // Add a non-counting "Accounts Payable (Total)" row to make Balance Sheet reconcile 1:1 with Trial Balance.
+      // TB typically shows a single "Accounts Payable" balance, while BS lists vendor-level payables plus JE payables.
+      // IMPORTANT: Do NOT add this to totalLiabilities; it's display-only.
+      const accountsPayableTotal = liabilities
+        .filter((l) => l.category === 'Accounts Payable')
+        .reduce((sum, l) => sum + Number(l.amount || 0), 0);
+      if (accountsPayableTotal > 0) {
+        liabilities.unshift({
+          vendor: 'Accounts Payable (Total)',
+          amount: accountsPayableTotal,
+          status: 'Summary',
+          category: 'Accounts Payable',
+        });
       }
 
       // totalEquity will be recalculated after we get opening amounts
@@ -3943,24 +4039,6 @@ export class ReportsService {
         .groupBy('entry.debit_account')
         .addGroupBy('entry.credit_account');
 
-      // Separate query for opening equity accounts to include entries even when debit is Cash/Bank
-      // This ensures Share Capital entries are captured even if they're debited to Cash/Bank
-      const openingEquityAccountsQuery = this.journalEntriesRepository
-        .createQueryBuilder('entry')
-        .select([
-          'entry.debit_account AS debitAccount',
-          'entry.credit_account AS creditAccount',
-          'SUM(entry.amount) AS amount',
-        ])
-        .where('entry.organization_id = :organizationId', { organizationId })
-        .andWhere('entry.entry_date < :startDate', { startDate })
-        .andWhere(
-          "entry.credit_account IN ('share_capital', 'retained_earnings', 'owner_shareholder_account')",
-        )
-        .andWhere("entry.debit_account IN ('cash', 'bank')")
-        .groupBy('entry.debit_account')
-        .addGroupBy('entry.credit_account');
-
       // OPTIMIZATION: Split large Promise.all into smaller batches to reduce connection pool pressure
       // Batch 1: Core opening balances (5 queries)
       // Batch 2: Additional opening balances (5 queries)
@@ -3997,13 +4075,11 @@ export class ReportsService {
       const [
         openingDebitNotesRow,
         openingJournalRows,
-        openingEquityRows,
         openingCashJournalEntriesRow,
         openingBankJournalEntriesRow,
       ] = await Promise.all([
         openingDebitNotesQuery.getRawOne(),
         openingJournalQuery.getRawMany(),
-        openingEquityAccountsQuery.getRawMany(),
         openingCashJournalEntriesQuery.getRawOne(),
         openingBankJournalEntriesQuery.getRawOne(),
       ]);
@@ -4169,6 +4245,7 @@ export class ReportsService {
 
       openingJournalRows.forEach((row) => {
         const amount = Number(row.amount || 0);
+        const vatAmount = Number(row.vatamount || row.vatAmount || 0);
         const debitAccount = row.debitaccount || row.debitAccount;
         const creditAccount = row.creditaccount || row.creditAccount;
 
@@ -4194,31 +4271,19 @@ export class ReportsService {
         ) {
           const existing =
             openingAccountCredits.get(creditAccount as string) || 0;
-          openingAccountCredits.set(creditAccount as string, existing + amount);
+          const creditAmount =
+            creditAccount === 'accounts_payable' ? amount + vatAmount : amount;
+          openingAccountCredits.set(
+            creditAccount as string,
+            existing + creditAmount,
+          );
         }
       });
 
-      // Add opening equity account entries (including those with Cash/Bank as debit)
-      // This ensures Share Capital entries are captured even when debited to Cash/Bank
-      openingEquityRows.forEach((row) => {
-        const amount = Number(row.amount || 0);
-        const creditAccount = row.creditaccount || row.creditAccount;
-
-        // Only process if credit account is an equity account
-        if (
-          creditAccount &&
-          [
-            'share_capital',
-            'retained_earnings',
-            'owner_shareholder_account',
-          ].includes(creditAccount)
-        ) {
-          // Track credits for equity accounts
-          const existing =
-            openingAccountCredits.get(creditAccount as string) || 0;
-          openingAccountCredits.set(creditAccount as string, existing + amount);
-        }
-      });
+      // NOTE: We intentionally do NOT run a separate "opening equity" query here.
+      // `openingJournalRows` already captures equity credits even when the debit side is Cash/Bank,
+      // because we only skip posting to Cash/Bank, not skipping the equity credit side.
+      // A separate equity query would double-count Share Capital / Owner amounts.
 
       const openingLedgerAccountsById = await this.loadLedgerAccountsByIds(
         organizationId,

@@ -5138,7 +5138,6 @@ export class ReportGeneratorService {
         'Closing Debit',
         'Closing Credit',
         'Closing Balance',
-        'Opening Balance (Plus)+Debit (minus)-Credit',
       ];
       accountsSheet.addRow(headerRowValues);
       const headerRow = accountsSheet.getRow(1);
@@ -5186,43 +5185,23 @@ export class ReportGeneratorService {
           item.closingCredit || 0,
           closingBalanceDisplay, // Use inverted value for credit accounts
         ]);
-
-        // Add formula column: Opening Balance + Period Debit - Period Credit
-        // For credit accounts, we need to invert the formula result
-        const openingBalanceCell = `E${rowNum}`;
-        const periodDebitCell = `F${rowNum}`;
-        const periodCreditCell = `G${rowNum}`;
-        
-        if (isCreditAccount) {
-          // For credit accounts: -(Opening Balance + Debit - Credit)
-          const formulaCell = accountsSheet.getCell(`L${rowNum}`);
-          formulaCell.value = {
-            formula: `-(${openingBalanceCell}+${periodDebitCell}-${periodCreditCell})`,
-          };
-        } else {
-          // For debit accounts: Opening Balance + Debit - Credit
-          const formulaCell = accountsSheet.getCell(`L${rowNum}`);
-          formulaCell.value = {
-            formula: `${openingBalanceCell}+${periodDebitCell}-${periodCreditCell}`,
-          };
-        }
       });
 
-      // Format all currency columns including the formula column
-      ['C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L'].forEach((col) => {
+      // Format all currency columns
+      ['C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K'].forEach((col) => {
         accountsSheet.getColumn(col).numFmt = `"${currency}" #,##0.00`;
         accountsSheet.getColumn(col).alignment = { horizontal: 'right' };
       });
 
       accountsSheet.getColumn('A').width = 25;
       accountsSheet.getColumn('B').width = 15;
-      ['C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L'].forEach((col) => {
+      ['C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K'].forEach((col) => {
         accountsSheet.getColumn(col).width = 18;
       });
 
-      // Add total row with formula for the formula column
+      // Add total row (optional)
       const totalRowNum = data.accounts.length + 2;
-      accountsSheet.addRow(['Sum Total', '', '', '', '', '', '', '', '', '', '', '']);
+      accountsSheet.addRow(['Sum Total', '', '', '', '', '', '', '', '', '', '']);
       const totalRow = accountsSheet.getRow(totalRowNum);
       totalRow.font = { bold: true };
       totalRow.fill = {
@@ -5236,12 +5215,6 @@ export class ReportGeneratorService {
       closingBalanceSumCell.value = { formula: `SUM(K2:K${totalRowNum - 1})` };
       closingBalanceSumCell.numFmt = `"${currency}" #,##0.00`;
       closingBalanceSumCell.alignment = { horizontal: 'right' };
-      
-      // Add sum formula for formula column (L) - should equal 0
-      const formulaSumCell = accountsSheet.getCell(`L${totalRowNum}`);
-      formulaSumCell.value = { formula: `SUM(L2:L${totalRowNum - 1})` };
-      formulaSumCell.numFmt = `"${currency}" #,##0.00`;
-      formulaSumCell.alignment = { horizontal: 'right' };
     }
   }
 
