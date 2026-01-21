@@ -1083,28 +1083,96 @@ export class ReportsService {
 
       const accrualsAtEnd = Number(accrualsAtEndRow?.credit || 0);
       const accrualsAtStart = Number(accrualsAtStartRow?.credit || 0);
-      const accrualsPeriodMovement = accrualsAtEnd - accrualsAtStart;
+      // Trial Balance presentation requirement:
+      // Show Accounts Payable period CREDIT as total supplier purchases (incl. VAT) + AP journal credits,
+      // and period DEBIT as the offset (payments + debit notes), so that:
+      // closingAP = openingAP + periodCredit - periodDebit
 
-      const accrualsPeriodDebit =
-        accrualsPeriodMovement < 0 ? Math.abs(accrualsPeriodMovement) : 0;
-      const accrualsPeriodCredit =
-        accrualsPeriodMovement > 0 ? accrualsPeriodMovement : 0;
-      // Closing balance should be the total outstanding (accrualsAtEnd) as credit
-      const apClosingBalance = accrualsAtEnd;
+      // Journal AP balance at start/end (VAT-inclusive, like TB JE logic)
+      const journalApAtEndQuery = this.journalEntriesRepository
+        .createQueryBuilder('entry')
+        .select([
+          "SUM(CASE WHEN entry.credit_account = 'accounts_payable' THEN (entry.amount + COALESCE(entry.vat_amount, 0)) ELSE 0 END) AS credit",
+          "SUM(CASE WHEN entry.debit_account = 'accounts_payable' THEN (entry.amount + COALESCE(entry.vat_amount, 0)) ELSE 0 END) AS debit",
+        ])
+        .where('entry.organization_id = :organizationId', { organizationId })
+        .andWhere('entry.entry_date <= :endDate', { endDate });
+
+      const journalApAtStartQuery = this.journalEntriesRepository
+        .createQueryBuilder('entry')
+        .select([
+          "SUM(CASE WHEN entry.credit_account = 'accounts_payable' THEN (entry.amount + COALESCE(entry.vat_amount, 0)) ELSE 0 END) AS credit",
+          "SUM(CASE WHEN entry.debit_account = 'accounts_payable' THEN (entry.amount + COALESCE(entry.vat_amount, 0)) ELSE 0 END) AS debit",
+        ])
+        .where('entry.organization_id = :organizationId', { organizationId })
+        .andWhere('entry.entry_date < :startDate', { startDate });
+
+      // Total supplier purchases for the period (incl. VAT), regardless of settlement method
+      const expensesTotalPeriodQuery = this.expensesRepository
+        .createQueryBuilder('expense')
+        .select([
+          'SUM(COALESCE(expense.total_amount, expense.amount + COALESCE(expense.vat_amount, 0))) AS total',
+        ])
+        .where('expense.organization_id = :organizationId', { organizationId })
+        .andWhere('expense.is_deleted = false')
+        .andWhere('expense.expense_date >= :startDate', { startDate })
+        .andWhere('expense.expense_date <= :endDate', { endDate })
+        .andWhere("(expense.type IS NULL OR expense.type != 'credit')");
+
+      const journalApCreditsPeriodQuery = this.journalEntriesRepository
+        .createQueryBuilder('entry')
+        .select(['SUM(entry.amount + COALESCE(entry.vat_amount, 0)) AS credit'])
+        .where('entry.organization_id = :organizationId', { organizationId })
+        .andWhere("entry.credit_account = 'accounts_payable'")
+        .andWhere('entry.entry_date >= :startDate', { startDate })
+        .andWhere('entry.entry_date <= :endDate', { endDate });
+
+      const [
+        journalApAtEndRow,
+        journalApAtStartRow,
+        expensesTotalPeriodRow,
+        journalApCreditsPeriodRow,
+      ] = await Promise.all([
+        journalApAtEndQuery.getRawOne(),
+        journalApAtStartQuery.getRawOne(),
+        expensesTotalPeriodQuery.getRawOne(),
+        journalApCreditsPeriodQuery.getRawOne(),
+      ]);
+
+      const journalApEnd =
+        Number(journalApAtEndRow?.credit || 0) -
+        Number(journalApAtEndRow?.debit || 0);
+      const journalApStart =
+        Number(journalApAtStartRow?.credit || 0) -
+        Number(journalApAtStartRow?.debit || 0);
+
+      const openingAp = accrualsAtStart + journalApStart;
+      const closingAp = accrualsAtEnd + journalApEnd;
+
+      const expensePurchasesPeriod = Number(expensesTotalPeriodRow?.total || 0);
+      const journalApCreditsPeriod = Number(
+        journalApCreditsPeriodRow?.credit || 0,
+      );
+      const apPeriodCredit = expensePurchasesPeriod + journalApCreditsPeriod;
+      const apPeriodDebit = openingAp + apPeriodCredit - closingAp;
+
+      // Closing balance should be the total outstanding at end (credit balance for liability)
+      const apClosingBalance = closingAp;
 
       // Always add AP account if there's any balance (opening or closing)
       if (
         accrualsAtStart > 0 ||
         accrualsAtEnd > 0 ||
-        accrualsPeriodDebit > 0 ||
-        accrualsPeriodCredit > 0
+        apPeriodDebit > 0 ||
+        apPeriodCredit > 0 ||
+        openingAp > 0 ||
+        closingAp > 0
       ) {
         accounts.push({
           accountName: 'Accounts Payable',
           accountType: 'Liability',
-          debit: accrualsPeriodDebit,
-          credit:
-            accrualsPeriodCredit + (accrualsAtStart > 0 ? accrualsAtStart : 0), // Include opening balance in credit
+          debit: apPeriodDebit > 0 ? apPeriodDebit : 0,
+          credit: apPeriodCredit > 0 ? apPeriodCredit : 0,
           balance: apClosingBalance, // Closing balance (positive = credit for liability)
         });
       }
@@ -1245,15 +1313,47 @@ export class ReportsService {
 
       const arAtEnd = receivablesAtEnd + debitNotesAtEnd;
       const arAtStart = receivablesAtStart + debitNotesAtStart;
-      const arPeriodMovement = arAtEnd - arAtStart;
-
-      // For Trial Balance: AR should show closing balance as DEBIT
-      // Period movement: positive = increase (debit), negative = decrease (credit)
-      const arPeriodDebit = arPeriodMovement > 0 ? arPeriodMovement : 0;
-      const arPeriodCredit =
-        arPeriodMovement < 0 ? Math.abs(arPeriodMovement) : 0;
       // Closing balance is the total outstanding (arAtEnd) - should be positive debit
       const arClosingBalance = arAtEnd;
+
+      // Trial Balance presentation requirement:
+      // Show AR period DEBIT as total invoice totals (incl. VAT) + customer debit notes in period,
+      // and AR period CREDIT as the offset (cash received + credit notes etc.) so that:
+      // closingAR = openingAR + periodDebit - periodCredit
+      const invoicesTotalPeriodQuery = this.salesInvoicesRepository
+        .createQueryBuilder('invoice')
+        .select(['SUM(COALESCE(invoice.total_amount, 0)) AS total'])
+        .where('invoice.organization_id = :organizationId', { organizationId })
+        .andWhere('invoice.is_deleted = false')
+        .andWhere('invoice.invoice_date >= :startDate', { startDate })
+        .andWhere('invoice.invoice_date <= :endDate', { endDate });
+
+      const customerDebitNotesPeriodQuery = this.debitNotesRepository
+        .createQueryBuilder('debitNote')
+        .select(['SUM(COALESCE(debitNote.total_amount, 0)) AS total'])
+        .where('debitNote.organization_id = :organizationId', {
+          organizationId,
+        })
+        .andWhere('debitNote.invoice_id IS NOT NULL')
+        .andWhere('debitNote.is_deleted = false')
+        .andWhere('debitNote.debit_note_date >= :startDate', { startDate })
+        .andWhere('debitNote.debit_note_date <= :endDate', { endDate })
+        .andWhere('debitNote.status IN (:...statuses)', {
+          statuses: [DebitNoteStatus.ISSUED, DebitNoteStatus.APPLIED],
+        });
+
+      const [invoicesTotalPeriodRow, customerDebitNotesPeriodRow] =
+        await Promise.all([
+          invoicesTotalPeriodQuery.getRawOne(),
+          customerDebitNotesPeriodQuery.getRawOne(),
+        ]);
+
+      const invoicesTotalPeriod = Number(invoicesTotalPeriodRow?.total || 0);
+      const customerDebitNotesPeriod = Number(
+        customerDebitNotesPeriodRow?.total || 0,
+      );
+      const arPeriodDebit = invoicesTotalPeriod + customerDebitNotesPeriod;
+      const arPeriodCredit = arAtStart + arPeriodDebit - arAtEnd;
 
       // Always add AR account if there's any balance (opening or closing)
       // Match Balance Sheet logic exactly: show if netReceivablesAmount > 0
@@ -1269,8 +1369,8 @@ export class ReportsService {
         accounts.push({
           accountName: 'Accounts Receivable',
           accountType: 'Asset',
-          debit: arPeriodDebit + (arAtStart > 0 ? arAtStart : 0), // Include opening balance in debit
-          credit: arPeriodCredit,
+          debit: arPeriodDebit > 0 ? arPeriodDebit : 0,
+          credit: arPeriodCredit > 0 ? arPeriodCredit : 0,
           balance: arClosingBalance, // Closing balance (positive = debit for asset)
         });
       }
@@ -1721,16 +1821,29 @@ export class ReportsService {
         const debitAccount = row.debitaccount || row.debitAccount;
         const creditAccount = row.creditaccount || row.creditAccount;
 
-        const debitLedgerId = this.parseLedgerAccountId(debitAccount);
-        if (debitLedgerId) customLedgerIds.push(debitLedgerId);
-        const creditLedgerId = this.parseLedgerAccountId(creditAccount);
-        if (creditLedgerId) customLedgerIds.push(creditLedgerId);
+        // Accounts Payable is calculated separately (accruals + JE AP totals) to satisfy the
+        // “gross debit/credit movement” requirement. To avoid double-counting AP, we skip
+        // posting to the AP account *here*, but we must still post the non‑AP side so the
+        // Trial Balance remains balanced (e.g., Prepaid Rent / Expense debits).
+        const creditIsAp = creditAccount === 'accounts_payable';
+        const debitIsAp = debitAccount === 'accounts_payable';
+
+        // Track custom ledger IDs for the non-AP side(s) only
+        if (debitAccount && !debitIsAp) {
+          const debitLedgerId = this.parseLedgerAccountId(debitAccount);
+          if (debitLedgerId) customLedgerIds.push(debitLedgerId);
+        }
+        if (creditAccount && !creditIsAp) {
+          const creditLedgerId = this.parseLedgerAccountId(creditAccount);
+          if (creditLedgerId) customLedgerIds.push(creditLedgerId);
+        }
 
         // Add base amount to debit account
         // If credit account is Accounts Payable, VAT is part of what you owe (not a receivable)
         // Otherwise, VAT goes to VAT Receivable (Input VAT)
         if (
           debitAccount &&
+          !debitIsAp &&
           debitAccount !== 'cash' &&
           debitAccount !== 'bank'
         ) {
@@ -1754,6 +1867,7 @@ export class ReportsService {
         // For other accounts: base amount only (VAT handled separately)
         if (
           creditAccount &&
+          !creditIsAp &&
           creditAccount !== 'cash' &&
           creditAccount !== 'bank'
         ) {
@@ -2321,12 +2435,26 @@ export class ReportsService {
       const openingAccrualsRow = await openingAccrualsQuery.getRawOne();
       const openingAccrualsCredit = Number(openingAccrualsRow?.credit || 0);
 
-      const openingAccrualsBalance = openingAccrualsCredit - 0;
+      // Opening Accounts Payable should include both accrual-based AP and journal-entry AP (VAT-inclusive)
+      const openingJournalApRow = await this.journalEntriesRepository
+        .createQueryBuilder('entry')
+        .select([
+          "SUM(CASE WHEN entry.credit_account = 'accounts_payable' THEN (entry.amount + COALESCE(entry.vat_amount, 0)) ELSE 0 END) AS credit",
+          "SUM(CASE WHEN entry.debit_account = 'accounts_payable' THEN (entry.amount + COALESCE(entry.vat_amount, 0)) ELSE 0 END) AS debit",
+        ])
+        .where('entry.organization_id = :organizationId', { organizationId })
+        .andWhere('entry.entry_date < :startDate', { startDate })
+        .getRawOne();
+
+      const openingJournalAp =
+        Number(openingJournalApRow?.credit || 0) -
+        Number(openingJournalApRow?.debit || 0);
+      const openingApCreditTotal = openingAccrualsCredit + openingJournalAp;
 
       openingBalances.set('Accounts Payable', {
         debit: 0,
-        credit: openingAccrualsCredit,
-        balance: openingAccrualsBalance,
+        credit: openingApCreditTotal,
+        balance: openingApCreditTotal,
       });
 
       const openingCreditNoteApplicationsSubquery =
@@ -3226,7 +3354,7 @@ export class ReportsService {
         );
       }
 
-      const liabilities: Array<{
+      let liabilities: Array<{
         vendor: string;
         amount: number;
         status: string;
@@ -3869,6 +3997,24 @@ export class ReportsService {
           }
         }
       });
+
+      // Collapse Accounts Payable into a single total row (UI requirement).
+      // We still keep totalLiabilities intact (already includes these amounts).
+      const accountsPayableTotal = liabilities
+        .filter((l) => l.category === 'Accounts Payable')
+        .reduce((sum, l) => sum + Number(l.amount || 0), 0);
+      if (accountsPayableTotal > 0) {
+        liabilities = liabilities.filter(
+          (l) => l.category !== 'Accounts Payable',
+        );
+        liabilities.unshift({
+          vendor: 'Accounts Payable',
+          amount: accountsPayableTotal,
+          status: 'liability',
+          expectedDate: null,
+          category: 'Accounts Payable',
+        });
+      }
 
       // totalEquity will be recalculated after we get opening amounts
       // It's calculated later with period amounts (see line 2397)
