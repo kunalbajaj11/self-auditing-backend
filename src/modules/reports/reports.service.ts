@@ -3741,7 +3741,6 @@ export class ReportsService {
 
       const closingAssets = openingAssets + totalAssets;
       const closingLiabilities = openingLiabilities + totalLiabilities;
-      const closingEquity = openingEquity + totalEquity;
 
       const equityItems: Array<{
         account: string;
@@ -3810,6 +3809,12 @@ export class ReportsService {
         closing: Number(closingShareholderAccount.toFixed(2)),
       });
 
+      // Calculate total equity as sum of all equity items' closing balances
+      const totalEquityFromItems = equityItems.reduce(
+        (sum, item) => sum + item.closing,
+        0,
+      );
+
       const result = {
         asOfDate,
         period: {
@@ -3841,8 +3846,8 @@ export class ReportsService {
           journalShareholder: Number(totalJournalShareholder.toFixed(2)),
           opening: Number(openingEquity.toFixed(2)),
           period: Number(totalEquity.toFixed(2)),
-          closing: Number(closingEquity.toFixed(2)),
-          total: Number(closingEquity.toFixed(2)),
+          closing: Number(totalEquityFromItems.toFixed(2)),
+          total: Number(totalEquityFromItems.toFixed(2)),
           net: Number(totalEquity.toFixed(2)),
         },
         summary: {
@@ -3857,15 +3862,17 @@ export class ReportsService {
           periodEquity: Number(totalEquity.toFixed(2)),
           totalAssets: Number(totalAssets.toFixed(2)),
           totalLiabilities: Number(totalLiabilities.toFixed(2)),
-          totalEquity: Number(totalEquity.toFixed(2)),
+          totalEquity: Number(totalEquityFromItems.toFixed(2)),
           closingAssets: Number(closingAssets.toFixed(2)),
           closingLiabilities: Number(closingLiabilities.toFixed(2)),
-          closingEquity: Number(closingEquity.toFixed(2)),
+          closingEquity: Number(totalEquityFromItems.toFixed(2)),
           closingBalance: Number(
-            (closingAssets - closingLiabilities - closingEquity).toFixed(2),
+            (closingAssets - closingLiabilities - totalEquityFromItems).toFixed(
+              2,
+            ),
           ),
           balance: Number(
-            (totalAssets - totalLiabilities - totalEquity).toFixed(2),
+            (totalAssets - totalLiabilities - totalEquityFromItems).toFixed(2),
           ),
         },
       };
