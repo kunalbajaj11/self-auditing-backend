@@ -412,7 +412,7 @@ export class LicenseKeysService {
       where: { id: organizationId },
       select: ['enablePayroll', 'enableInventory'],
     });
-    
+
     if (!organization) {
       return false;
     }

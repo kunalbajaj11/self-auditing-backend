@@ -47,16 +47,21 @@ export class PayrollController {
     @Body() dto: CreateSalaryProfileDto,
   ) {
     // Log raw body to debug
-    console.log(`[PayrollController] Raw DTO received:`, JSON.stringify(dto, null, 2));
+    console.log(
+      `[PayrollController] Raw DTO received:`,
+      JSON.stringify(dto, null, 2),
+    );
     console.log(`[PayrollController] userId in DTO:`, dto.userId);
-    
+
     // Check if userId might be coming as user_id (snake_case)
     const rawBody = dto as any;
     if (!dto.userId && rawBody.user_id) {
-      console.log(`[PayrollController] Found user_id (snake_case), mapping to userId`);
+      console.log(
+        `[PayrollController] Found user_id (snake_case), mapping to userId`,
+      );
       dto.userId = rawBody.user_id;
     }
-    
+
     return this.payrollService.createSalaryProfile(
       user?.organizationId as string,
       dto,

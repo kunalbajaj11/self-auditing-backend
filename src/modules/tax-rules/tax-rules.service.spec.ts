@@ -301,9 +301,9 @@ describe('TaxRulesService', () => {
 
       expect(result.vatAmount).toBe(0);
       expect(result.baseAmount).toBe(100);
-      expect(result.appliedRules.some((r) => r.includes('Full exemption'))).toBe(
-        true,
-      );
+      expect(
+        result.appliedRules.some((r) => r.includes('Full exemption')),
+      ).toBe(true);
     });
 
     it('should apply partial exemption by percentage', async () => {
@@ -363,13 +363,15 @@ describe('TaxRulesService', () => {
         isActive: true,
       } as CategoryTaxRule;
 
-      jest.spyOn(categoryTaxRulesRepository, 'createQueryBuilder').mockReturnValue({
-        leftJoinAndSelect: jest.fn().mockReturnThis(),
-        where: jest.fn().mockReturnThis(),
-        andWhere: jest.fn().mockReturnThis(),
-        orderBy: jest.fn().mockReturnThis(),
-        getOne: jest.fn().mockResolvedValue(mockCategoryRule),
-      } as any);
+      jest
+        .spyOn(categoryTaxRulesRepository, 'createQueryBuilder')
+        .mockReturnValue({
+          leftJoinAndSelect: jest.fn().mockReturnThis(),
+          where: jest.fn().mockReturnThis(),
+          andWhere: jest.fn().mockReturnThis(),
+          orderBy: jest.fn().mockReturnThis(),
+          getOne: jest.fn().mockResolvedValue(mockCategoryRule),
+        } as any);
 
       jest.spyOn(taxRulesRepository, 'createQueryBuilder').mockReturnValue({
         leftJoinAndSelect: jest.fn().mockReturnThis(),
@@ -463,4 +465,3 @@ describe('TaxRulesService', () => {
     });
   });
 });
-

@@ -3939,11 +3939,17 @@ export class ReportGeneratorService {
     if (data.period) {
       doc.fontSize(9).font('Helvetica').fillColor(textMuted);
       if (data.period.startDate) {
-        doc.text(`From: ${new Date(data.period.startDate).toLocaleDateString('en-GB')}`, margin);
+        doc.text(
+          `From: ${new Date(data.period.startDate).toLocaleDateString('en-GB')}`,
+          margin,
+        );
         doc.y += 12;
       }
       if (data.period.endDate) {
-        doc.text(`To: ${new Date(data.period.endDate).toLocaleDateString('en-GB')}`, margin);
+        doc.text(
+          `To: ${new Date(data.period.endDate).toLocaleDateString('en-GB')}`,
+          margin,
+        );
         doc.y += 12;
       }
       doc.y += 8;
@@ -4033,7 +4039,11 @@ export class ReportGeneratorService {
     doc.y = cardY + cardHeight + 20;
 
     // Products table
-    if (data.products && Array.isArray(data.products) && data.products.length > 0) {
+    if (
+      data.products &&
+      Array.isArray(data.products) &&
+      data.products.length > 0
+    ) {
       doc.fontSize(11).font('Helvetica-Bold').fillColor(textDark);
       doc.text('Product Stock Details', margin, doc.y);
       doc.y += 15;
@@ -4181,7 +4191,8 @@ export class ReportGeneratorService {
         x += colWidths[4];
 
         // Adjustments
-        const adjColor = (product.adjustments || 0) >= 0 ? positiveColor : negativeColor;
+        const adjColor =
+          (product.adjustments || 0) >= 0 ? positiveColor : negativeColor;
         doc.fillColor(adjColor);
         doc.text((product.adjustments || 0).toFixed(2), x, rowY + 7, {
           width: colWidths[5] - 12,
@@ -4199,18 +4210,28 @@ export class ReportGeneratorService {
 
         // Average Cost
         doc.font('Helvetica').fillColor(textMuted);
-        doc.text(this.formatCurrency(product.averageCost || 0, currency), x, rowY + 7, {
-          width: colWidths[7] - 12,
-          align: 'right',
-        });
+        doc.text(
+          this.formatCurrency(product.averageCost || 0, currency),
+          x,
+          rowY + 7,
+          {
+            width: colWidths[7] - 12,
+            align: 'right',
+          },
+        );
         x += colWidths[7];
 
         // Stock Value
         doc.font('Helvetica-Bold').fillColor(textDark);
-        doc.text(this.formatCurrency(product.stockValue || 0, currency), x, rowY + 7, {
-          width: colWidths[8] - 12,
-          align: 'right',
-        });
+        doc.text(
+          this.formatCurrency(product.stockValue || 0, currency),
+          x,
+          rowY + 7,
+          {
+            width: colWidths[8] - 12,
+            align: 'right',
+          },
+        );
 
         doc.font('Helvetica');
         rowY += rowHeight;
@@ -4260,7 +4281,8 @@ export class ReportGeneratorService {
       });
       x += colWidths[4];
 
-      const adjTotalColor = (summary.totalAdjustments || 0) >= 0 ? positiveColor : negativeColor;
+      const adjTotalColor =
+        (summary.totalAdjustments || 0) >= 0 ? positiveColor : negativeColor;
       doc.fillColor(adjTotalColor);
       doc.text((summary.totalAdjustments || 0).toFixed(2), x, totalY + 9, {
         width: colWidths[5] - 12,
@@ -4280,15 +4302,24 @@ export class ReportGeneratorService {
       x += colWidths[7];
 
       doc.fillColor(textDark);
-      doc.text(this.formatCurrency(summary.totalStockValue || 0, currency), x, totalY + 9, {
-        width: colWidths[8] - 12,
-        align: 'right',
-      });
+      doc.text(
+        this.formatCurrency(summary.totalStockValue || 0, currency),
+        x,
+        totalY + 9,
+        {
+          width: colWidths[8] - 12,
+          align: 'right',
+        },
+      );
 
       doc.y = totalY + totalRowHeight + 10;
     } else {
       doc.fontSize(10).font('Helvetica').fillColor(textMuted);
-      doc.text('No stock movements found for the selected period.', margin, doc.y);
+      doc.text(
+        'No stock movements found for the selected period.',
+        margin,
+        doc.y,
+      );
       doc.y += 15;
     }
 
@@ -5935,7 +5966,8 @@ export class ReportGeneratorService {
     const data = reportData.data as any;
 
     // Summary sheet
-    const summarySheet = workbook.getWorksheet('Summary') || workbook.addWorksheet('Summary');
+    const summarySheet =
+      workbook.getWorksheet('Summary') || workbook.addWorksheet('Summary');
     this.addXLSXHeader(summarySheet, reportData);
 
     summarySheet.addRow(['Stock Balance Report Summary']);
@@ -5946,10 +5978,16 @@ export class ReportGeneratorService {
     // Period
     if (data.period) {
       if (data.period.startDate) {
-        summarySheet.addRow(['From:', new Date(data.period.startDate).toLocaleDateString('en-GB')]);
+        summarySheet.addRow([
+          'From:',
+          new Date(data.period.startDate).toLocaleDateString('en-GB'),
+        ]);
       }
       if (data.period.endDate) {
-        summarySheet.addRow(['To:', new Date(data.period.endDate).toLocaleDateString('en-GB')]);
+        summarySheet.addRow([
+          'To:',
+          new Date(data.period.endDate).toLocaleDateString('en-GB'),
+        ]);
       }
       summarySheet.addRow([]);
     }
@@ -5974,10 +6012,13 @@ export class ReportGeneratorService {
     summarySheet.getColumn('A').width = 20;
     summarySheet.getColumn('B').numFmt = '#,##0.00';
     summarySheet.getColumn('B').alignment = { horizontal: 'right' };
-    summarySheet.getRow(summarySheet.rowCount).getCell('B').numFmt = `"${currency}" #,##0.00`;
+    summarySheet.getRow(summarySheet.rowCount).getCell('B').numFmt =
+      `"${currency}" #,##0.00`;
 
     summarySheet.addRow([]);
-    summarySheet.addRow(['Note: Total stock value should match the "Closing Stock (Inventory)" amount in the Balance Sheet report for the same date.']);
+    summarySheet.addRow([
+      'Note: Total stock value should match the "Closing Stock (Inventory)" amount in the Balance Sheet report for the same date.',
+    ]);
     const noteRow = summarySheet.getRow(summarySheet.rowCount);
     noteRow.font = { italic: true, size: 9 };
     noteRow.getCell('A').fill = {
@@ -5987,7 +6028,11 @@ export class ReportGeneratorService {
     };
 
     // Products sheet
-    if (data.products && Array.isArray(data.products) && data.products.length > 0) {
+    if (
+      data.products &&
+      Array.isArray(data.products) &&
+      data.products.length > 0
+    ) {
       const productsSheet = workbook.addWorksheet('Products');
       productsSheet.addRow([
         'Product Name',
@@ -6485,22 +6530,38 @@ export class ReportGeneratorService {
         lines.push('');
         if (data.period) {
           if (data.period.startDate) {
-            lines.push(`From,${new Date(data.period.startDate).toLocaleDateString('en-GB')}`);
+            lines.push(
+              `From,${new Date(data.period.startDate).toLocaleDateString('en-GB')}`,
+            );
           }
           if (data.period.endDate) {
-            lines.push(`To,${new Date(data.period.endDate).toLocaleDateString('en-GB')}`);
+            lines.push(
+              `To,${new Date(data.period.endDate).toLocaleDateString('en-GB')}`,
+            );
           }
         }
         lines.push('');
         lines.push('Summary');
         lines.push('-'.repeat(80));
         if (data.summary) {
-          lines.push(`Opening Stock,${(data.summary.totalOpeningStock || 0).toFixed(2)}`);
-          lines.push(`Stock Inwards,${(data.summary.totalStockInwards || 0).toFixed(2)}`);
-          lines.push(`Stock Outwards,${(data.summary.totalStockOutwards || 0).toFixed(2)}`);
-          lines.push(`Adjustments,${(data.summary.totalAdjustments || 0).toFixed(2)}`);
-          lines.push(`Closing Stock,${(data.summary.totalClosingStock || 0).toFixed(2)}`);
-          lines.push(`Stock Value,${this.formatCurrency(data.summary.totalStockValue || 0, currency)}`);
+          lines.push(
+            `Opening Stock,${(data.summary.totalOpeningStock || 0).toFixed(2)}`,
+          );
+          lines.push(
+            `Stock Inwards,${(data.summary.totalStockInwards || 0).toFixed(2)}`,
+          );
+          lines.push(
+            `Stock Outwards,${(data.summary.totalStockOutwards || 0).toFixed(2)}`,
+          );
+          lines.push(
+            `Adjustments,${(data.summary.totalAdjustments || 0).toFixed(2)}`,
+          );
+          lines.push(
+            `Closing Stock,${(data.summary.totalClosingStock || 0).toFixed(2)}`,
+          );
+          lines.push(
+            `Stock Value,${this.formatCurrency(data.summary.totalStockValue || 0, currency)}`,
+          );
         }
         lines.push('');
         lines.push('-'.repeat(80));

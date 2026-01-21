@@ -244,8 +244,9 @@ export class SuperAdminService {
             this.getTotalAttachmentSize(organization.id),
           ]);
           // License query runs separately to avoid overloading
-          const license =
-            await this.licenseKeysService.findByOrganizationId(organization.id);
+          const license = await this.licenseKeysService.findByOrganizationId(
+            organization.id,
+          );
 
           // Calculate ranking score: weighted combination of metrics
           // Formula: (expenseCount * 0.5) + (userCount * 0.3) + (accrualCount * 0.2)

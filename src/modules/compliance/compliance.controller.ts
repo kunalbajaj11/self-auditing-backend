@@ -76,7 +76,8 @@ export class ComplianceController {
   @Roles(UserRole.ADMIN)
   async createDeadline(
     @CurrentUser() user: AuthenticatedUser,
-    @Body() body: {
+    @Body()
+    body: {
       complianceType: ComplianceType;
       period: string;
       dueDate: string;
@@ -95,7 +96,8 @@ export class ComplianceController {
   @Roles(UserRole.ADMIN)
   async generateDeadlines(
     @CurrentUser() user: AuthenticatedUser,
-    @Body() body: {
+    @Body()
+    body: {
       complianceType: ComplianceType;
       startDate: string;
       endDate: string;
@@ -179,4 +181,3 @@ export class ComplianceController {
     return { success: true, message: 'Reminders sent' };
   }
 }
-

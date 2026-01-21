@@ -1,10 +1,4 @@
-import {
-  Column,
-  Entity,
-  Index,
-  JoinColumn,
-  ManyToOne,
-} from 'typeorm';
+import { Column, Entity, Index, JoinColumn, ManyToOne } from 'typeorm';
 import { AbstractEntity } from './abstract.entity';
 import { Organization } from './organization.entity';
 import { User } from './user.entity';
@@ -106,4 +100,3 @@ export class TaxForm extends AbstractEntity {
   @Column({ name: 'filing_date', type: 'date', nullable: true })
   filingDate?: Date | null; // Date when filed with tax authority
 }
-

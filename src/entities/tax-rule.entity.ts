@@ -81,4 +81,3 @@ export class TaxRule extends AbstractEntity {
   })
   categoryRules?: CategoryTaxRule[];
 }
-

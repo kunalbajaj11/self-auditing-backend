@@ -12,4 +12,3 @@ export class BulkUpdateProfilesDto {
   @Type(() => ProfileUserMappingDto)
   mappings: ProfileUserMappingDto[];
 }
-

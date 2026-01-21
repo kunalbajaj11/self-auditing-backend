@@ -158,7 +158,7 @@ export class OrganizationsService {
     }
 
     const saved = await this.organizationsRepository.save(organization);
-    
+
     // Invalidate the super admin cache when organization is updated
     // This ensures the organization usage list shows updated enablePayroll/enableInventory values
     try {

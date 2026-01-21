@@ -33,4 +33,3 @@ export class TaxBracket extends AbstractEntity {
   @Column({ name: 'bracket_order', type: 'int', default: 0 })
   bracketOrder: number; // Order for progressive tax calculation
 }
-

@@ -1,10 +1,4 @@
-import {
-  Column,
-  Entity,
-  JoinColumn,
-  ManyToOne,
-  Index,
-} from 'typeorm';
+import { Column, Entity, JoinColumn, ManyToOne, Index } from 'typeorm';
 import { AbstractEntity } from './abstract.entity';
 import { Expense } from './expense.entity';
 import { Product } from '../modules/products/product.entity';
@@ -104,4 +98,3 @@ export class PurchaseLineItem extends AbstractEntity {
   @Column({ name: 'line_number', type: 'integer', default: 1 })
   lineNumber: number; // Order of line items
 }
-

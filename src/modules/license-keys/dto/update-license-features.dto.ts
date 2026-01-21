@@ -9,4 +9,3 @@ export class UpdateLicenseFeaturesDto {
   @IsBoolean()
   enableInventory?: boolean;
 }
-

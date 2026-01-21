@@ -1,4 +1,12 @@
-import { Column, Entity, JoinColumn, ManyToOne, Index, Unique, OneToMany } from 'typeorm';
+import {
+  Column,
+  Entity,
+  JoinColumn,
+  ManyToOne,
+  Index,
+  Unique,
+  OneToMany,
+} from 'typeorm';
 import { AbstractEntity } from '../../entities/abstract.entity';
 import { Organization } from '../../entities/organization.entity';
 import { StockValuationMethod } from '../../common/enums/stock-valuation-method.enum';

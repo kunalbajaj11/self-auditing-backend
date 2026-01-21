@@ -2,7 +2,11 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { TaxFormsService } from './tax-forms.service';
-import { TaxForm, TaxFormType, TaxFormStatus } from '../../entities/tax-form.entity';
+import {
+  TaxForm,
+  TaxFormType,
+  TaxFormStatus,
+} from '../../entities/tax-form.entity';
 import { Organization } from '../../entities/organization.entity';
 import { Expense } from '../../entities/expense.entity';
 import { SalesInvoice } from '../../entities/sales-invoice.entity';
@@ -286,4 +290,3 @@ describe('TaxFormsService', () => {
     });
   });
 });
-

@@ -147,8 +147,18 @@ describe('ReportsService (JE + custom ledger accounts)', () => {
     // - Credit revenue ledger 100
     // - Debit expense ledger 40
     const periodCustomRows: RawRow[] = [
-      { debitaccount: 'cash', creditaccount: customRevenueCode, amount: '100', vat: '0' },
-      { debitaccount: customExpenseCode, creditaccount: 'cash', amount: '40', vat: '0' },
+      {
+        debitaccount: 'cash',
+        creditaccount: customRevenueCode,
+        amount: '100',
+        vat: '0',
+      },
+      {
+        debitaccount: customExpenseCode,
+        creditaccount: 'cash',
+        amount: '40',
+        vat: '0',
+      },
     ];
     const openingCustomRows: RawRow[] = [];
 
@@ -188,21 +198,45 @@ describe('ReportsService (JE + custom ledger accounts)', () => {
         { provide: getRepositoryToken(Accrual), useValue: accrualsRepo },
         { provide: getRepositoryToken(Report), useValue: reportsRepo },
         { provide: getRepositoryToken(Organization), useValue: orgsRepo },
-        { provide: getRepositoryToken(SalesInvoice), useValue: salesInvoicesRepo },
-        { provide: getRepositoryToken(ExpensePayment), useValue: expensePaymentsRepo },
-        { provide: getRepositoryToken(InvoicePayment), useValue: invoicePaymentsRepo },
-        { provide: getRepositoryToken(JournalEntry), useValue: journalEntriesRepo },
+        {
+          provide: getRepositoryToken(SalesInvoice),
+          useValue: salesInvoicesRepo,
+        },
+        {
+          provide: getRepositoryToken(ExpensePayment),
+          useValue: expensePaymentsRepo,
+        },
+        {
+          provide: getRepositoryToken(InvoicePayment),
+          useValue: invoicePaymentsRepo,
+        },
+        {
+          provide: getRepositoryToken(JournalEntry),
+          useValue: journalEntriesRepo,
+        },
         { provide: getRepositoryToken(CreditNote), useValue: creditNotesRepo },
         { provide: getRepositoryToken(DebitNote), useValue: debitNotesRepo },
-        { provide: getRepositoryToken(LedgerAccount), useValue: ledgerAccountsRepo },
-        { provide: getRepositoryToken(CreditNoteApplication), useValue: creditNoteAppsRepo },
-        { provide: getRepositoryToken(DebitNoteApplication), useValue: debitNoteAppsRepo },
+        {
+          provide: getRepositoryToken(LedgerAccount),
+          useValue: ledgerAccountsRepo,
+        },
+        {
+          provide: getRepositoryToken(CreditNoteApplication),
+          useValue: creditNoteAppsRepo,
+        },
+        {
+          provide: getRepositoryToken(DebitNoteApplication),
+          useValue: debitNoteAppsRepo,
+        },
         {
           provide: getRepositoryToken(DebitNoteExpenseApplication),
           useValue: debitNoteExpenseAppsRepo,
         },
         { provide: getRepositoryToken(Product), useValue: productsRepo },
-        { provide: getRepositoryToken(StockMovement), useValue: stockMovementsRepo },
+        {
+          provide: getRepositoryToken(StockMovement),
+          useValue: stockMovementsRepo,
+        },
       ],
     }).compile();
 
@@ -290,21 +324,45 @@ describe('ReportsService (JE + custom ledger accounts)', () => {
         { provide: getRepositoryToken(Accrual), useValue: accrualsRepo },
         { provide: getRepositoryToken(Report), useValue: reportsRepo },
         { provide: getRepositoryToken(Organization), useValue: orgsRepo },
-        { provide: getRepositoryToken(SalesInvoice), useValue: salesInvoicesRepo },
-        { provide: getRepositoryToken(ExpensePayment), useValue: expensePaymentsRepo },
-        { provide: getRepositoryToken(InvoicePayment), useValue: invoicePaymentsRepo },
-        { provide: getRepositoryToken(JournalEntry), useValue: journalEntriesRepo },
+        {
+          provide: getRepositoryToken(SalesInvoice),
+          useValue: salesInvoicesRepo,
+        },
+        {
+          provide: getRepositoryToken(ExpensePayment),
+          useValue: expensePaymentsRepo,
+        },
+        {
+          provide: getRepositoryToken(InvoicePayment),
+          useValue: invoicePaymentsRepo,
+        },
+        {
+          provide: getRepositoryToken(JournalEntry),
+          useValue: journalEntriesRepo,
+        },
         { provide: getRepositoryToken(CreditNote), useValue: creditNotesRepo },
         { provide: getRepositoryToken(DebitNote), useValue: debitNotesRepo },
-        { provide: getRepositoryToken(LedgerAccount), useValue: ledgerAccountsRepo },
-        { provide: getRepositoryToken(CreditNoteApplication), useValue: creditNoteAppsRepo },
-        { provide: getRepositoryToken(DebitNoteApplication), useValue: debitNoteAppsRepo },
+        {
+          provide: getRepositoryToken(LedgerAccount),
+          useValue: ledgerAccountsRepo,
+        },
+        {
+          provide: getRepositoryToken(CreditNoteApplication),
+          useValue: creditNoteAppsRepo,
+        },
+        {
+          provide: getRepositoryToken(DebitNoteApplication),
+          useValue: debitNoteAppsRepo,
+        },
         {
           provide: getRepositoryToken(DebitNoteExpenseApplication),
           useValue: debitNoteExpenseAppsRepo,
         },
         { provide: getRepositoryToken(Product), useValue: productsRepo },
-        { provide: getRepositoryToken(StockMovement), useValue: stockMovementsRepo },
+        {
+          provide: getRepositoryToken(StockMovement),
+          useValue: stockMovementsRepo,
+        },
       ],
     }).compile();
 
@@ -315,10 +373,10 @@ describe('ReportsService (JE + custom ledger accounts)', () => {
       endDate: '2026-01-31',
     });
 
-    const marketing = tb.accounts.find((a: any) => a.accountName === 'Marketing Expense');
+    const marketing = tb.accounts.find(
+      (a: any) => a.accountName === 'Marketing Expense',
+    );
     expect(marketing).toBeTruthy();
     expect(marketing.accountType).toBe('Expense');
   });
 });
-
-

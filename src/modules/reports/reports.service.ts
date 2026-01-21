@@ -1741,10 +1741,10 @@ export class ReportsService {
           existing.debit += amount;
           accountMap.set(debitAccount, existing);
 
-          // If there's VAT on the debit side AND credit account is NOT Accounts Payable,
-          // add it to VAT Receivable (Input VAT)
-          // If credit account IS Accounts Payable, VAT is already included in AP (what you owe)
-          if (vatAmount > 0 && creditAccount !== 'accounts_payable') {
+          // If there's VAT on the debit side, add it to VAT Receivable (Input VAT)
+          // This is input VAT that can be reclaimed, regardless of the credit account
+          // (Even if credit is Accounts Payable, the VAT is still input VAT)
+          if (vatAmount > 0) {
             journalEntryVatReceivable.amount += vatAmount;
           }
         }
@@ -2426,12 +2426,37 @@ export class ReportsService {
       const openingVatReceivableDebit = Number(
         openingVatReceivableRow?.debit || 0,
       );
-      if (openingVatReceivableDebit > 0) {
+
+      // Add opening VAT from journal entries (where debit is expense/asset and credit is NOT accounts_payable)
+      const openingJournalVatReceivableQuery = this.journalEntriesRepository
+        .createQueryBuilder('entry')
+        .select(['SUM(COALESCE(entry.vat_amount, 0)) AS vatAmount'])
+        .where('entry.organization_id = :organizationId', { organizationId })
+        .andWhere('entry.entry_date < :startDate', { startDate })
+        .andWhere('CAST(entry.vat_amount AS DECIMAL) > 0')
+        .andWhere(
+          "(entry.vat_tax_type IS NULL OR entry.vat_tax_type != 'reverse_charge')",
+        )
+        .andWhere("entry.credit_account != 'accounts_payable'");
+
+      const openingJournalVatReceivableRow =
+        await openingJournalVatReceivableQuery.getRawOne();
+      const openingJournalVatReceivableDebit = Number(
+        openingJournalVatReceivableRow?.vatAmount || 0,
+      );
+
+      const totalOpeningVatReceivableDebit =
+        openingVatReceivableDebit + openingJournalVatReceivableDebit;
+
+      if (totalOpeningVatReceivableDebit > 0) {
         openingBalances.set('VAT Receivable (Input VAT)', {
-          debit: openingVatReceivableDebit,
+          debit: totalOpeningVatReceivableDebit,
           credit: 0,
-          balance: openingVatReceivableDebit,
+          balance: totalOpeningVatReceivableDebit,
         });
+        this.logger.debug(
+          `Trial Balance - Opening VAT Receivable: expenses=${openingVatReceivableDebit}, journalEntries=${openingJournalVatReceivableDebit}, total=${totalOpeningVatReceivableDebit}, organizationId=${organizationId}`,
+        );
       }
 
       const openingVatPayableQuery = this.salesInvoicesRepository
@@ -6196,11 +6221,38 @@ export class ReportsService {
       .andWhere('CAST(debitNote.vat_amount AS DECIMAL) > 0')
       .orderBy('debitNote.created_at', 'DESC');
 
+    // Query journal entries with VAT amounts
+    const journalEntriesVatQuery = this.journalEntriesRepository
+      .createQueryBuilder('entry')
+      .select([
+        'entry.id AS journalEntryId',
+        'entry.entry_date AS entryDate',
+        'entry.description AS description',
+        'entry.customer_vendor_name AS vendorName',
+        'entry.vendor_trn AS trn',
+        'entry.amount AS amount',
+        'entry.vat_amount AS vatAmount',
+        'entry.vat_tax_type AS vatTaxType',
+        'entry.debit_account AS debitAccount',
+        'entry.credit_account AS creditAccount',
+        'entry.reference_number AS referenceNumber',
+      ])
+      .where('entry.organization_id = :organizationId', { organizationId })
+      .andWhere('entry.entry_date >= :startDate', { startDate })
+      .andWhere('entry.entry_date <= :endDate', { endDate })
+      .andWhere('CAST(entry.vat_amount AS DECIMAL) > 0')
+      .andWhere(
+        "(entry.vat_tax_type IS NULL OR entry.vat_tax_type != 'reverse_charge')",
+      )
+      .orderBy('entry.created_at', 'DESC');
+
     // Split into batches to reduce concurrent connections
-    const [vatOutputInvoices, vatCreditNotes] = await Promise.all([
-      vatOutputQuery.getRawMany(),
-      vatCreditNotesQuery.getRawMany(),
-    ]);
+    const [vatOutputInvoices, vatCreditNotes, journalEntriesVat] =
+      await Promise.all([
+        vatOutputQuery.getRawMany(),
+        vatCreditNotesQuery.getRawMany(),
+        journalEntriesVatQuery.getRawMany(),
+      ]);
     const [vatOutputDebitNotes, vatInputDebitNotes] = await Promise.all([
       vatOutputDebitNotesQuery.getRawMany(),
       vatInputDebitNotesQuery.getRawMany(),
@@ -6208,6 +6260,101 @@ export class ReportsService {
 
     this.logger.debug(
       `VAT Control Account - Supplier debit notes found: count=${vatInputDebitNotes.length}, data=${JSON.stringify(vatInputDebitNotes)}`,
+    );
+
+    // Process journal entries for VAT Input and Output
+    const journalEntryLedgerIds: string[] = [];
+    journalEntriesVat.forEach((entry: any) => {
+      const debitLedgerId = this.parseLedgerAccountId(
+        entry.debitaccount || entry.debitAccount,
+      );
+      if (debitLedgerId) journalEntryLedgerIds.push(debitLedgerId);
+      const creditLedgerId = this.parseLedgerAccountId(
+        entry.creditaccount || entry.creditAccount,
+      );
+      if (creditLedgerId) journalEntryLedgerIds.push(creditLedgerId);
+    });
+
+    const journalEntryLedgerAccounts = await this.loadLedgerAccountsByIds(
+      organizationId,
+      journalEntryLedgerIds,
+    );
+
+    const getAccountCategory = (
+      accountCode: string | null | undefined,
+    ): string | null => {
+      if (!accountCode) return null;
+      const ledgerId = this.parseLedgerAccountId(accountCode);
+      if (ledgerId) {
+        const ledgerAccount = journalEntryLedgerAccounts.get(ledgerId);
+        if (ledgerAccount) return ledgerAccount.category;
+      }
+      // Check fixed accounts
+      if (accountCode in ACCOUNT_METADATA) {
+        return ACCOUNT_METADATA[accountCode as JournalEntryAccount].category;
+      }
+      return null;
+    };
+
+    const vatInputJournalEntries: any[] = [];
+    const vatOutputJournalEntries: any[] = [];
+
+    journalEntriesVat.forEach((entry: any) => {
+      const vatAmount = parseFloat(entry.vatamount || entry.vatAmount || '0');
+      const amount = parseFloat(entry.amount || '0');
+      const debitAccount = entry.debitaccount || entry.debitAccount;
+      const creditAccount = entry.creditaccount || entry.creditAccount;
+      const vendorName =
+        entry.vendorname || entry.vendorName || entry.description || 'N/A';
+      const trn = entry.trn || null;
+      const description = entry.description || vendorName || 'Journal Entry';
+      const referenceNumber = entry.referencenumber || entry.referenceNumber;
+
+      const baseAmount = amount;
+      const grossAmount = amount + vatAmount;
+      const vatRate =
+        baseAmount > 0 ? ((vatAmount / baseAmount) * 100).toFixed(2) : '0';
+
+      const debitCategory = getAccountCategory(debitAccount);
+      const creditCategory = getAccountCategory(creditAccount);
+
+      // VAT Input: when debit account is expense or asset (and has VAT)
+      if (debitCategory === 'expense' || debitCategory === 'asset') {
+        vatInputJournalEntries.push({
+          id: entry.journalentryid || entry.journalEntryId,
+          date: entry.entrydate || entry.entryDate,
+          description: description,
+          vendorName: vendorName,
+          amount: Number(baseAmount.toFixed(2)),
+          grossAmount: Number(grossAmount.toFixed(2)),
+          vatRate: Number(vatRate),
+          vatAmount: Number(vatAmount.toFixed(2)),
+          trn: trn,
+          type: 'journal_entry',
+          referenceNumber: referenceNumber,
+        });
+      }
+
+      // VAT Output: when credit account is revenue (and has VAT)
+      if (creditCategory === 'revenue') {
+        vatOutputJournalEntries.push({
+          id: entry.journalentryid || entry.journalEntryId,
+          date: entry.entrydate || entry.entryDate,
+          description: description,
+          customerName: vendorName, // For output VAT, vendorName is actually customer name
+          amount: Number(baseAmount.toFixed(2)),
+          grossAmount: Number(grossAmount.toFixed(2)),
+          vatRate: Number(vatRate),
+          vatAmount: Number(vatAmount.toFixed(2)),
+          trn: trn,
+          type: 'journal_entry',
+          referenceNumber: referenceNumber,
+        });
+      }
+    });
+
+    this.logger.debug(
+      `VAT Control Account - Journal entries found: input=${vatInputJournalEntries.length}, output=${vatOutputJournalEntries.length}`,
     );
 
     const vatOutputItems = vatOutputInvoices.map((invoice: any) => {
@@ -6357,8 +6504,12 @@ export class ReportsService {
       };
     });
 
-    // VAT Input: expenses + supplier debit notes (reduces VAT Receivable)
+    // VAT Input: expenses + supplier debit notes + journal entries (reduces VAT Receivable)
     const totalVatInput = vatInputItems.reduce(
+      (sum, item) => sum + item.vatAmount,
+      0,
+    );
+    const totalVatInputJournalEntries = vatInputJournalEntries.reduce(
       (sum, item) => sum + item.vatAmount,
       0,
     );
@@ -6366,13 +6517,18 @@ export class ReportsService {
       (sum, item) => sum + Math.abs(item.vatAmount), // use absolute since items are negative for display
       0,
     );
-    const netVatInput = totalVatInput - totalVatInputDebitNotes;
+    const netVatInput =
+      totalVatInput + totalVatInputJournalEntries - totalVatInputDebitNotes;
     this.logger.debug(
-      `VAT Control Account - VAT Input calculation: totalVatInput=${totalVatInput}, totalVatInputDebitNotes=${totalVatInputDebitNotes}, netVatInput=${netVatInput}`,
+      `VAT Control Account - VAT Input calculation: totalVatInput=${totalVatInput}, totalVatInputJournalEntries=${totalVatInputJournalEntries}, totalVatInputDebitNotes=${totalVatInputDebitNotes}, netVatInput=${netVatInput}`,
     );
 
-    // VAT Output: invoices - credit notes + customer debit notes (increases VAT Payable)
+    // VAT Output: invoices - credit notes + customer debit notes + journal entries (increases VAT Payable)
     const totalVatOutput = vatOutputItems.reduce(
+      (sum, item) => sum + item.vatAmount,
+      0,
+    );
+    const totalVatOutputJournalEntries = vatOutputJournalEntries.reduce(
       (sum, item) => sum + item.vatAmount,
       0,
     );
@@ -6390,36 +6546,52 @@ export class ReportsService {
 
     // Since credit note items have negative vatAmount, adding them subtracts from total
     const netVatOutput =
-      totalVatOutput + totalVatCreditNotesSum + totalVatOutputDebitNotes;
+      totalVatOutput +
+      totalVatOutputJournalEntries +
+      totalVatCreditNotesSum +
+      totalVatOutputDebitNotes;
     const netVat = netVatOutput - netVatInput;
 
     return {
       startDate,
       endDate,
-      vatInputItems: [...vatInputItems, ...vatInputDebitNoteItems],
+      vatInputItems: [
+        ...vatInputItems,
+        ...vatInputJournalEntries,
+        ...vatInputDebitNoteItems,
+      ],
       vatOutputItems: [
         ...vatOutputItems,
+        ...vatOutputJournalEntries,
         ...vatCreditNoteItems,
         ...vatOutputDebitNoteItems,
       ],
       summary: {
         vatInput: Number(totalVatInput.toFixed(2)),
+        vatInputJournalEntries: Number(totalVatInputJournalEntries.toFixed(2)),
         vatInputDebitNotes: Number(totalVatInputDebitNotes.toFixed(2)),
         netVatInput: Number(netVatInput.toFixed(2)),
         vatOutput: Number(totalVatOutput.toFixed(2)),
+        vatOutputJournalEntries: Number(
+          totalVatOutputJournalEntries.toFixed(2),
+        ),
         vatCreditNotes: Number(totalVatCreditNotes.toFixed(2)), // Absolute value for summary
         vatOutputDebitNotes: Number(totalVatOutputDebitNotes.toFixed(2)),
         netVatOutput: Number(netVatOutput.toFixed(2)),
         netVat: Number(netVat.toFixed(2)),
         totalTransactions:
           vatInputItems.length +
+          vatInputJournalEntries.length +
           vatOutputItems.length +
+          vatOutputJournalEntries.length +
           vatCreditNoteItems.length +
           vatOutputDebitNoteItems.length +
           vatInputDebitNoteItems.length,
         inputTransactions: vatInputItems.length,
+        inputJournalEntryTransactions: vatInputJournalEntries.length,
         inputDebitNoteTransactions: vatInputDebitNoteItems.length,
         outputTransactions: vatOutputItems.length,
+        outputJournalEntryTransactions: vatOutputJournalEntries.length,
         creditNoteTransactions: vatCreditNoteItems.length,
         outputDebitNoteTransactions: vatOutputDebitNoteItems.length,
       },

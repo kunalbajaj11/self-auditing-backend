@@ -24,4 +24,3 @@ export class GenerateVATReturnDto {
   @IsString()
   notes?: string;
 }
-

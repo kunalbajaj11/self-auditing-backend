@@ -28,7 +28,9 @@ export class LedgerAccountsService {
   ): Promise<LedgerAccount[]> {
     const query = this.ledgerAccountsRepository
       .createQueryBuilder('ledgerAccount')
-      .where('ledgerAccount.organization_id = :organizationId', { organizationId })
+      .where('ledgerAccount.organization_id = :organizationId', {
+        organizationId,
+      })
       .andWhere('ledgerAccount.is_deleted = false');
 
     // Scope custom ledger accounts to creator; always include system defaults
@@ -37,7 +39,10 @@ export class LedgerAccountsService {
       { userId },
     );
 
-    return query.orderBy('ledgerAccount.category', 'ASC').addOrderBy('ledgerAccount.name', 'ASC').getMany();
+    return query
+      .orderBy('ledgerAccount.category', 'ASC')
+      .addOrderBy('ledgerAccount.name', 'ASC')
+      .getMany();
   }
 
   async create(
@@ -90,7 +95,9 @@ export class LedgerAccountsService {
       throw new NotFoundException('Ledger account not found');
     }
     if (ledgerAccount.isSystemDefault) {
-      throw new ConflictException('Cannot update system default ledger accounts');
+      throw new ConflictException(
+        'Cannot update system default ledger accounts',
+      );
     }
     if (dto.name && dto.name !== ledgerAccount.name) {
       const duplicate = await this.ledgerAccountsRepository.findOne({
@@ -118,11 +125,12 @@ export class LedgerAccountsService {
       throw new NotFoundException('Ledger account not found');
     }
     if (ledgerAccount.isSystemDefault) {
-      throw new ConflictException('Cannot delete system default ledger accounts');
+      throw new ConflictException(
+        'Cannot delete system default ledger accounts',
+      );
     }
     ledgerAccount.isDeleted = true;
     ledgerAccount.deletedAt = new Date();
     await this.ledgerAccountsRepository.save(ledgerAccount);
   }
 }
-

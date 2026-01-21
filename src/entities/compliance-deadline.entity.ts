@@ -1,10 +1,4 @@
-import {
-  Column,
-  Entity,
-  Index,
-  JoinColumn,
-  ManyToOne,
-} from 'typeorm';
+import { Column, Entity, Index, JoinColumn, ManyToOne } from 'typeorm';
 import { AbstractEntity } from './abstract.entity';
 import { Organization } from './organization.entity';
 import { Region } from '../common/enums/region.enum';
@@ -107,4 +101,3 @@ export class ComplianceDeadline extends AbstractEntity {
   @Column({ name: 'extended_due_date', type: 'date', nullable: true })
   extendedDueDate?: Date | null; // If deadline was extended
 }
-

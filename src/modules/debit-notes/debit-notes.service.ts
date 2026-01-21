@@ -246,9 +246,8 @@ export class DebitNotesService {
 
     // Check if debit note has enough remaining amount
     const totalApplied = await this.getTotalAppliedAmount(debitNoteId);
-    const totalExpenseApplied = await this.getTotalExpenseAppliedAmount(
-      debitNoteId,
-    );
+    const totalExpenseApplied =
+      await this.getTotalExpenseAppliedAmount(debitNoteId);
     const remainingAmount =
       parseFloat(debitNote.totalAmount) - totalApplied - totalExpenseApplied;
 
@@ -370,15 +369,19 @@ export class DebitNotesService {
     }
 
     // Validate: Debit note should be either for customer (invoice) OR supplier (expense), not both
-    const newInvoiceId = dto.invoiceId !== undefined ? dto.invoiceId : debitNote.invoice?.id;
-    const newExpenseId = dto.expenseId !== undefined ? dto.expenseId : debitNote.expense?.id;
+    const newInvoiceId =
+      dto.invoiceId !== undefined ? dto.invoiceId : debitNote.invoice?.id;
+    const newExpenseId =
+      dto.expenseId !== undefined ? dto.expenseId : debitNote.expense?.id;
     if (newInvoiceId && newExpenseId) {
       throw new BadRequestException(
         'Debit note cannot be linked to both invoice and expense',
       );
     }
-    const newCustomerId = dto.customerId !== undefined ? dto.customerId : debitNote.customer?.id;
-    const newVendorId = dto.vendorId !== undefined ? dto.vendorId : debitNote.vendor?.id;
+    const newCustomerId =
+      dto.customerId !== undefined ? dto.customerId : debitNote.customer?.id;
+    const newVendorId =
+      dto.vendorId !== undefined ? dto.vendorId : debitNote.vendor?.id;
     if (newCustomerId && newVendorId) {
       throw new BadRequestException(
         'Debit note cannot have both customer and vendor',

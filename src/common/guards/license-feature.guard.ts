@@ -62,4 +62,3 @@ export class LicenseFeatureGuard implements CanActivate {
     return true;
   }
 }
-

@@ -1,9 +1,16 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { TaxRule, TaxRuleType, TaxRuleStatus } from '../../entities/tax-rule.entity';
+import {
+  TaxRule,
+  TaxRuleType,
+  TaxRuleStatus,
+} from '../../entities/tax-rule.entity';
 import { TaxBracket } from '../../entities/tax-bracket.entity';
-import { TaxExemption, ExemptionType } from '../../entities/tax-exemption.entity';
+import {
+  TaxExemption,
+  ExemptionType,
+} from '../../entities/tax-exemption.entity';
 import { CategoryTaxRule } from '../../entities/category-tax-rule.entity';
 import { Organization } from '../../entities/organization.entity';
 import { Region } from '../../common/enums/region.enum';
@@ -109,7 +116,12 @@ export class TaxRulesService {
       this.logger.debug(
         `No tax rules found for org ${organizationId}, using standard calculation`,
       );
-      return this.calculateStandardTax(amount, 5, calculationMethod, isReverseCharge);
+      return this.calculateStandardTax(
+        amount,
+        5,
+        calculationMethod,
+        isReverseCharge,
+      );
     }
 
     // Apply exemptions first
@@ -121,7 +133,7 @@ export class TaxRulesService {
       date,
     );
 
-    let taxableAmount = exemptionResult.taxableAmount;
+    const taxableAmount = exemptionResult.taxableAmount;
     const appliedRules = exemptionResult.appliedRules;
 
     // Get effective tax rate
@@ -217,18 +229,14 @@ export class TaxRulesService {
       .leftJoinAndSelect('categoryRules.category', 'categoryRuleCategory')
       .where('rule.organization_id = :organizationId', { organizationId })
       .andWhere('rule.is_active = true')
-      .andWhere(
-        '(rule.region = :region OR rule.region IS NULL)',
-        { region },
-      )
+      .andWhere('(rule.region = :region OR rule.region IS NULL)', { region })
       .andWhere(
         '(rule.effective_date IS NULL OR rule.effective_date <= :date)',
         { date },
       )
-      .andWhere(
-        '(rule.expiry_date IS NULL OR rule.expiry_date >= :date)',
-        { date },
-      )
+      .andWhere('(rule.expiry_date IS NULL OR rule.expiry_date >= :date)', {
+        date,
+      })
       .orderBy('rule.priority', 'DESC')
       .addOrderBy('rule.created_at', 'DESC');
 
@@ -385,9 +393,7 @@ export class TaxRulesService {
     const highestBracket = sortedBrackets[sortedBrackets.length - 1];
     return {
       rate: parseFloat(highestBracket.rate),
-      appliedRules: [
-        `Tax bracket (highest rate): ${highestBracket.rate}%`,
-      ],
+      appliedRules: [`Tax bracket (highest rate): ${highestBracket.rate}%`],
     };
   }
 
@@ -499,7 +505,13 @@ export class TaxRulesService {
   async getTaxRules(organizationId: string): Promise<TaxRule[]> {
     return this.taxRulesRepository.find({
       where: { organization: { id: organizationId } },
-      relations: ['brackets', 'exemptions', 'exemptions.category', 'categoryRules', 'categoryRules.category'],
+      relations: [
+        'brackets',
+        'exemptions',
+        'exemptions.category',
+        'categoryRules',
+        'categoryRules.category',
+      ],
       order: { priority: 'DESC', createdAt: 'DESC' },
     });
   }
@@ -507,10 +519,7 @@ export class TaxRulesService {
   /**
    * Create a new tax rule
    */
-  async createTaxRule(
-    organizationId: string,
-    dto: any,
-  ): Promise<TaxRule> {
+  async createTaxRule(organizationId: string, dto: any): Promise<TaxRule> {
     const organization = await this.organizationsRepository.findOne({
       where: { id: organizationId },
     });
@@ -557,7 +566,9 @@ export class TaxRulesService {
     if (dto.description !== undefined) taxRule.description = dto.description;
     if (dto.ruleConfig !== undefined) taxRule.ruleConfig = dto.ruleConfig;
     if (dto.effectiveDate !== undefined)
-      taxRule.effectiveDate = dto.effectiveDate ? new Date(dto.effectiveDate) : null;
+      taxRule.effectiveDate = dto.effectiveDate
+        ? new Date(dto.effectiveDate)
+        : null;
     if (dto.expiryDate !== undefined)
       taxRule.expiryDate = dto.expiryDate ? new Date(dto.expiryDate) : null;
     if (dto.isActive !== undefined) taxRule.isActive = dto.isActive;
@@ -685,4 +696,3 @@ export class TaxRulesService {
     return this.categoryTaxRulesRepository.save(categoryRule);
   }
 }
-

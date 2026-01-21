@@ -266,9 +266,7 @@ export class ComplianceCalendarService {
   /**
    * Get deadlines that need reminders
    */
-  async getDeadlinesNeedingReminders(
-    organizationId: string,
-  ): Promise<{
+  async getDeadlinesNeedingReminders(organizationId: string): Promise<{
     due30d: ComplianceDeadline[];
     due15d: ComplianceDeadline[];
     due7d: ComplianceDeadline[];
@@ -319,4 +317,3 @@ export class ComplianceCalendarService {
     return { due30d, due15d, due7d, due1d, dueToday, overdue };
   }
 }
-

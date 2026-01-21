@@ -1,7 +1,11 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { TaxForm, TaxFormType, TaxFormStatus } from '../../entities/tax-form.entity';
+import {
+  TaxForm,
+  TaxFormType,
+  TaxFormStatus,
+} from '../../entities/tax-form.entity';
 import { Organization } from '../../entities/organization.entity';
 import { User } from '../../entities/user.entity';
 import { Expense } from '../../entities/expense.entity';
@@ -174,7 +178,9 @@ export class TaxFormsService {
       .getMany();
 
     for (const invoice of invoices) {
-      const baseAmount = parseFloat(invoice.baseAmount || invoice.amount || '0');
+      const baseAmount = parseFloat(
+        invoice.baseAmount || invoice.amount || '0',
+      );
       const vatAmount = parseFloat(invoice.vatAmount || '0');
       // SalesInvoice may not have vatTaxType, default to standard
       const vatTaxType = (invoice as any).vatTaxType || 'standard';
@@ -221,7 +227,9 @@ export class TaxFormsService {
       .getMany();
 
     for (const expense of expenses) {
-      const baseAmount = parseFloat(expense.baseAmount || expense.amount || '0');
+      const baseAmount = parseFloat(
+        expense.baseAmount || expense.amount || '0',
+      );
       const vatAmount = parseFloat(expense.vatAmount || '0');
       const vatTaxType = expense.vatTaxType || 'standard';
 
@@ -291,11 +299,7 @@ export class TaxFormsService {
       const endMonth = quarterNum * 3 - 1;
 
       const startDate = new Date(parseInt(year, 10), startMonth, 1);
-      const endDate = new Date(
-        parseInt(year, 10),
-        endMonth + 1,
-        0,
-      ); // Last day of month
+      const endDate = new Date(parseInt(year, 10), endMonth + 1, 0); // Last day of month
 
       return {
         startDate: startDate.toISOString().split('T')[0],
@@ -304,12 +308,12 @@ export class TaxFormsService {
     } else if (period.match(/^\d{4}-\d{2}$/)) {
       // Monthly: '2024-01'
       const [year, month] = period.split('-');
-      const startDate = new Date(parseInt(year, 10), parseInt(month, 10) - 1, 1);
-      const endDate = new Date(
+      const startDate = new Date(
         parseInt(year, 10),
-        parseInt(month, 10),
-        0,
-      ); // Last day of month
+        parseInt(month, 10) - 1,
+        1,
+      );
+      const endDate = new Date(parseInt(year, 10), parseInt(month, 10), 0); // Last day of month
 
       return {
         startDate: startDate.toISOString().split('T')[0],
@@ -348,9 +352,7 @@ export class TaxFormsService {
       data.sales.reverseCharge.vatAmount +
       data.adjustments.outputVAT;
 
-    if (
-      Math.abs(calculatedOutputVAT - data.totals.totalOutputVAT) > 0.01
-    ) {
+    if (Math.abs(calculatedOutputVAT - data.totals.totalOutputVAT) > 0.01) {
       errors.push(
         `Output VAT calculation mismatch: expected ${calculatedOutputVAT}, got ${data.totals.totalOutputVAT}`,
       );
@@ -369,7 +371,10 @@ export class TaxFormsService {
     }
 
     // Warnings
-    if (data.sales.standardRate.count === 0 && data.purchases.standardRate.count === 0) {
+    if (
+      data.sales.standardRate.count === 0 &&
+      data.purchases.standardRate.count === 0
+    ) {
       warnings.push('No standard rate transactions found');
     }
 
@@ -474,10 +479,7 @@ export class TaxFormsService {
   /**
    * Get tax form by ID
    */
-  async getTaxFormById(
-    id: string,
-    organizationId: string,
-  ): Promise<TaxForm> {
+  async getTaxFormById(id: string, organizationId: string): Promise<TaxForm> {
     const form = await this.taxFormsRepository.findOne({
       where: {
         id,
@@ -515,4 +517,3 @@ export class TaxFormsService {
     return this.taxFormsRepository.save(form);
   }
 }
-

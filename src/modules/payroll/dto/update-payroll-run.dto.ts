@@ -4,8 +4,7 @@ export class UpdatePayrollRunDto {
   @IsOptional()
   @IsString()
   @Matches(/^\d{4}-\d{2}$/, {
-    message:
-      'payrollPeriod must be in format "YYYY-MM" (e.g., "2024-01")',
+    message: 'payrollPeriod must be in format "YYYY-MM" (e.g., "2024-01")',
   })
   payrollPeriod?: string;
 

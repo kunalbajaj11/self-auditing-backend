@@ -46,4 +46,3 @@ export class DebitNoteExpenseApplication extends AbstractEntity {
   @Column({ type: 'text', nullable: true })
   notes?: string | null;
 }
-

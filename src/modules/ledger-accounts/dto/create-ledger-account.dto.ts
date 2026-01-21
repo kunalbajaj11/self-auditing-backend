@@ -13,4 +13,3 @@ export class CreateLedgerAccountDto {
   @IsEnum(['asset', 'liability', 'equity', 'revenue', 'expense'])
   category: 'asset' | 'liability' | 'equity' | 'revenue' | 'expense';
 }
-

@@ -162,10 +162,9 @@ export class JournalEntriesService {
             vendorNamePattern: `%${dto.customerVendorName}%`,
           },
         )
-        .andWhere(
-          'ABS(CAST(payment.amount AS DECIMAL) - :amount) <= 0.01',
-          { amount: dto.amount },
-        )
+        .andWhere('ABS(CAST(payment.amount AS DECIMAL) - :amount) <= 0.01', {
+          amount: dto.amount,
+        })
         .getMany();
 
       if (existingCashPayments.length > 0) {

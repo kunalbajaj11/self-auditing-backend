@@ -1,7 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { ComplianceDeadline, ComplianceType } from '../../entities/compliance-deadline.entity';
+import {
+  ComplianceDeadline,
+  ComplianceType,
+} from '../../entities/compliance-deadline.entity';
 import { TaxForm, TaxFormStatus } from '../../entities/tax-form.entity';
 import { Organization } from '../../entities/organization.entity';
 import { Region } from '../../common/enums/region.enum';
@@ -104,9 +107,10 @@ export class ComplianceReportsService {
         name: organization.name,
         region: organization.region as Region,
       },
-      period: startDate && endDate
-        ? `${startDate.toISOString().split('T')[0]} to ${endDate.toISOString().split('T')[0]}`
-        : 'All time',
+      period:
+        startDate && endDate
+          ? `${startDate.toISOString().split('T')[0]} to ${endDate.toISOString().split('T')[0]}`
+          : 'All time',
       deadlines: {
         total: deadlines.length,
         pending: deadlines.filter((d) => d.status === 'pending').length,
@@ -148,11 +152,7 @@ export class ComplianceReportsService {
     month?: number,
   ): Promise<ComplianceDeadline[]> {
     const startDate = new Date(year, month !== undefined ? month - 1 : 0, 1);
-    const endDate = new Date(
-      year,
-      month !== undefined ? month : 12,
-      0,
-    ); // Last day of month/year
+    const endDate = new Date(year, month !== undefined ? month : 12, 0); // Last day of month/year
 
     return this.deadlinesRepository
       .createQueryBuilder('deadline')
@@ -207,4 +207,3 @@ export class ComplianceReportsService {
     return result;
   }
 }
-

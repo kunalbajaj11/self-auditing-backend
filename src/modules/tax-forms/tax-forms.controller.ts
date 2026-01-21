@@ -76,7 +76,9 @@ export class TaxFormsController {
     const validation = this.taxFormsService.validateVATReturn(data);
 
     // Get organization
-    const organization = await this.taxFormsService['organizationsRepository'].findOne({
+    const organization = await this.taxFormsService[
+      'organizationsRepository'
+    ].findOne({
       where: { id: user?.organizationId as string },
     });
 
@@ -103,8 +105,10 @@ export class TaxFormsController {
     );
 
     // Update validation errors/warnings
-    taxForm.validationErrors = validation.errors.length > 0 ? validation.errors : null;
-    taxForm.validationWarnings = validation.warnings.length > 0 ? validation.warnings : null;
+    taxForm.validationErrors =
+      validation.errors.length > 0 ? validation.errors : null;
+    taxForm.validationWarnings =
+      validation.warnings.length > 0 ? validation.warnings : null;
     await (this.taxFormsService as any).taxFormsRepository.save(taxForm);
 
     return {
@@ -132,7 +136,9 @@ export class TaxFormsController {
     );
 
     // Get organization
-    const organization = await this.taxFormsService['organizationsRepository'].findOne({
+    const organization = await this.taxFormsService[
+      'organizationsRepository'
+    ].findOne({
       where: { id: user?.organizationId as string },
     });
 
@@ -160,10 +166,7 @@ export class TaxFormsController {
     const filename = `${dto.formType}_${dto.period}.${format}`;
 
     res.setHeader('Content-Type', contentType);
-    res.setHeader(
-      'Content-Disposition',
-      `attachment; filename="${filename}"`,
-    );
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     res.send(fileBuffer);
   }
 
@@ -203,4 +206,3 @@ export class TaxFormsController {
     );
   }
 }
-

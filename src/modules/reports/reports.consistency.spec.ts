@@ -74,17 +74,32 @@ class SmartQueryBuilder {
   }
 
   async getRawOne() {
-    return this.resolver({ repo: this.repo, selects: this.selects, wheres: this.wheres }).one ?? {};
+    return (
+      this.resolver({
+        repo: this.repo,
+        selects: this.selects,
+        wheres: this.wheres,
+      }).one ?? {}
+    );
   }
   async getRawMany() {
-    return this.resolver({ repo: this.repo, selects: this.selects, wheres: this.wheres }).many ?? [];
+    return (
+      this.resolver({
+        repo: this.repo,
+        selects: this.selects,
+        wheres: this.wheres,
+      }).many ?? []
+    );
   }
   async getMany() {
     return [];
   }
 }
 
-function makeSmartRepo(repo: string, resolver: (info: QBInfo) => { one?: any; many?: any[] }) {
+function makeSmartRepo(
+  repo: string,
+  resolver: (info: QBInfo) => { one?: any; many?: any[] },
+) {
   return {
     createQueryBuilder: jest.fn(() => new SmartQueryBuilder(repo, resolver)),
     find: jest.fn(async () => []),
@@ -110,72 +125,118 @@ describe('ReportsService report consistency (custom ledger JEs, cash counterpart
       { debitaccount: expCode, creditaccount: 'cash', amount: '40', vat: '0' },
     ];
 
-    const ledgerAccountsRepo = makeSmartRepo('ledgerAccounts', () => ({ one: {}, many: [] }));
+    const ledgerAccountsRepo = makeSmartRepo('ledgerAccounts', () => ({
+      one: {},
+      many: [],
+    }));
     ledgerAccountsRepo.find = jest.fn(async () => [
-      { id: revId, name: 'JE Revenue', category: 'revenue', organization: { id: organizationId } } as any,
-      { id: expId, name: 'JE Expense', category: 'expense', organization: { id: organizationId } } as any,
+      {
+        id: revId,
+        name: 'JE Revenue',
+        category: 'revenue',
+        organization: { id: organizationId },
+      } as any,
+      {
+        id: expId,
+        name: 'JE Expense',
+        category: 'expense',
+        organization: { id: organizationId },
+      } as any,
     ]);
 
-    const journalEntriesRepo = makeSmartRepo('journalEntries', ({ selects }: QBInfo) => {
-      const selectText = Array.isArray(selects) ? selects.join(' ') : String(selects ?? '');
+    const journalEntriesRepo = makeSmartRepo(
+      'journalEntries',
+      ({ selects }: QBInfo) => {
+        const selectText = Array.isArray(selects)
+          ? selects.join(' ')
+          : String(selects ?? '');
 
-      // P&L fixed-account JE aggregates (sales_revenue/general_expense) => 0
-      if (selectText.includes("AS revenueCredit") && selectText.includes("sales_revenue")) {
-        return {
-          one: {
-            revenuecredit: 0,
-            revenuedebit: 0,
-            revenuevatcredit: 0,
-            revenuevatdebit: 0,
-            expensedebit: 0,
-            expensecredit: 0,
-            expensevatdebit: 0,
-            expensevatcredit: 0,
-          },
-        };
-      }
+        // P&L fixed-account JE aggregates (sales_revenue/general_expense) => 0
+        if (
+          selectText.includes('AS revenueCredit') &&
+          selectText.includes('sales_revenue')
+        ) {
+          return {
+            one: {
+              revenuecredit: 0,
+              revenuedebit: 0,
+              revenuevatcredit: 0,
+              revenuevatdebit: 0,
+              expensedebit: 0,
+              expensecredit: 0,
+              expensevatdebit: 0,
+              expensevatcredit: 0,
+            },
+          };
+        }
 
-      // Custom-ledger P&L rawMany uses SUM(entry.amount) AS amount + SUM(COALESCE(entry.vat_amount...)) AS vat
-      if (selectText.includes('SUM(entry.amount) AS amount') && selectText.includes('SUM(COALESCE(entry.vat_amount')) {
-        return { many: journalGroupedRows };
-      }
+        // Custom-ledger P&L rawMany uses SUM(entry.amount) AS amount + SUM(COALESCE(entry.vat_amount...)) AS vat
+        if (
+          selectText.includes('SUM(entry.amount) AS amount') &&
+          selectText.includes('SUM(COALESCE(entry.vat_amount')
+        ) {
+          return { many: journalGroupedRows };
+        }
 
-      // TB/BS JE grouped by account uses SUM(entry.amount) AS amount (no vat sum)
-      if (selectText.includes('SUM(entry.amount) AS amount') && !selectText.includes('vat_amount')) {
-        return { many: journalGroupedRows };
-      }
+        // TB/BS JE grouped by account uses SUM(entry.amount) AS amount (no vat sum)
+        if (
+          selectText.includes('SUM(entry.amount) AS amount') &&
+          !selectText.includes('vat_amount')
+        ) {
+          return { many: journalGroupedRows };
+        }
 
-      // Cash/Bank JE helpers return received/paid
-      if (selectText.includes("AS received") && selectText.includes("AS paid")) {
-        // For cash queries, revenue JE contributes received=100; expense JE contributes paid=40
-        return { one: { received: 100, paid: 40 } };
-      }
+        // Cash/Bank JE helpers return received/paid
+        if (
+          selectText.includes('AS received') &&
+          selectText.includes('AS paid')
+        ) {
+          // For cash queries, revenue JE contributes received=100; expense JE contributes paid=40
+          return { one: { received: 100, paid: 40 } };
+        }
 
-      return { one: {}, many: [] };
-    });
+        return { one: {}, many: [] };
+      },
+    );
 
     // Everything else returns 0/empty
     const zeroOne = () => ({ one: {} });
     const zeroMany = () => ({ many: [] });
     const expensesRepo = makeSmartRepo('expenses', ({ selects }: QBInfo) => {
-      const selectText = Array.isArray(selects) ? selects.join(' ') : String(selects ?? '');
+      const selectText = Array.isArray(selects)
+        ? selects.join(' ')
+        : String(selects ?? '');
       // P&L expense by category returns none
-      if (selectText.includes('AS category') && selectText.includes('SUM(')) return { many: [] };
+      if (selectText.includes('AS category') && selectText.includes('SUM('))
+        return { many: [] };
       // Opening/BS expenses sums => 0
       if (selectText.includes('AS amount')) return { one: { amount: 0 } };
       return { one: {} };
     });
-    const salesInvoicesRepo = makeSmartRepo('salesInvoices', () => ({ one: { revenue: 0, vat: 0, count: 0 } }));
-    const creditNotesRepo = makeSmartRepo('creditNotes', () => ({ one: { amount: 0, vat: 0, count: 0, creditNotes: 0, creditnotes: 0 } }));
-    const debitNotesRepo = makeSmartRepo('debitNotes', () => ({ one: { amount: 0, vat: 0, count: 0, debitNotes: 0, debitnotes: 0 } }));
-    const invoicePaymentsRepo = makeSmartRepo('invoicePayments', () => ({ one: {} }));
-    const expensePaymentsRepo = makeSmartRepo('expensePayments', () => ({ one: {} }));
+    const salesInvoicesRepo = makeSmartRepo('salesInvoices', () => ({
+      one: { revenue: 0, vat: 0, count: 0 },
+    }));
+    const creditNotesRepo = makeSmartRepo('creditNotes', () => ({
+      one: { amount: 0, vat: 0, count: 0, creditNotes: 0, creditnotes: 0 },
+    }));
+    const debitNotesRepo = makeSmartRepo('debitNotes', () => ({
+      one: { amount: 0, vat: 0, count: 0, debitNotes: 0, debitnotes: 0 },
+    }));
+    const invoicePaymentsRepo = makeSmartRepo('invoicePayments', () => ({
+      one: {},
+    }));
+    const expensePaymentsRepo = makeSmartRepo('expensePayments', () => ({
+      one: {},
+    }));
     const accrualsRepo = makeSmartRepo('accruals', () => ({ one: {} }));
     const reportsRepo = makeSmartRepo('reports', zeroOne);
     const orgsRepo = makeSmartRepo('orgs', zeroOne);
     const creditNoteAppsRepo = makeSmartRepo('creditNoteApps', zeroOne);
     const debitNoteAppsRepo = makeSmartRepo('debitNoteApps', zeroOne);
-    const debitNoteExpenseAppsRepo = makeSmartRepo('debitNoteExpenseApps', zeroOne);
+    const debitNoteExpenseAppsRepo = makeSmartRepo(
+      'debitNoteExpenseApps',
+      zeroOne,
+    );
     const productsRepo = makeSmartRepo('products', zeroMany);
     const stockMovementsRepo = makeSmartRepo('stockMovements', zeroMany);
 
@@ -184,37 +245,76 @@ describe('ReportsService report consistency (custom ledger JEs, cash counterpart
         ReportsService,
         {
           provide: SettingsService,
-          useValue: { getTaxSettings: jest.fn(async () => ({ taxYearEnd: null })) },
+          useValue: {
+            getTaxSettings: jest.fn(async () => ({ taxYearEnd: null })),
+          },
         },
         { provide: DataSource, useValue: {} },
         { provide: getRepositoryToken(Expense), useValue: expensesRepo },
         { provide: getRepositoryToken(Accrual), useValue: accrualsRepo },
         { provide: getRepositoryToken(Report), useValue: reportsRepo },
         { provide: getRepositoryToken(Organization), useValue: orgsRepo },
-        { provide: getRepositoryToken(SalesInvoice), useValue: salesInvoicesRepo },
-        { provide: getRepositoryToken(ExpensePayment), useValue: expensePaymentsRepo },
-        { provide: getRepositoryToken(InvoicePayment), useValue: invoicePaymentsRepo },
-        { provide: getRepositoryToken(JournalEntry), useValue: journalEntriesRepo },
+        {
+          provide: getRepositoryToken(SalesInvoice),
+          useValue: salesInvoicesRepo,
+        },
+        {
+          provide: getRepositoryToken(ExpensePayment),
+          useValue: expensePaymentsRepo,
+        },
+        {
+          provide: getRepositoryToken(InvoicePayment),
+          useValue: invoicePaymentsRepo,
+        },
+        {
+          provide: getRepositoryToken(JournalEntry),
+          useValue: journalEntriesRepo,
+        },
         { provide: getRepositoryToken(CreditNote), useValue: creditNotesRepo },
         { provide: getRepositoryToken(DebitNote), useValue: debitNotesRepo },
-        { provide: getRepositoryToken(LedgerAccount), useValue: ledgerAccountsRepo },
-        { provide: getRepositoryToken(CreditNoteApplication), useValue: creditNoteAppsRepo },
-        { provide: getRepositoryToken(DebitNoteApplication), useValue: debitNoteAppsRepo },
-        { provide: getRepositoryToken(DebitNoteExpenseApplication), useValue: debitNoteExpenseAppsRepo },
+        {
+          provide: getRepositoryToken(LedgerAccount),
+          useValue: ledgerAccountsRepo,
+        },
+        {
+          provide: getRepositoryToken(CreditNoteApplication),
+          useValue: creditNoteAppsRepo,
+        },
+        {
+          provide: getRepositoryToken(DebitNoteApplication),
+          useValue: debitNoteAppsRepo,
+        },
+        {
+          provide: getRepositoryToken(DebitNoteExpenseApplication),
+          useValue: debitNoteExpenseAppsRepo,
+        },
         { provide: getRepositoryToken(Product), useValue: productsRepo },
-        { provide: getRepositoryToken(StockMovement), useValue: stockMovementsRepo },
+        {
+          provide: getRepositoryToken(StockMovement),
+          useValue: stockMovementsRepo,
+        },
       ],
     }).compile();
 
     const service = moduleRef.get(ReportsService);
 
     const filters = { startDate: '2026-01-01', endDate: '2026-01-31' };
-    const pnl = await (service as any).buildProfitAndLoss(organizationId, filters);
+    const pnl = await (service as any).buildProfitAndLoss(
+      organizationId,
+      filters,
+    );
     expect(pnl.summary.netProfit).toBe(60);
 
-    const tb = await (service as any).buildTrialBalance(organizationId, filters);
-    const tbExpense = tb.accounts.find((a: any) => a.accountName === 'JE Expense');
-    const tbRevenue = tb.accounts.find((a: any) => a.accountName === 'JE Revenue');
+    const tb = await (service as any).buildTrialBalance(
+      organizationId,
+      filters,
+    );
+    const tbExpense = tb.accounts.find(
+      (a: any) => a.accountName === 'JE Expense',
+    );
+    const tbRevenue = tb.accounts.find(
+      (a: any) => a.accountName === 'JE Revenue',
+    );
     expect(tbExpense).toBeTruthy();
     expect(tbExpense.accountType).toBe('Expense');
     expect(tbRevenue).toBeTruthy();
@@ -230,7 +330,9 @@ describe('ReportsService report consistency (custom ledger JEs, cash counterpart
       startDate: '2026-01-01',
       endDate: '2026-01-31',
     });
-    const bsRE = bs.equity.items.find((i: any) => i.account === 'Retained Earnings');
+    const bsRE = bs.equity.items.find(
+      (i: any) => i.account === 'Retained Earnings',
+    );
     expect(bsRE).toBeTruthy();
     expect(bsRE.closing).toBe(60);
   });
@@ -248,108 +350,223 @@ describe('ReportsService report consistency (custom ledger JEs, cash counterpart
       { debitaccount: expCode, creditaccount: 'cash', amount: '10', vat: '0' },
     ];
 
-    const ledgerAccountsRepo = makeSmartRepo('ledgerAccounts', () => ({ one: {}, many: [] }));
+    const ledgerAccountsRepo = makeSmartRepo('ledgerAccounts', () => ({
+      one: {},
+      many: [],
+    }));
     ledgerAccountsRepo.find = jest.fn(async () => [
-      { id: revId, name: 'JE Revenue', category: 'revenue', organization: { id: organizationId } } as any,
-      { id: expId, name: 'JE Expense', category: 'expense', organization: { id: organizationId } } as any,
+      {
+        id: revId,
+        name: 'JE Revenue',
+        category: 'revenue',
+        organization: { id: organizationId },
+      } as any,
+      {
+        id: expId,
+        name: 'JE Expense',
+        category: 'expense',
+        organization: { id: organizationId },
+      } as any,
     ]);
 
-    const journalEntriesRepo = makeSmartRepo('journalEntries', ({ selects }: QBInfo) => {
-      const selectText = Array.isArray(selects) ? selects.join(' ') : String(selects ?? '');
-      if (selectText.includes("AS revenueCredit") && selectText.includes("sales_revenue")) {
-        return { one: { revenuecredit: 0, revenuedebit: 0, revenuevatcredit: 0, revenuevatdebit: 0, expensedebit: 0, expensecredit: 0, expensevatdebit: 0, expensevatcredit: 0 } };
-      }
-      if (selectText.includes('SUM(entry.amount) AS amount') && selectText.includes('SUM(COALESCE(entry.vat_amount')) {
-        return { many: journalGroupedRows };
-      }
-      if (selectText.includes('SUM(entry.amount) AS amount') && !selectText.includes('vat_amount')) {
-        return { many: journalGroupedRows };
-      }
-      if (selectText.includes("AS received") && selectText.includes("AS paid")) {
-        return { one: { received: 30, paid: 10 } };
-      }
-      return { one: {}, many: [] };
-    });
+    const journalEntriesRepo = makeSmartRepo(
+      'journalEntries',
+      ({ selects }: QBInfo) => {
+        const selectText = Array.isArray(selects)
+          ? selects.join(' ')
+          : String(selects ?? '');
+        if (
+          selectText.includes('AS revenueCredit') &&
+          selectText.includes('sales_revenue')
+        ) {
+          return {
+            one: {
+              revenuecredit: 0,
+              revenuedebit: 0,
+              revenuevatcredit: 0,
+              revenuevatdebit: 0,
+              expensedebit: 0,
+              expensecredit: 0,
+              expensevatdebit: 0,
+              expensevatcredit: 0,
+            },
+          };
+        }
+        if (
+          selectText.includes('SUM(entry.amount) AS amount') &&
+          selectText.includes('SUM(COALESCE(entry.vat_amount')
+        ) {
+          return { many: journalGroupedRows };
+        }
+        if (
+          selectText.includes('SUM(entry.amount) AS amount') &&
+          !selectText.includes('vat_amount')
+        ) {
+          return { many: journalGroupedRows };
+        }
+        if (
+          selectText.includes('AS received') &&
+          selectText.includes('AS paid')
+        ) {
+          return { one: { received: 30, paid: 10 } };
+        }
+        return { one: {}, many: [] };
+      },
+    );
 
-    const salesInvoicesRepo = makeSmartRepo('salesInvoices', ({ selects }: QBInfo) => {
-      const selectText = Array.isArray(selects) ? selects.join(' ') : String(selects ?? '');
-      if (selectText.includes('AS revenue') && selectText.includes('COUNT')) {
-        return { one: { revenue: 200, vat: 0, count: 1 } };
-      }
-      if (selectText.includes('AS revenue')) return { one: { revenue: 200 } };
-      if (selectText.includes('AS invoiceAmount') || selectText.includes('AS amount')) return { one: { amount: 0, invoiceamount: 0 } };
-      return { one: {} };
-    });
+    const salesInvoicesRepo = makeSmartRepo(
+      'salesInvoices',
+      ({ selects }: QBInfo) => {
+        const selectText = Array.isArray(selects)
+          ? selects.join(' ')
+          : String(selects ?? '');
+        if (selectText.includes('AS revenue') && selectText.includes('COUNT')) {
+          return { one: { revenue: 200, vat: 0, count: 1 } };
+        }
+        if (selectText.includes('AS revenue')) return { one: { revenue: 200 } };
+        if (
+          selectText.includes('AS invoiceAmount') ||
+          selectText.includes('AS amount')
+        )
+          return { one: { amount: 0, invoiceamount: 0 } };
+        return { one: {} };
+      },
+    );
 
     const expensesRepo = makeSmartRepo('expenses', ({ selects }: QBInfo) => {
-      const selectText = Array.isArray(selects) ? selects.join(' ') : String(selects ?? '');
+      const selectText = Array.isArray(selects)
+        ? selects.join(' ')
+        : String(selects ?? '');
       // P&L breakdown
       if (selectText.includes('AS category') && selectText.includes('SUM(')) {
-        return { many: [{ category: 'Office', amount: '50', vat: '0', count: '1' }] };
+        return {
+          many: [{ category: 'Office', amount: '50', vat: '0', count: '1' }],
+        };
       }
       // TB breakdown uses accountName/accountType/debit
-      if (selectText.includes('AS accountName') && selectText.includes('AS debit')) {
-        return { many: [{ accountname: 'Office', accounttype: 'Expense', debit: '50', credit: '0' }] };
+      if (
+        selectText.includes('AS accountName') &&
+        selectText.includes('AS debit')
+      ) {
+        return {
+          many: [
+            {
+              accountname: 'Office',
+              accounttype: 'Expense',
+              debit: '50',
+              credit: '0',
+            },
+          ],
+        };
       }
       // Sum expenses
       if (selectText.includes('AS amount')) return { one: { amount: 50 } };
       return { one: {} };
     });
 
-    const creditNotesRepo = makeSmartRepo('creditNotes', () => ({ one: { amount: 0, vat: 0, count: 0, creditNotes: 0, creditnotes: 0 } }));
-    const debitNotesRepo = makeSmartRepo('debitNotes', () => ({ one: { amount: 0, vat: 0, count: 0, debitNotes: 0, debitnotes: 0 } }));
-    const invoicePaymentsRepo = makeSmartRepo('invoicePayments', () => ({ one: {} }));
-    const expensePaymentsRepo = makeSmartRepo('expensePayments', () => ({ one: {} }));
+    const creditNotesRepo = makeSmartRepo('creditNotes', () => ({
+      one: { amount: 0, vat: 0, count: 0, creditNotes: 0, creditnotes: 0 },
+    }));
+    const debitNotesRepo = makeSmartRepo('debitNotes', () => ({
+      one: { amount: 0, vat: 0, count: 0, debitNotes: 0, debitnotes: 0 },
+    }));
+    const invoicePaymentsRepo = makeSmartRepo('invoicePayments', () => ({
+      one: {},
+    }));
+    const expensePaymentsRepo = makeSmartRepo('expensePayments', () => ({
+      one: {},
+    }));
     const accrualsRepo = makeSmartRepo('accruals', () => ({ one: {} }));
     const reportsRepo = makeSmartRepo('reports', () => ({ one: {} }));
     const orgsRepo = makeSmartRepo('orgs', () => ({ one: {} }));
-    const creditNoteAppsRepo = makeSmartRepo('creditNoteApps', () => ({ one: {} }));
-    const debitNoteAppsRepo = makeSmartRepo('debitNoteApps', () => ({ one: {} }));
-    const debitNoteExpenseAppsRepo = makeSmartRepo('debitNoteExpenseApps', () => ({ one: {} }));
+    const creditNoteAppsRepo = makeSmartRepo('creditNoteApps', () => ({
+      one: {},
+    }));
+    const debitNoteAppsRepo = makeSmartRepo('debitNoteApps', () => ({
+      one: {},
+    }));
+    const debitNoteExpenseAppsRepo = makeSmartRepo(
+      'debitNoteExpenseApps',
+      () => ({ one: {} }),
+    );
     const productsRepo = makeSmartRepo('products', () => ({ many: [] }));
-    const stockMovementsRepo = makeSmartRepo('stockMovements', () => ({ many: [] }));
+    const stockMovementsRepo = makeSmartRepo('stockMovements', () => ({
+      many: [],
+    }));
 
     const moduleRef = await Test.createTestingModule({
       providers: [
         ReportsService,
         {
           provide: SettingsService,
-          useValue: { getTaxSettings: jest.fn(async () => ({ taxYearEnd: null })) },
+          useValue: {
+            getTaxSettings: jest.fn(async () => ({ taxYearEnd: null })),
+          },
         },
         { provide: DataSource, useValue: {} },
         { provide: getRepositoryToken(Expense), useValue: expensesRepo },
         { provide: getRepositoryToken(Accrual), useValue: accrualsRepo },
         { provide: getRepositoryToken(Report), useValue: reportsRepo },
         { provide: getRepositoryToken(Organization), useValue: orgsRepo },
-        { provide: getRepositoryToken(SalesInvoice), useValue: salesInvoicesRepo },
-        { provide: getRepositoryToken(ExpensePayment), useValue: expensePaymentsRepo },
-        { provide: getRepositoryToken(InvoicePayment), useValue: invoicePaymentsRepo },
-        { provide: getRepositoryToken(JournalEntry), useValue: journalEntriesRepo },
+        {
+          provide: getRepositoryToken(SalesInvoice),
+          useValue: salesInvoicesRepo,
+        },
+        {
+          provide: getRepositoryToken(ExpensePayment),
+          useValue: expensePaymentsRepo,
+        },
+        {
+          provide: getRepositoryToken(InvoicePayment),
+          useValue: invoicePaymentsRepo,
+        },
+        {
+          provide: getRepositoryToken(JournalEntry),
+          useValue: journalEntriesRepo,
+        },
         { provide: getRepositoryToken(CreditNote), useValue: creditNotesRepo },
         { provide: getRepositoryToken(DebitNote), useValue: debitNotesRepo },
-        { provide: getRepositoryToken(LedgerAccount), useValue: ledgerAccountsRepo },
-        { provide: getRepositoryToken(CreditNoteApplication), useValue: creditNoteAppsRepo },
-        { provide: getRepositoryToken(DebitNoteApplication), useValue: debitNoteAppsRepo },
-        { provide: getRepositoryToken(DebitNoteExpenseApplication), useValue: debitNoteExpenseAppsRepo },
+        {
+          provide: getRepositoryToken(LedgerAccount),
+          useValue: ledgerAccountsRepo,
+        },
+        {
+          provide: getRepositoryToken(CreditNoteApplication),
+          useValue: creditNoteAppsRepo,
+        },
+        {
+          provide: getRepositoryToken(DebitNoteApplication),
+          useValue: debitNoteAppsRepo,
+        },
+        {
+          provide: getRepositoryToken(DebitNoteExpenseApplication),
+          useValue: debitNoteExpenseAppsRepo,
+        },
         { provide: getRepositoryToken(Product), useValue: productsRepo },
-        { provide: getRepositoryToken(StockMovement), useValue: stockMovementsRepo },
+        {
+          provide: getRepositoryToken(StockMovement),
+          useValue: stockMovementsRepo,
+        },
       ],
     }).compile();
 
     const service = moduleRef.get(ReportsService);
     const filters = { startDate: '2026-01-01', endDate: '2026-01-31' };
 
-    const pnl = await (service as any).buildProfitAndLoss(organizationId, filters);
+    const pnl = await (service as any).buildProfitAndLoss(
+      organizationId,
+      filters,
+    );
     expect(pnl.summary.netProfit).toBe(170);
 
     const bs = await (service as any).buildBalanceSheet(organizationId, {
       startDate: '2026-01-01',
       endDate: '2026-01-31',
     });
-    const bsRE = bs.equity.items.find((i: any) => i.account === 'Retained Earnings');
+    const bsRE = bs.equity.items.find(
+      (i: any) => i.account === 'Retained Earnings',
+    );
     expect(bsRE).toBeTruthy();
     expect(bsRE.closing).toBe(170);
   });
 });
-
-

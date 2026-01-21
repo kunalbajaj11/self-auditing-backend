@@ -83,7 +83,7 @@ export class ExpensesService {
    * Calculate VAT amount based on tax settings
    * Supports both inclusive and exclusive tax calculation methods
    * For reverse charge: VAT is calculated but NOT added to total (customer self-accounts)
-   * 
+   *
    * Enhanced: Uses TaxRulesService if available, falls back to standard calculation
    */
   private async calculateVatAmount(
@@ -106,8 +106,10 @@ export class ExpensesService {
           select: ['region'],
         });
 
-        const taxSettings = await this.settingsService.getTaxSettings(organizationId);
-        const calculationMethod = taxSettings.taxCalculationMethod || 'inclusive';
+        const taxSettings =
+          await this.settingsService.getTaxSettings(organizationId);
+        const calculationMethod =
+          taxSettings.taxCalculationMethod || 'inclusive';
 
         const result = await this.taxRulesService.calculateTax({
           amount,
@@ -127,7 +129,10 @@ export class ExpensesService {
         };
       } catch (error) {
         // If tax rules service fails, fall back to standard calculation
-        console.warn('Tax rules service error, falling back to standard calculation:', error);
+        console.warn(
+          'Tax rules service error, falling back to standard calculation:',
+          error,
+        );
       }
     }
 
@@ -425,7 +430,7 @@ export class ExpensesService {
     }
 
     // Handle line items if provided (item-wise purchase entry)
-    let lineItems: PurchaseLineItemDto[] | undefined = dto.lineItems;
+    const lineItems: PurchaseLineItemDto[] | undefined = dto.lineItems;
     let vatAmount = dto.vatAmount;
     let expenseAmount = dto.amount;
 
@@ -434,14 +439,15 @@ export class ExpensesService {
       let totalAmount = 0;
       let totalVatAmount = 0;
       const defaultTaxRate = await this.getDefaultTaxRate(organizationId);
-      const taxSettings = await this.settingsService.getTaxSettings(organizationId);
+      const taxSettings =
+        await this.settingsService.getTaxSettings(organizationId);
       const calculationMethod = taxSettings.taxCalculationMethod || 'inclusive';
 
       // Process each line item
       for (let i = 0; i < lineItems.length; i++) {
         const lineItem = lineItems[i];
         const lineAmount = lineItem.quantity * lineItem.unitPrice;
-        
+
         // Get VAT rate for this line item
         let lineVatRate = lineItem.vatRate;
         if (!lineVatRate && lineItem.productId) {
@@ -449,7 +455,9 @@ export class ExpensesService {
           const product = await this.productsRepository.findOne({
             where: { id: lineItem.productId },
           });
-          lineVatRate = product?.vatRate ? parseFloat(product.vatRate) : defaultTaxRate;
+          lineVatRate = product?.vatRate
+            ? parseFloat(product.vatRate)
+            : defaultTaxRate;
         } else if (!lineVatRate) {
           lineVatRate = defaultTaxRate;
         }
@@ -457,7 +465,7 @@ export class ExpensesService {
         // Calculate VAT for this line item
         const lineVatTaxType = lineItem.vatTaxType || vatTaxType;
         let lineVatAmount = 0;
-        
+
         if (lineVatTaxType === 'zero_rated' || lineVatTaxType === 'exempt') {
           lineVatAmount = 0;
         } else if (lineVatTaxType === 'reverse_charge') {
@@ -626,7 +634,8 @@ export class ExpensesService {
     // Create line items if provided
     if (lineItems && lineItems.length > 0) {
       const defaultTaxRate = await this.getDefaultTaxRate(organizationId);
-      const taxSettings = await this.settingsService.getTaxSettings(organizationId);
+      const taxSettings =
+        await this.settingsService.getTaxSettings(organizationId);
       const calculationMethod = taxSettings.taxCalculationMethod || 'inclusive';
 
       const lineItemEntities = await Promise.all(
@@ -644,11 +653,13 @@ export class ExpensesService {
 
           // Calculate line item amounts
           const lineAmount = lineItemDto.quantity * lineItemDto.unitPrice;
-          
+
           // Get VAT rate
           let lineVatRate = lineItemDto.vatRate;
           if (!lineVatRate && product) {
-            lineVatRate = product.vatRate ? parseFloat(product.vatRate) : defaultTaxRate;
+            lineVatRate = product.vatRate
+              ? parseFloat(product.vatRate)
+              : defaultTaxRate;
           } else if (!lineVatRate) {
             lineVatRate = defaultTaxRate;
           }
@@ -656,7 +667,7 @@ export class ExpensesService {
           // Calculate VAT for this line item
           const lineVatTaxType = lineItemDto.vatTaxType || vatTaxType;
           let lineVatAmount = 0;
-          
+
           if (lineVatTaxType === 'zero_rated' || lineVatTaxType === 'exempt') {
             lineVatAmount = 0;
           } else if (lineVatTaxType === 'reverse_charge') {
@@ -686,7 +697,8 @@ export class ExpensesService {
             itemName: lineItemDto.itemName,
             sku: product?.sku || lineItemDto.sku || null,
             quantity: lineItemDto.quantity.toString(),
-            unitOfMeasure: lineItemDto.unitOfMeasure || product?.unitOfMeasure || 'unit',
+            unitOfMeasure:
+              lineItemDto.unitOfMeasure || product?.unitOfMeasure || 'unit',
             unitPrice: lineItemDto.unitPrice.toString(),
             amount: lineAmount.toString(),
             vatRate: lineVatRate.toString(),
@@ -771,7 +783,8 @@ export class ExpensesService {
       await this.linkExpenseToAccrual(saved, linkedAccrualExpense);
     } else if (
       effectiveType !== ExpenseType.ACCRUAL &&
-      (effectiveType === ExpenseType.EXPENSE || effectiveType === ExpenseType.CREDIT) &&
+      (effectiveType === ExpenseType.EXPENSE ||
+        effectiveType === ExpenseType.CREDIT) &&
       dto.vendorName &&
       dto.amount
     ) {
@@ -798,9 +811,8 @@ export class ExpensesService {
 
     if (hasInventoryAccess) {
       try {
-        const locations = await this.inventoryService.findAllLocations(
-          organizationId,
-        );
+        const locations =
+          await this.inventoryService.findAllLocations(organizationId);
 
         if (locations.length > 0) {
           const location = locations.find((l) => l.isDefault) || locations[0];
@@ -1314,7 +1326,7 @@ export class ExpensesService {
     }
     // Capture previous purchase status BEFORE updating (for payment auto-creation check)
     const previousPurchaseStatus = expense.purchaseStatus;
-    
+
     if (dto.purchaseStatus !== undefined) {
       expense.purchaseStatus = dto.purchaseStatus;
     }
@@ -1363,10 +1375,12 @@ export class ExpensesService {
       // Only create if no payment record exists
       if (existingPayments.length === 0) {
         // Use calculated total (accounting for reverse charge) or database-generated total
-        const paymentAmount = isReverseCharge 
-          ? calculatedTotalAmount 
-          : (saved.totalAmount ? parseFloat(saved.totalAmount) : calculatedTotalAmount);
-        
+        const paymentAmount = isReverseCharge
+          ? calculatedTotalAmount
+          : saved.totalAmount
+            ? parseFloat(saved.totalAmount)
+            : calculatedTotalAmount;
+
         const payment = this.expensePaymentsRepository.create({
           expense: saved,
           organization: { id: organizationId },

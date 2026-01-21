@@ -9,4 +9,3 @@ export const LICENSE_FEATURE_KEY = 'licenseFeature';
  */
 export const RequireLicenseFeature = (feature: 'payroll' | 'inventory') =>
   SetMetadata(LICENSE_FEATURE_KEY, feature);
-

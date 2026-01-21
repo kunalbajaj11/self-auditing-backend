@@ -25,4 +25,3 @@ import { Category } from '../../entities/category.entity';
   exports: [TaxRulesService],
 })
 export class TaxRulesModule {}
-

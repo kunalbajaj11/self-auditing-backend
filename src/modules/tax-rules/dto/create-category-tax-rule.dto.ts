@@ -26,4 +26,3 @@ export class CreateCategoryTaxRuleDto {
   @IsOptional()
   description?: string;
 }
-

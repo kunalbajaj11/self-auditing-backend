@@ -12,12 +12,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([
-      ComplianceDeadline,
-      TaxForm,
-      Organization,
-      User,
-    ]),
+    TypeOrmModule.forFeature([ComplianceDeadline, TaxForm, Organization, User]),
     NotificationsModule,
   ],
   providers: [
@@ -33,4 +28,3 @@ import { NotificationsModule } from '../notifications/notifications.module';
   ],
 })
 export class ComplianceModule {}
-

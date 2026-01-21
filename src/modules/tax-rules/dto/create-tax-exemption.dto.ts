@@ -37,4 +37,3 @@ export class CreateTaxExemptionDto {
   @IsOptional()
   description?: string;
 }
-

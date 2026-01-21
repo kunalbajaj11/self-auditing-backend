@@ -598,7 +598,9 @@ export class ExpensePaymentsService {
       });
 
       const paymentDate =
-        payments.length > 0 ? payments[0].paymentDate : new Date().toISOString().split('T')[0];
+        payments.length > 0
+          ? payments[0].paymentDate
+          : new Date().toISOString().split('T')[0];
 
       // Call the settlement logic
       await this.updateAccrualStatusForExpense(

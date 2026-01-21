@@ -163,9 +163,8 @@ describe('ExpensesService - Tax Rules Integration', () => {
           ],
         }).compile();
 
-      const serviceWithoutTaxRules = moduleWithoutTaxRules.get<ExpensesService>(
-        ExpensesService,
-      );
+      const serviceWithoutTaxRules =
+        moduleWithoutTaxRules.get<ExpensesService>(ExpensesService);
 
       const result = await (serviceWithoutTaxRules as any).calculateVatAmount(
         mockOrganizationId,
@@ -180,4 +179,3 @@ describe('ExpensesService - Tax Rules Integration', () => {
     });
   });
 });
-

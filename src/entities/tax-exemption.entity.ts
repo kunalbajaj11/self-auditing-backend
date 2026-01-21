@@ -54,10 +54,15 @@ export class TaxExemption extends AbstractEntity {
   })
   exemptionPercentage?: string | null; // For partial exemptions
 
-  @Column({ name: 'threshold_amount', type: 'decimal', precision: 12, scale: 2, nullable: true })
+  @Column({
+    name: 'threshold_amount',
+    type: 'decimal',
+    precision: 12,
+    scale: 2,
+    nullable: true,
+  })
   thresholdAmount?: string | null; // Amount threshold for exemption
 
   @Column({ type: 'text', nullable: true })
   description?: string | null;
 }
-

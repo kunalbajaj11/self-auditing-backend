@@ -60,7 +60,7 @@ export class TaxCalculationService {
     }, 0);
 
     // Default: no tax (can be extended with region-specific brackets)
-    let taxAmount = 0;
+    const taxAmount = 0;
 
     // Example tax brackets (can be configured per region)
     // if (region === 'INDIA') {

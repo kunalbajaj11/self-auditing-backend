@@ -141,7 +141,7 @@ export class CategoriesService {
 
     // Filter by expense type if provided (for fixed_assets and cost_of_sales)
     if (expenseType) {
-      // Include categories that match the expense type (system type) OR 
+      // Include categories that match the expense type (system type) OR
       // categories linked to a custom expense type with matching name OR
       // have no expense type (general categories)
       query.andWhere(
@@ -152,7 +152,7 @@ export class CategoriesService {
     // If no expense type specified, return all categories (no filtering)
 
     const categories = await query.orderBy('category.name', 'ASC').getMany();
-    
+
     // Transform to ensure expenseTypeId is included in response
     // TypeORM includes the relationship object but we also need the ID field
     return categories.map((category) => {

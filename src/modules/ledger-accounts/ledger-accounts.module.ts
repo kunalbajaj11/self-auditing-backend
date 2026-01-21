@@ -13,4 +13,3 @@ import { User } from '../../entities/user.entity';
   exports: [LedgerAccountsService],
 })
 export class LedgerAccountsModule {}
-

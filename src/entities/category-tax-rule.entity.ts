@@ -30,4 +30,3 @@ export class CategoryTaxRule extends AbstractEntity {
   @Column({ type: 'text', nullable: true })
   description?: string | null;
 }
-

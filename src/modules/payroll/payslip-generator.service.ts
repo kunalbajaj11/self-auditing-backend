@@ -19,7 +19,9 @@ export class PayslipGeneratorService {
     try {
       const urlLower = url.toLowerCase();
       if (urlLower.endsWith('.svg') || urlLower.includes('image/svg+xml')) {
-        console.warn(`Skipping SVG image from URL: ${url} (PDFKit doesn't support SVG)`);
+        console.warn(
+          `Skipping SVG image from URL: ${url} (PDFKit doesn't support SVG)`,
+        );
         return null;
       }
 
@@ -29,15 +31,22 @@ export class PayslipGeneratorService {
       });
 
       const contentType = response.headers['content-type'] || '';
-      if (contentType.includes('image/svg+xml') || contentType.includes('image/svg')) {
-        console.warn(`Skipping SVG image from URL: ${url} (Content-Type: ${contentType})`);
+      if (
+        contentType.includes('image/svg+xml') ||
+        contentType.includes('image/svg')
+      ) {
+        console.warn(
+          `Skipping SVG image from URL: ${url} (Content-Type: ${contentType})`,
+        );
         return null;
       }
 
       const buffer = Buffer.from(response.data);
       const bufferStart = buffer.slice(0, 100).toString('utf-8').toLowerCase();
       if (bufferStart.includes('<svg') || bufferStart.includes('<?xml')) {
-        console.warn(`Skipping SVG image from URL: ${url} (detected SVG content)`);
+        console.warn(
+          `Skipping SVG image from URL: ${url} (detected SVG content)`,
+        );
         return null;
       }
 
@@ -54,7 +63,15 @@ export class PayslipGeneratorService {
   private getApplicationLogoPath(): string | null {
     const possiblePaths = [
       path.join(process.cwd(), 'assets', 'images', 'app-logo.jpg'),
-      path.join(__dirname, '..', '..', '..', 'assets', 'images', 'app-logo.jpg'),
+      path.join(
+        __dirname,
+        '..',
+        '..',
+        '..',
+        'assets',
+        'images',
+        'app-logo.jpg',
+      ),
       path.join(__dirname, '..', '..', 'assets', 'images', 'app-logo.jpg'),
       path.join(process.cwd(), 'assets', 'images', 'logo.jpeg'),
       path.join(__dirname, '..', '..', '..', 'assets', 'images', 'logo.jpeg'),
@@ -82,7 +99,10 @@ export class PayslipGeneratorService {
   /**
    * Format currency amount
    */
-  private formatCurrency(value: number | string, currency: string = 'AED'): string {
+  private formatCurrency(
+    value: number | string,
+    currency: string = 'AED',
+  ): string {
     const numValue = typeof value === 'string' ? parseFloat(value) : value;
     if (isNaN(numValue)) {
       return `${currency} 0.00`;
@@ -96,7 +116,8 @@ export class PayslipGeneratorService {
    */
   private formatDate(dateString: string | Date): string {
     if (!dateString) return '';
-    const date = typeof dateString === 'string' ? new Date(dateString) : dateString;
+    const date =
+      typeof dateString === 'string' ? new Date(dateString) : dateString;
     return date.toLocaleDateString('en-GB', {
       day: '2-digit',
       month: 'short',
@@ -144,7 +165,9 @@ export class PayslipGeneratorService {
         // Try to get organization logo from settings
         let logoBuffer: Buffer | null = null;
         try {
-          logoBuffer = await this.settingsService.getInvoiceLogoBuffer(organization.id);
+          logoBuffer = await this.settingsService.getInvoiceLogoBuffer(
+            organization.id,
+          );
         } catch (error) {
           console.warn('Failed to get organization logo:', error);
         }
@@ -154,8 +177,14 @@ export class PayslipGeneratorService {
 
         try {
           if (logoBuffer) {
-            const bufferStart = logoBuffer.slice(0, 100).toString('utf-8').toLowerCase();
-            if (!bufferStart.includes('<svg') && !bufferStart.includes('<?xml')) {
+            const bufferStart = logoBuffer
+              .slice(0, 100)
+              .toString('utf-8')
+              .toLowerCase();
+            if (
+              !bufferStart.includes('<svg') &&
+              !bufferStart.includes('<?xml')
+            ) {
               doc.image(logoBuffer, logoX, logoY, {
                 width: logoSize,
                 height: logoSize,
@@ -204,15 +233,25 @@ export class PayslipGeneratorService {
           align: 'right',
         });
         yPos += 12;
-        doc.text(`Pay Date: ${this.formatDate(payrollRun.payDate)}`, rightX, yPos, {
-          width: pageWidth - rightX - margin,
-          align: 'right',
-        });
+        doc.text(
+          `Pay Date: ${this.formatDate(payrollRun.payDate)}`,
+          rightX,
+          yPos,
+          {
+            width: pageWidth - rightX - margin,
+            align: 'right',
+          },
+        );
         yPos += 12;
-        doc.text(`Payslip #: ${payrollEntry.id.substring(0, 8).toUpperCase()}`, rightX, yPos, {
-          width: pageWidth - rightX - margin,
-          align: 'right',
-        });
+        doc.text(
+          `Payslip #: ${payrollEntry.id.substring(0, 8).toUpperCase()}`,
+          rightX,
+          yPos,
+          {
+            width: pageWidth - rightX - margin,
+            align: 'right',
+          },
+        );
 
         // Horizontal line below header
         doc
@@ -236,8 +275,13 @@ export class PayslipGeneratorService {
         // ============================================
         // EMPLOYEE INFORMATION SECTION
         // ============================================
-        const employeeName = payrollEntry.employeeName || payrollEntry.user?.name || payrollEntry.user?.email || 'Employee';
-        const employeeEmail = payrollEntry.email || payrollEntry.user?.email || 'N/A';
+        const employeeName =
+          payrollEntry.employeeName ||
+          payrollEntry.user?.name ||
+          payrollEntry.user?.email ||
+          'Employee';
+        const employeeEmail =
+          payrollEntry.email || payrollEntry.user?.email || 'N/A';
 
         // Employee info box
         const infoBoxY = doc.y;
@@ -258,7 +302,11 @@ export class PayslipGeneratorService {
         doc.fontSize(10).font('Helvetica').fillColor('#374151');
         doc.text(`Name: ${employeeName}`, margin + 10, infoBoxY + 25);
         doc.text(`Email: ${employeeEmail}`, margin + 10, infoBoxY + 38);
-        doc.text(`Currency: ${payrollEntry.currency || payrollRun.currency}`, margin + pageWidth / 2 - margin, infoBoxY + 25);
+        doc.text(
+          `Currency: ${payrollEntry.currency || payrollRun.currency}`,
+          margin + pageWidth / 2 - margin,
+          infoBoxY + 25,
+        );
 
         doc.y = infoBoxY + infoBoxHeight + 15;
 
@@ -289,7 +337,10 @@ export class PayslipGeneratorService {
         // Basic Salary
         doc.text('Basic Salary', margin + 10, doc.y);
         doc.text(
-          this.formatCurrency(parseFloat(payrollEntry.basicSalary), payrollEntry.currency || payrollRun.currency),
+          this.formatCurrency(
+            parseFloat(payrollEntry.basicSalary),
+            payrollEntry.currency || payrollRun.currency,
+          ),
           pageWidth - margin - 10,
           doc.y,
           { width: 110, align: 'right' },
@@ -312,7 +363,10 @@ export class PayslipGeneratorService {
             if (amount > 0) {
               doc.text(componentName, margin + 20, doc.y);
               doc.text(
-                this.formatCurrency(amount, payrollEntry.currency || payrollRun.currency),
+                this.formatCurrency(
+                  amount,
+                  payrollEntry.currency || payrollRun.currency,
+                ),
                 pageWidth - margin - 10,
                 doc.y,
                 { width: 110, align: 'right' },
@@ -325,7 +379,10 @@ export class PayslipGeneratorService {
           if (parseFloat(payrollEntry.allowancesAmount) > 0) {
             doc.text('Allowances', margin + 20, doc.y);
             doc.text(
-              this.formatCurrency(parseFloat(payrollEntry.allowancesAmount), payrollEntry.currency || payrollRun.currency),
+              this.formatCurrency(
+                parseFloat(payrollEntry.allowancesAmount),
+                payrollEntry.currency || payrollRun.currency,
+              ),
               pageWidth - margin - 10,
               doc.y,
               { width: 110, align: 'right' },
@@ -336,7 +393,10 @@ export class PayslipGeneratorService {
           if (parseFloat(payrollEntry.overtimeAmount) > 0) {
             doc.text('Overtime', margin + 20, doc.y);
             doc.text(
-              this.formatCurrency(parseFloat(payrollEntry.overtimeAmount), payrollEntry.currency || payrollRun.currency),
+              this.formatCurrency(
+                parseFloat(payrollEntry.overtimeAmount),
+                payrollEntry.currency || payrollRun.currency,
+              ),
               pageWidth - margin - 10,
               doc.y,
               { width: 110, align: 'right' },
@@ -347,7 +407,10 @@ export class PayslipGeneratorService {
           if (parseFloat(payrollEntry.bonusAmount) > 0) {
             doc.text('Bonus', margin + 20, doc.y);
             doc.text(
-              this.formatCurrency(parseFloat(payrollEntry.bonusAmount), payrollEntry.currency || payrollRun.currency),
+              this.formatCurrency(
+                parseFloat(payrollEntry.bonusAmount),
+                payrollEntry.currency || payrollRun.currency,
+              ),
               pageWidth - margin - 10,
               doc.y,
               { width: 110, align: 'right' },
@@ -358,7 +421,10 @@ export class PayslipGeneratorService {
           if (parseFloat(payrollEntry.commissionAmount) > 0) {
             doc.text('Commission', margin + 20, doc.y);
             doc.text(
-              this.formatCurrency(parseFloat(payrollEntry.commissionAmount), payrollEntry.currency || payrollRun.currency),
+              this.formatCurrency(
+                parseFloat(payrollEntry.commissionAmount),
+                payrollEntry.currency || payrollRun.currency,
+              ),
               pageWidth - margin - 10,
               doc.y,
               { width: 110, align: 'right' },
@@ -380,7 +446,10 @@ export class PayslipGeneratorService {
         doc.fontSize(11).font('Helvetica-Bold').fillColor('#1a1a1a');
         doc.text('Gross Salary', margin + 10, doc.y);
         doc.text(
-          this.formatCurrency(parseFloat(payrollEntry.grossSalary), payrollEntry.currency || payrollRun.currency),
+          this.formatCurrency(
+            parseFloat(payrollEntry.grossSalary),
+            payrollEntry.currency || payrollRun.currency,
+          ),
           pageWidth - margin - 10,
           doc.y,
           { width: 110, align: 'right' },
@@ -413,7 +482,10 @@ export class PayslipGeneratorService {
           doc.fontSize(10).font('Helvetica').fillColor('#1a1a1a');
 
           // Deduction details
-          if (payrollEntry.entryDetails && payrollEntry.entryDetails.length > 0) {
+          if (
+            payrollEntry.entryDetails &&
+            payrollEntry.entryDetails.length > 0
+          ) {
             const deductionDetails = payrollEntry.entryDetails.filter(
               (detail) => detail.componentType === 'deduction',
             );
@@ -424,7 +496,10 @@ export class PayslipGeneratorService {
               if (amount > 0) {
                 doc.text(componentName, margin + 20, doc.y);
                 doc.text(
-                  this.formatCurrency(amount, payrollEntry.currency || payrollRun.currency),
+                  this.formatCurrency(
+                    amount,
+                    payrollEntry.currency || payrollRun.currency,
+                  ),
                   pageWidth - margin - 10,
                   doc.y,
                   { width: 110, align: 'right' },
@@ -436,7 +511,10 @@ export class PayslipGeneratorService {
             // Fallback to summary
             doc.text('Total Deductions', margin + 20, doc.y);
             doc.text(
-              this.formatCurrency(parseFloat(payrollEntry.deductionsAmount), payrollEntry.currency || payrollRun.currency),
+              this.formatCurrency(
+                parseFloat(payrollEntry.deductionsAmount),
+                payrollEntry.currency || payrollRun.currency,
+              ),
               pageWidth - margin - 10,
               doc.y,
               { width: 110, align: 'right' },
@@ -457,7 +535,10 @@ export class PayslipGeneratorService {
           doc.fontSize(11).font('Helvetica-Bold').fillColor('#dc3545');
           doc.text('Total Deductions', margin + 10, doc.y);
           doc.text(
-            this.formatCurrency(parseFloat(payrollEntry.deductionsAmount), payrollEntry.currency || payrollRun.currency),
+            this.formatCurrency(
+              parseFloat(payrollEntry.deductionsAmount),
+              payrollEntry.currency || payrollRun.currency,
+            ),
             pageWidth - margin - 10,
             doc.y,
             { width: 110, align: 'right' },
@@ -483,7 +564,10 @@ export class PayslipGeneratorService {
         doc.fontSize(16).font('Helvetica-Bold').fillColor('#ffffff');
         doc.text('NET SALARY', margin + 15, netSalaryBoxY + 12);
         doc.text(
-          this.formatCurrency(parseFloat(payrollEntry.netSalary), payrollEntry.currency || payrollRun.currency),
+          this.formatCurrency(
+            parseFloat(payrollEntry.netSalary),
+            payrollEntry.currency || payrollRun.currency,
+          ),
           pageWidth - margin - 15,
           netSalaryBoxY + 12,
           { width: 200, align: 'right' },
@@ -503,9 +587,14 @@ export class PayslipGeneratorService {
           .stroke();
 
         doc.fontSize(8).font('Helvetica').fillColor('#666666');
-        doc.text('This is a computer-generated payslip, no signature required.', margin, footerY, {
-          align: 'left',
-        });
+        doc.text(
+          'This is a computer-generated payslip, no signature required.',
+          margin,
+          footerY,
+          {
+            align: 'left',
+          },
+        );
         doc.text('Generated by SelfAccounting.AI', margin, footerY + 10, {
           align: 'left',
         });

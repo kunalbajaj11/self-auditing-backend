@@ -51,12 +51,9 @@ export class ComplianceReminderService {
   /**
    * Send compliance reminders for an organization
    */
-  async sendRemindersForOrganization(
-    organizationId: string,
-  ): Promise<void> {
-    const deadlines = await this.calendarService.getDeadlinesNeedingReminders(
-      organizationId,
-    );
+  async sendRemindersForOrganization(organizationId: string): Promise<void> {
+    const deadlines =
+      await this.calendarService.getDeadlinesNeedingReminders(organizationId);
 
     const organization = await this.organizationsRepository.findOne({
       where: { id: organizationId },
@@ -185,4 +182,3 @@ export class ComplianceReminderService {
     );
   }
 }
-

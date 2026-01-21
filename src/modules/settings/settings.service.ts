@@ -263,9 +263,7 @@ export class SettingsService {
    * Get the invoice logo as a stream for proxy serving
    * This allows serving logos from private storage buckets
    */
-  async getInvoiceLogoStream(
-    organizationId: string,
-  ): Promise<{
+  async getInvoiceLogoStream(organizationId: string): Promise<{
     stream: any;
     contentType?: string;
     contentLength?: number;

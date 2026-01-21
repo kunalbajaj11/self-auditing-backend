@@ -52,4 +52,3 @@ export class CreateTaxRuleDto {
   @IsOptional()
   priority?: number;
 }
-

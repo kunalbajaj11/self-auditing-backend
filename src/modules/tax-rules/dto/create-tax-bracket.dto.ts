@@ -32,4 +32,3 @@ export class CreateTaxBracketDto {
   @IsOptional()
   bracketOrder?: number;
 }
-

@@ -24,7 +24,9 @@ export async function migrateCashBankToCash(
     .where("debit_account = 'cash_bank'")
     .execute();
 
-  console.log(`Updated ${debitResult.affected || 0} entries with debit_account = 'cash_bank' → 'cash'`);
+  console.log(
+    `Updated ${debitResult.affected || 0} entries with debit_account = 'cash_bank' → 'cash'`,
+  );
 
   // Update credit_account from cash_bank to cash
   const creditResult = await journalEntryRepository
@@ -34,9 +36,12 @@ export async function migrateCashBankToCash(
     .where("credit_account = 'cash_bank'")
     .execute();
 
-  console.log(`Updated ${creditResult.affected || 0} entries with credit_account = 'cash_bank' → 'cash'`);
+  console.log(
+    `Updated ${creditResult.affected || 0} entries with credit_account = 'cash_bank' → 'cash'`,
+  );
 
   console.log(`\nMigration complete:`);
-  console.log(`- Total entries updated: ${(debitResult.affected || 0) + (creditResult.affected || 0)}`);
+  console.log(
+    `- Total entries updated: ${(debitResult.affected || 0) + (creditResult.affected || 0)}`,
+  );
 }
-

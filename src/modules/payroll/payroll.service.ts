@@ -67,7 +67,7 @@ export class PayrollService {
   ): Promise<EmployeeSalaryProfile> {
     // Log the entire DTO to see what's being received
     console.log(`[PayrollService] Received DTO:`, JSON.stringify(dto, null, 2));
-    
+
     // Support both userId (camelCase) and user_id (snake_case)
     const userId = dto.userId || (dto as any).user_id;
     console.log(`[PayrollService] Resolved userId:`, userId);
@@ -89,7 +89,7 @@ export class PayrollService {
     // If userId is provided, validate it exists and belongs to the organization
     let user: User | null = null;
     let finalUserId: string | null = null;
-    
+
     if (userId) {
       user = await this.usersRepository.findOne({
         where: { id: userId, organization: { id: organizationId } },
@@ -104,8 +104,10 @@ export class PayrollService {
     } else if (dto.employeeName) {
       // Optional auto-link: Try to find user by name if employeeName is provided
       // This is optional - profiles without users are valid for external employees
-      console.log(`[PayrollService] No userId provided, attempting optional auto-link by employeeName: "${dto.employeeName}"`);
-      
+      console.log(
+        `[PayrollService] No userId provided, attempting optional auto-link by employeeName: "${dto.employeeName}"`,
+      );
+
       // Use query builder for more reliable organization filtering
       user = await this.usersRepository
         .createQueryBuilder('user')
@@ -113,17 +115,27 @@ export class PayrollService {
         .andWhere('user.organization_id = :organizationId', { organizationId })
         .andWhere('user.is_deleted = false')
         .getOne();
-      
+
       if (user) {
         finalUserId = user.id;
-        console.log(`[PayrollService] ✅ Auto-linked to user: ${user.id} (${user.name})`);
+        console.log(
+          `[PayrollService] ✅ Auto-linked to user: ${user.id} (${user.name})`,
+        );
       } else {
-        console.log(`[PayrollService] ℹ️  No user found with name "${dto.employeeName}" - profile will be created for external employee (no portal access)`);
-        console.log(`[PayrollService] This is valid - external employees don't need portal access`);
+        console.log(
+          `[PayrollService] ℹ️  No user found with name "${dto.employeeName}" - profile will be created for external employee (no portal access)`,
+        );
+        console.log(
+          `[PayrollService] This is valid - external employees don't need portal access`,
+        );
       }
     } else {
-      console.log(`[PayrollService] Creating profile WITHOUT userId and WITHOUT employeeName`);
-      console.log(`[PayrollService] WARNING: Profile must have either userId or employeeName`);
+      console.log(
+        `[PayrollService] Creating profile WITHOUT userId and WITHOUT employeeName`,
+      );
+      console.log(
+        `[PayrollService] WARNING: Profile must have either userId or employeeName`,
+      );
     }
 
     const profile = this.salaryProfilesRepository.create({
@@ -145,29 +157,37 @@ export class PayrollService {
 
     // ALWAYS use direct SQL update if we have a userId (TypeORM relation save is unreliable)
     if (finalUserId) {
-      console.log(`[PayrollService] Executing SQL update to set user_id = ${finalUserId}`);
+      console.log(
+        `[PayrollService] Executing SQL update to set user_id = ${finalUserId}`,
+      );
       // Use direct SQL update to ensure user_id is persisted
       await this.dataSource.query(
         `UPDATE employee_salary_profiles SET user_id = $1 WHERE id = $2`,
         [finalUserId, savedProfile.id],
       );
-      
+
       // Verify it was saved
       const verifyResult = await this.dataSource.query(
         `SELECT user_id FROM employee_salary_profiles WHERE id = $1`,
         [savedProfile.id],
       );
       const savedUserId = verifyResult[0]?.user_id;
-      console.log(`[PayrollService] Verified user_id in database: ${savedUserId || 'NULL'}`);
-      
+      console.log(
+        `[PayrollService] Verified user_id in database: ${savedUserId || 'NULL'}`,
+      );
+
       if (!savedUserId) {
-        console.error(`[PayrollService] ERROR: user_id was NOT saved to database!`);
+        console.error(
+          `[PayrollService] ERROR: user_id was NOT saved to database!`,
+        );
         throw new BadRequestException(
           `Failed to save user_id to salary profile. Please try again or contact support.`,
         );
       }
     } else {
-      console.log(`[PayrollService] ℹ️  Profile created without user_id - this is valid for external employees without portal access`);
+      console.log(
+        `[PayrollService] ℹ️  Profile created without user_id - this is valid for external employees without portal access`,
+      );
     }
 
     // Save salary components if provided
@@ -209,7 +229,9 @@ export class PayrollService {
       );
       const dbUserId = dbCheck[0]?.user_id;
       if (dbUserId) {
-        console.log(`[PayrollService] WARNING: user_id exists in DB (${dbUserId}) but relation not loaded, reloading...`);
+        console.log(
+          `[PayrollService] WARNING: user_id exists in DB (${dbUserId}) but relation not loaded, reloading...`,
+        );
         // Force reload the user
         const userEntity = await this.usersRepository.findOne({
           where: { id: dbUserId },
@@ -247,7 +269,9 @@ export class PayrollService {
         );
         const dbUserId = dbCheck[0]?.user_id;
         if (dbUserId) {
-          console.log(`[PayrollService] Profile ${profile.id} has user_id ${dbUserId} in DB but relation is null - loading user...`);
+          console.log(
+            `[PayrollService] Profile ${profile.id} has user_id ${dbUserId} in DB but relation is null - loading user...`,
+          );
           const userEntity = await this.usersRepository.findOne({
             where: { id: dbUserId },
           });
@@ -418,18 +442,23 @@ export class PayrollService {
 
     // Ensure user_id is saved to database using direct SQL (TypeORM relation save is unreliable)
     if (dto.userId !== undefined) {
-      console.log(`[PayrollService] Updating profile ${id} with userId: ${userIdToSave}`);
+      console.log(
+        `[PayrollService] Updating profile ${id} with userId: ${userIdToSave}`,
+      );
       await this.dataSource.query(
         `UPDATE employee_salary_profiles SET user_id = $1 WHERE id = $2`,
         [userIdToSave, profile.id],
       );
-      
+
       // Verify it was saved
       const verifyResult = await this.dataSource.query(
         `SELECT user_id FROM employee_salary_profiles WHERE id = $1`,
         [profile.id],
       );
-      console.log(`[PayrollService] Verified user_id after update:`, verifyResult[0]?.user_id || 'NULL');
+      console.log(
+        `[PayrollService] Verified user_id after update:`,
+        verifyResult[0]?.user_id || 'NULL',
+      );
     }
 
     // Update salary components if provided
@@ -692,7 +721,9 @@ export class PayrollService {
 
         // Show details of active profiles
         // Check user_id directly from database for accurate diagnostics
-        const profileIds = allProfiles.filter((p) => p.isActive).map((p) => p.id);
+        const profileIds = allProfiles
+          .filter((p) => p.isActive)
+          .map((p) => p.id);
         const userIdsMap = new Map<string, string | null>();
         if (profileIds.length > 0) {
           const userIds = await this.dataSource.query(
@@ -717,10 +748,12 @@ export class PayrollService {
             const userIdFromDb = userIdsMap.get(p.id);
             const hasUser = !!userIdFromDb;
 
-            return `  Profile ID: ${p.id}, Employee: ${p.employeeName || p.user?.name || 'N/A'}, ` +
+            return (
+              `  Profile ID: ${p.id}, Employee: ${p.employeeName || p.user?.name || 'N/A'}, ` +
               `Effective: ${p.effectiveDate}, End: ${p.endDate || 'NULL'}, ` +
               `User ID in DB: ${userIdFromDb || 'NULL'}, Has User: ${hasUser}, Has EmployeeName: ${!!p.employeeName}, ` +
-              `Effective Valid: ${effectiveDateValid}, End Valid: ${endDateValid}`;
+              `Effective Valid: ${effectiveDateValid}, End Valid: ${endDateValid}`
+            );
           })
           .join('\n');
 
@@ -745,7 +778,8 @@ export class PayrollService {
       );
 
       // Determine employee name: prefer profile employeeName, fallback to user name
-      const employeeName = profile.employeeName || profile.user?.name || 'Employee';
+      const employeeName =
+        profile.employeeName || profile.user?.name || 'Employee';
 
       // Determine email: prefer profile email, fallback to user email
       const email = profile.email || profile.user?.email || null;
@@ -795,7 +829,9 @@ export class PayrollService {
       );
 
       const entryId = insertResult[0].id;
-      console.log(`[PayrollService] Created payroll entry ${entryId} for employee ${employeeName}`);
+      console.log(
+        `[PayrollService] Created payroll entry ${entryId} for employee ${employeeName}`,
+      );
 
       // Reload the entry with relations for return
       const savedEntry = await this.payrollEntriesRepository.findOne({
@@ -804,7 +840,9 @@ export class PayrollService {
       });
 
       if (!savedEntry) {
-        throw new BadRequestException(`Failed to reload payroll entry after creation`);
+        throw new BadRequestException(
+          `Failed to reload payroll entry after creation`,
+        );
       }
 
       // Verify payroll_run_id was saved correctly
@@ -813,14 +851,20 @@ export class PayrollService {
         [entryId],
       );
       const entryData = dbCheck[0];
-      
+
       if (!entryData.payroll_run_id || entryData.payroll_run_id !== run.id) {
-        console.error(`[PayrollService] CRITICAL ERROR: payroll_run_id was not saved correctly for entry ${entryId}`);
-        throw new BadRequestException(`Failed to create payroll entry: payroll_run_id was not set correctly`);
+        console.error(
+          `[PayrollService] CRITICAL ERROR: payroll_run_id was not saved correctly for entry ${entryId}`,
+        );
+        throw new BadRequestException(
+          `Failed to create payroll entry: payroll_run_id was not set correctly`,
+        );
       }
-      
+
       if (!entryData.user_id && !entryData.employee_name) {
-        console.error(`[PayrollService] ERROR: Both user_id and employee_name are NULL for entry ${entryId}`);
+        console.error(
+          `[PayrollService] ERROR: Both user_id and employee_name are NULL for entry ${entryId}`,
+        );
         throw new BadRequestException(
           `Failed to create payroll entry: Both user_id and employee_name are missing. Entry requires either a user (for portal users) or employee_name (for external employees).`,
         );
@@ -1035,7 +1079,12 @@ export class PayrollService {
         id: entryId,
         payrollRun: { organization: { id: organizationId } },
       },
-      relations: ['payrollRun', 'user', 'payrollRun.organization', 'entryDetails'],
+      relations: [
+        'payrollRun',
+        'user',
+        'payrollRun.organization',
+        'entryDetails',
+      ],
     });
 
     if (!entry) {
@@ -1119,7 +1168,8 @@ export class PayrollService {
       where: { id: organizationId },
     });
 
-    const employeeName = entry.employeeName || entry.user?.name || entry.user?.email || 'Employee';
+    const employeeName =
+      entry.employeeName || entry.user?.name || entry.user?.email || 'Employee';
     const emailSubject = `Your Payslip - ${entry.payrollRun.payrollPeriod}`;
     const emailHtml = this.buildPayslipEmailHtml(
       employeeName,

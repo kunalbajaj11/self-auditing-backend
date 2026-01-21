@@ -71,7 +71,10 @@ export class SalesInvoicesService {
       .createQueryBuilder('invoice')
       .leftJoinAndSelect('invoice.customer', 'customer')
       .leftJoinAndSelect('invoice.lineItems', 'lineItems')
-      .leftJoinAndSelect('invoice.creditNoteApplications', 'creditNoteApplications')
+      .leftJoinAndSelect(
+        'invoice.creditNoteApplications',
+        'creditNoteApplications',
+      )
       .where('invoice.organization_id = :organizationId', { organizationId })
       .andWhere('invoice.is_deleted = false');
 
@@ -222,7 +225,7 @@ export class SalesInvoicesService {
       // Convert purchase invoice vatTaxType to uppercase to match sales invoice format
       // Purchase invoices use: 'standard', 'zero_rated', 'exempt', 'reverse_charge'
       // Sales invoices use: 'STANDARD', 'ZERO_RATED', 'EXEMPT', 'REVERSE_CHARGE'
-      const vatTaxType = item.vatTaxType 
+      const vatTaxType = item.vatTaxType
         ? item.vatTaxType.toUpperCase()
         : 'STANDARD';
 
@@ -428,25 +431,26 @@ export class SalesInvoicesService {
     }
 
     // Get numbering settings to check if manual entry is allowed
-    const numberingSettings = await this.settingsService.getOrCreateSettings(organizationId);
+    const numberingSettings =
+      await this.settingsService.getOrCreateSettings(organizationId);
     let invoiceNumber: string;
 
     if (numberingSettings.numberingAllowManual && dto.invoiceNumber) {
       // Use manual invoice number
       invoiceNumber = dto.invoiceNumber.trim();
-      
+
       // Check for duplicates if enabled
       if (numberingSettings.numberingWarnDuplicates) {
         const existing = await this.invoicesRepository.findOne({
-          where: { 
+          where: {
             invoiceNumber,
             organization: { id: organizationId },
-            isDeleted: false
-          }
+            isDeleted: false,
+          },
         });
         if (existing) {
           throw new BadRequestException(
-            `Invoice number ${invoiceNumber} already exists. Please use a different number.`
+            `Invoice number ${invoiceNumber} already exists. Please use a different number.`,
           );
         }
       }
@@ -456,18 +460,18 @@ export class SalesInvoicesService {
         organizationId,
         NumberingSequenceType.INVOICE,
       );
-      
+
       // Check for duplicates if enabled (even for auto-generated numbers)
       if (numberingSettings.numberingWarnDuplicates) {
         let attempts = 0;
         const maxAttempts = 10; // Prevent infinite loop
         while (attempts < maxAttempts) {
           const existing = await this.invoicesRepository.findOne({
-            where: { 
+            where: {
               invoiceNumber,
               organization: { id: organizationId },
-              isDeleted: false
-            }
+              isDeleted: false,
+            },
           });
           if (!existing) {
             break; // Number is unique
@@ -487,7 +491,8 @@ export class SalesInvoicesService {
     const publicToken = this.generatePublicToken();
 
     // Get tax settings for default VAT rate
-    const taxSettings = await this.settingsService.getTaxSettings(organizationId);
+    const taxSettings =
+      await this.settingsService.getTaxSettings(organizationId);
     const defaultTaxRate = taxSettings.taxDefaultRate || 5;
     const taxRates = await this.settingsService.getTaxRates(organizationId);
     const activeStandardRate = taxRates.find(
@@ -506,11 +511,13 @@ export class SalesInvoicesService {
     if (dto.lineItems && dto.lineItems.length > 0) {
       for (const item of dto.lineItems) {
         const amount = parseFloat(item.quantity) * parseFloat(item.unitPrice);
-        const isReverseCharge = item.vatTaxType === 'REVERSE_CHARGE' || item.vatTaxType === 'reverse_charge';
-        
+        const isReverseCharge =
+          item.vatTaxType === 'REVERSE_CHARGE' ||
+          item.vatTaxType === 'reverse_charge';
+
         // Use VAT rate from item, or find matching tax rate, or use default
         let itemVatRate = parseFloat(item.vatRate || '0');
-        
+
         if (itemVatRate === 0) {
           // Try to find matching tax rate by code or type
           if (item.vatTaxType && !isReverseCharge) {
@@ -524,20 +531,25 @@ export class SalesInvoicesService {
             }
           } else if (isReverseCharge) {
             // Use reverse charge rate from settings
-            itemVatRate = taxSettings.taxReverseChargeRate || effectiveDefaultRate;
+            itemVatRate =
+              taxSettings.taxReverseChargeRate || effectiveDefaultRate;
           } else {
             itemVatRate = effectiveDefaultRate;
           }
         }
-        
+
         const vatAmount = amount * (itemVatRate / 100);
         subtotal += amount; // Add base amount to subtotal
-        
+
         if (isReverseCharge) {
           // Reverse charge VAT: calculated but NOT added to total
           reverseChargeVatAmount += vatAmount;
-        } else if (item.vatTaxType === 'ZERO_RATED' || item.vatTaxType === 'zero_rated' || 
-                   item.vatTaxType === 'EXEMPT' || item.vatTaxType === 'exempt') {
+        } else if (
+          item.vatTaxType === 'ZERO_RATED' ||
+          item.vatTaxType === 'zero_rated' ||
+          item.vatTaxType === 'EXEMPT' ||
+          item.vatTaxType === 'exempt'
+        ) {
           // Zero rated or exempt: no VAT
           // Do nothing
         } else {
@@ -595,7 +607,9 @@ export class SalesInvoicesService {
       currency: dto.currency || 'AED',
       description: dto.description,
       notes: dto.notes,
-      status: dto.status ? (dto.status as InvoiceStatus) : InvoiceStatus.PROFORMA_INVOICE,
+      status: dto.status
+        ? (dto.status as InvoiceStatus)
+        : InvoiceStatus.PROFORMA_INVOICE,
       paymentStatus: PaymentStatus.UNPAID,
       paidAmount: '0',
       customer: dto.customerId ? { id: dto.customerId } : undefined,
@@ -624,12 +638,14 @@ export class SalesInvoicesService {
     if (dto.lineItems && dto.lineItems.length > 0) {
       const lineItems = dto.lineItems.map((item: any, index: number) => {
         const amount = parseFloat(item.quantity) * parseFloat(item.unitPrice);
-        
+
         // Determine VAT rate for this line item
-        const isReverseCharge = item.vatTaxType === 'REVERSE_CHARGE' || item.vatTaxType === 'reverse_charge';
+        const isReverseCharge =
+          item.vatTaxType === 'REVERSE_CHARGE' ||
+          item.vatTaxType === 'reverse_charge';
         let itemVatRate = parseFloat(item.vatRate || '0');
         let taxCode = item.taxCode || null; // Get tax code from item if provided
-        
+
         if (itemVatRate === 0) {
           // Try to find matching tax rate by code or type
           if (item.vatTaxType && !isReverseCharge) {
@@ -651,7 +667,8 @@ export class SalesInvoicesService {
             }
           } else if (isReverseCharge) {
             // Use reverse charge rate from settings
-            itemVatRate = taxSettings.taxReverseChargeRate || effectiveDefaultRate;
+            itemVatRate =
+              taxSettings.taxReverseChargeRate || effectiveDefaultRate;
             // Use default tax code from settings if not provided
             if (!taxCode && taxSettings.taxDefaultCode) {
               taxCode = taxSettings.taxDefaultCode;
@@ -669,7 +686,7 @@ export class SalesInvoicesService {
             taxCode = taxSettings.taxDefaultCode;
           }
         }
-        
+
         const vatAmount = amount * (itemVatRate / 100);
 
         const lineItem = this.lineItemsRepository.create({
@@ -713,9 +730,8 @@ export class SalesInvoicesService {
           if (lineItem.product?.id && lineItem.quantity) {
             try {
               // Get default location or first location
-              const locations = await this.inventoryService.findAllLocations(
-                organizationId,
-              );
+              const locations =
+                await this.inventoryService.findAllLocations(organizationId);
 
               if (locations.length === 0) {
                 console.warn(
@@ -724,34 +740,35 @@ export class SalesInvoicesService {
                 continue;
               }
 
-              const location = locations.find((l) => l.isDefault) || locations[0];
+              const location =
+                locations.find((l) => l.isDefault) || locations[0];
 
               if (location) {
-              // Get product to get cost price
-              const product = await this.productsRepository.findOne({
-                where: { id: lineItem.product.id },
-              });
+                // Get product to get cost price
+                const product = await this.productsRepository.findOne({
+                  where: { id: lineItem.product.id },
+                });
 
-              const unitCost = product?.costPrice
-                ? parseFloat(product.costPrice)
-                : product?.averageCost
-                  ? parseFloat(product.averageCost)
-                  : parseFloat(lineItem.unitPrice || '0');
+                const unitCost = product?.costPrice
+                  ? parseFloat(product.costPrice)
+                  : product?.averageCost
+                    ? parseFloat(product.averageCost)
+                    : parseFloat(lineItem.unitPrice || '0');
 
-              await this.inventoryService.recordStockMovement(
-                organizationId,
-                userId,
-                {
-                  productId: lineItem.product.id,
-                  locationId: location.id,
-                  movementType: StockMovementType.SALE,
-                  quantity: -parseFloat(lineItem.quantity), // Negative for sales
-                  unitCost,
-                  referenceType: 'sales_invoice',
-                  referenceId: savedInvoice.id,
-                  notes: `Sale via invoice ${savedInvoice.invoiceNumber}`,
-                },
-              );
+                await this.inventoryService.recordStockMovement(
+                  organizationId,
+                  userId,
+                  {
+                    productId: lineItem.product.id,
+                    locationId: location.id,
+                    movementType: StockMovementType.SALE,
+                    quantity: -parseFloat(lineItem.quantity), // Negative for sales
+                    unitCost,
+                    referenceType: 'sales_invoice',
+                    referenceId: savedInvoice.id,
+                    notes: `Sale via invoice ${savedInvoice.invoiceNumber}`,
+                  },
+                );
               }
             } catch (error) {
               // Log error but don't fail invoice creation
@@ -782,9 +799,8 @@ export class SalesInvoicesService {
     );
 
     // Get invoice template settings
-    const templateSettings = await this.settingsService.getInvoiceTemplate(
-      organizationId,
-    );
+    const templateSettings =
+      await this.settingsService.getInvoiceTemplate(organizationId);
 
     // Use proxy URL for logo if logo is configured (to serve from private bucket)
     const logoUrl = templateSettings.invoiceLogoUrl
@@ -988,24 +1004,27 @@ export class SalesInvoicesService {
     }
 
     // Get invoice template settings
-    const templateSettings = await this.settingsService.getInvoiceTemplate(
-      organizationId,
-    );
+    const templateSettings =
+      await this.settingsService.getInvoiceTemplate(organizationId);
 
     // Get currency settings
-    const currencySettings = await this.settingsService.getCurrencySettings(
-      organizationId,
-    );
+    const currencySettings =
+      await this.settingsService.getCurrencySettings(organizationId);
 
     // Get tax settings for tax registration info
-    const taxSettings = await this.settingsService.getTaxSettings(organizationId);
+    const taxSettings =
+      await this.settingsService.getTaxSettings(organizationId);
 
     // Fetch logo buffer from storage for PDF generation
-    const logoBuffer = await this.settingsService.getInvoiceLogoBuffer(organizationId);
+    const logoBuffer =
+      await this.settingsService.getInvoiceLogoBuffer(organizationId);
 
     // Get exchange rate if invoice currency differs from base currency
     let exchangeRate = null;
-    if (currencySettings.currencyShowExchangeRate && invoice.currency !== invoice.organization?.baseCurrency) {
+    if (
+      currencySettings.currencyShowExchangeRate &&
+      invoice.currency !== invoice.organization?.baseCurrency
+    ) {
       // Use the exchange rate from invoice if available
       if (invoice.exchangeRate) {
         exchangeRate = {
@@ -1054,7 +1073,8 @@ export class SalesInvoicesService {
         // Invoice template settings - use logo buffer for PDF generation
         logoBuffer: logoBuffer,
         logoUrl: null, // Logo is provided as buffer, not URL
-        headerText: templateSettings.invoiceHeaderText || invoice.organization?.name,
+        headerText:
+          templateSettings.invoiceHeaderText || invoice.organization?.name,
         colorScheme: templateSettings.invoiceColorScheme || 'blue',
         customColor: templateSettings.invoiceCustomColor,
         invoiceTitle: templateSettings.invoiceTitle || 'TAX INVOICE',
@@ -1063,13 +1083,15 @@ export class SalesInvoicesService {
         showPaymentTerms: templateSettings.invoiceShowPaymentTerms ?? true,
         showPaymentMethods: templateSettings.invoiceShowPaymentMethods ?? true,
         showBankDetails: templateSettings.invoiceShowBankDetails ?? false,
-        showTermsAndConditions: templateSettings.invoiceShowTermsConditions ?? true,
+        showTermsAndConditions:
+          templateSettings.invoiceShowTermsConditions ?? true,
         paymentTerms: paymentTerms || 'Net 30',
         defaultNotes: templateSettings.invoiceDefaultNotes,
         termsAndConditions: templateSettings.invoiceTermsConditions,
         footerText: templateSettings.invoiceFooterText,
         showFooter: templateSettings.invoiceShowFooter ?? true,
-        showItemDescription: templateSettings.invoiceShowItemDescription ?? true,
+        showItemDescription:
+          templateSettings.invoiceShowItemDescription ?? true,
         showItemQuantity: templateSettings.invoiceShowItemQuantity ?? true,
         showItemUnitPrice: templateSettings.invoiceShowItemUnitPrice ?? true,
         showItemTotal: templateSettings.invoiceShowItemTotal ?? true,
@@ -1117,9 +1139,8 @@ export class SalesInvoicesService {
     }
 
     // Get invoice template settings for email
-    const templateSettings = await this.settingsService.getInvoiceTemplate(
-      organizationId,
-    );
+    const templateSettings =
+      await this.settingsService.getInvoiceTemplate(organizationId);
 
     // Generate PDF
     const pdfBuffer = await this.generateInvoicePDF(invoiceId, organizationId);
@@ -1131,7 +1152,9 @@ export class SalesInvoicesService {
 
     // Replace template variables in email subject
     let emailSubject =
-      emailData.subject || templateSettings.invoiceEmailSubject || `Invoice ${invoice.invoiceNumber} from ${companyName}`;
+      emailData.subject ||
+      templateSettings.invoiceEmailSubject ||
+      `Invoice ${invoice.invoiceNumber} from ${companyName}`;
     emailSubject = emailSubject
       .replace(/\{\{invoiceNumber\}\}/g, invoice.invoiceNumber)
       .replace(/\{\{companyName\}\}/g, companyName)
@@ -1140,7 +1163,9 @@ export class SalesInvoicesService {
 
     // Replace template variables in email message
     let emailMessage =
-      emailData.message || templateSettings.invoiceEmailMessage || `Please find attached invoice ${invoice.invoiceNumber} for ${totalAmount} ${currency}.`;
+      emailData.message ||
+      templateSettings.invoiceEmailMessage ||
+      `Please find attached invoice ${invoice.invoiceNumber} for ${totalAmount} ${currency}.`;
     emailMessage = emailMessage
       .replace(/\{\{invoiceNumber\}\}/g, invoice.invoiceNumber)
       .replace(/\{\{companyName\}\}/g, companyName)
@@ -1163,7 +1188,10 @@ export class SalesInvoicesService {
     });
 
     // Update invoice status to TAX_INVOICE_RECEIVABLE if it's PROFORMA_INVOICE or DRAFT
-    if (invoice.status === InvoiceStatus.PROFORMA_INVOICE || invoice.status === InvoiceStatus.DRAFT) {
+    if (
+      invoice.status === InvoiceStatus.PROFORMA_INVOICE ||
+      invoice.status === InvoiceStatus.DRAFT
+    ) {
       invoice.status = InvoiceStatus.TAX_INVOICE_RECEIVABLE;
       await this.invoicesRepository.save(invoice);
     }
@@ -1250,7 +1278,7 @@ export class SalesInvoicesService {
       if (newOutstanding <= 0) {
         invoice.paymentStatus = PaymentStatus.PAID;
         invoice.paidDate = dto.paymentDate;
-        
+
         // Check if all payments are cash
         const allPayments = await manager.find(InvoicePayment, {
           where: {
@@ -1258,11 +1286,11 @@ export class SalesInvoicesService {
             organization: { id: organizationId },
           },
         });
-        
-        const allPaymentsCash = allPayments.length > 0 && allPayments.every(
-          (p) => p.paymentMethod === PaymentMethod.CASH,
-        );
-        
+
+        const allPaymentsCash =
+          allPayments.length > 0 &&
+          allPayments.every((p) => p.paymentMethod === PaymentMethod.CASH);
+
         invoice.status = allPaymentsCash
           ? InvoiceStatus.TAX_INVOICE_CASH_RECEIVED
           : InvoiceStatus.TAX_INVOICE_BANK_RECEIVED;
@@ -1392,7 +1420,7 @@ export class SalesInvoicesService {
       // Calculate outstanding balance within transaction
       const totalAmount = parseFloat(invoice.totalAmount);
       const currentPaidAmount = parseFloat(invoice.paidAmount || '0');
-      
+
       // Get applied credit notes within transaction
       const applications = await manager.find(CreditNoteApplication, {
         where: {
@@ -1406,15 +1434,18 @@ export class SalesInvoicesService {
         0,
       );
 
-      const outstandingBalance = totalAmount - currentPaidAmount - appliedCreditAmount;
+      const outstandingBalance =
+        totalAmount - currentPaidAmount - appliedCreditAmount;
 
       // Update payment status and invoice status
       if (outstandingBalance <= 0) {
         invoice.paymentStatus = PaymentStatus.PAID;
         // Check if all remaining payments are cash
-        const allPaymentsCash = remainingPayments.length > 0 && remainingPayments.every(
-          (p) => p.paymentMethod === PaymentMethod.CASH,
-        );
+        const allPaymentsCash =
+          remainingPayments.length > 0 &&
+          remainingPayments.every(
+            (p) => p.paymentMethod === PaymentMethod.CASH,
+          );
         invoice.status = allPaymentsCash
           ? InvoiceStatus.TAX_INVOICE_CASH_RECEIVED
           : InvoiceStatus.TAX_INVOICE_BANK_RECEIVED;
@@ -1425,14 +1456,22 @@ export class SalesInvoicesService {
       } else if (currentPaidAmount > 0) {
         invoice.paymentStatus = PaymentStatus.PARTIAL;
         // If was fully paid but now has outstanding, revert to receivable
-        if (invoice.status === InvoiceStatus.PAID || invoice.status === InvoiceStatus.TAX_INVOICE_BANK_RECEIVED || invoice.status === InvoiceStatus.TAX_INVOICE_CASH_RECEIVED) {
+        if (
+          invoice.status === InvoiceStatus.PAID ||
+          invoice.status === InvoiceStatus.TAX_INVOICE_BANK_RECEIVED ||
+          invoice.status === InvoiceStatus.TAX_INVOICE_CASH_RECEIVED
+        ) {
           invoice.status = InvoiceStatus.TAX_INVOICE_RECEIVABLE;
           invoice.paidDate = null;
         }
       } else {
         invoice.paymentStatus = PaymentStatus.UNPAID;
         // If was fully paid but now unpaid, revert to receivable
-        if (invoice.status === InvoiceStatus.PAID || invoice.status === InvoiceStatus.TAX_INVOICE_BANK_RECEIVED || invoice.status === InvoiceStatus.TAX_INVOICE_CASH_RECEIVED) {
+        if (
+          invoice.status === InvoiceStatus.PAID ||
+          invoice.status === InvoiceStatus.TAX_INVOICE_BANK_RECEIVED ||
+          invoice.status === InvoiceStatus.TAX_INVOICE_CASH_RECEIVED
+        ) {
           invoice.status = InvoiceStatus.TAX_INVOICE_RECEIVABLE;
           invoice.paidDate = null;
         }
@@ -1467,7 +1506,11 @@ export class SalesInvoicesService {
   ): Promise<SalesInvoice> {
     const invoice = await this.findById(organizationId, invoiceId);
 
-    if (invoice.status === InvoiceStatus.PAID || invoice.status === InvoiceStatus.TAX_INVOICE_BANK_RECEIVED || invoice.status === InvoiceStatus.TAX_INVOICE_CASH_RECEIVED) {
+    if (
+      invoice.status === InvoiceStatus.PAID ||
+      invoice.status === InvoiceStatus.TAX_INVOICE_BANK_RECEIVED ||
+      invoice.status === InvoiceStatus.TAX_INVOICE_CASH_RECEIVED
+    ) {
       throw new BadRequestException('Cannot update paid invoice');
     }
 
@@ -1485,7 +1528,7 @@ export class SalesInvoicesService {
         InvoiceStatus.TAX_INVOICE_BANK_RECEIVED,
         InvoiceStatus.TAX_INVOICE_CASH_RECEIVED,
       ];
-      
+
       // Prevent changing from paid status to non-paid status (redundant check but kept for clarity)
       const currentStatus = invoice.status as InvoiceStatus;
       if (
@@ -1535,15 +1578,18 @@ export class SalesInvoicesService {
       });
 
       // Get tax settings for reverse charge rate
-      const taxSettings = await this.settingsService.getTaxSettings(organizationId);
+      const taxSettings =
+        await this.settingsService.getTaxSettings(organizationId);
       const taxRates = await this.settingsService.getTaxRates(organizationId);
       const effectiveDefaultRate = taxSettings.taxDefaultRate || 5;
 
       // Create new line items
       const lineItems = dto.lineItems.map((item: any, index: number) => {
         const amount = parseFloat(item.quantity) * parseFloat(item.unitPrice);
-        const isReverseCharge = item.vatTaxType === 'REVERSE_CHARGE' || item.vatTaxType === 'reverse_charge';
-        
+        const isReverseCharge =
+          item.vatTaxType === 'REVERSE_CHARGE' ||
+          item.vatTaxType === 'reverse_charge';
+
         let vatRate = parseFloat(item.vatRate || '0');
         if (vatRate === 0) {
           if (isReverseCharge) {
@@ -1557,7 +1603,7 @@ export class SalesInvoicesService {
             vatRate = effectiveDefaultRate;
           }
         }
-        
+
         const vatAmount = amount * (vatRate / 100);
 
         return this.lineItemsRepository.create({
@@ -1587,15 +1633,21 @@ export class SalesInvoicesService {
       for (const item of lineItems) {
         const amount = parseFloat(item.amount);
         const vatAmount = parseFloat(item.vatAmount);
-        const isReverseCharge = item.vatTaxType === 'reverse_charge' || item.vatTaxType === 'REVERSE_CHARGE';
-        
+        const isReverseCharge =
+          item.vatTaxType === 'reverse_charge' ||
+          item.vatTaxType === 'REVERSE_CHARGE';
+
         subtotal += amount; // Add base amount to subtotal
-        
+
         if (isReverseCharge) {
           reverseChargeVatAmount += vatAmount;
           // Reverse charge VAT not added to total
-        } else if (item.vatTaxType === 'zero_rated' || item.vatTaxType === 'ZERO_RATED' ||
-                   item.vatTaxType === 'exempt' || item.vatTaxType === 'EXEMPT') {
+        } else if (
+          item.vatTaxType === 'zero_rated' ||
+          item.vatTaxType === 'ZERO_RATED' ||
+          item.vatTaxType === 'exempt' ||
+          item.vatTaxType === 'EXEMPT'
+        ) {
           // Zero rated or exempt: no VAT
         } else {
           standardVatAmount += vatAmount;
@@ -1629,7 +1681,9 @@ export class SalesInvoicesService {
       }
 
       invoice.amount = subtotal.toString(); // Subtotal BEFORE VAT
-      invoice.vatAmount = (standardVatAmount + reverseChargeVatAmount).toString(); // Both for reporting
+      invoice.vatAmount = (
+        standardVatAmount + reverseChargeVatAmount
+      ).toString(); // Both for reporting
     } else if (dto.amount !== undefined || dto.vatAmount !== undefined) {
       // Update amounts directly
       if (dto.amount !== undefined) {
@@ -1646,7 +1700,9 @@ export class SalesInvoicesService {
     // Check if invoice has reverse charge line items
     if (dto.lineItems && Array.isArray(dto.lineItems)) {
       const hasReverseCharge = dto.lineItems.some(
-        (item: any) => item.vatTaxType === 'REVERSE_CHARGE' || item.vatTaxType === 'reverse_charge'
+        (item: any) =>
+          item.vatTaxType === 'REVERSE_CHARGE' ||
+          item.vatTaxType === 'reverse_charge',
       );
       if (hasReverseCharge) {
         // Recalculate to get correct total (excluding reverse charge VAT)
@@ -1659,13 +1715,15 @@ export class SalesInvoicesService {
         let standardVatOnly = 0;
         for (const item of lineItems) {
           const vatTaxTypeStr = String(item.vatTaxType || '').toLowerCase();
-          const isReverseCharge = vatTaxTypeStr === 'reverse_charge' || 
-                                  item.vatTaxType === VatTaxType.REVERSE_CHARGE;
-          const isZeroRated = vatTaxTypeStr === 'zero_rated' || 
-                             item.vatTaxType === VatTaxType.ZERO_RATED;
-          const isExempt = vatTaxTypeStr === 'exempt' || 
-                          item.vatTaxType === VatTaxType.EXEMPT;
-          
+          const isReverseCharge =
+            vatTaxTypeStr === 'reverse_charge' ||
+            item.vatTaxType === VatTaxType.REVERSE_CHARGE;
+          const isZeroRated =
+            vatTaxTypeStr === 'zero_rated' ||
+            item.vatTaxType === VatTaxType.ZERO_RATED;
+          const isExempt =
+            vatTaxTypeStr === 'exempt' || item.vatTaxType === VatTaxType.EXEMPT;
+
           if (!isReverseCharge && !isZeroRated && !isExempt) {
             standardVatOnly += parseFloat(item.vatAmount);
           }
@@ -1706,8 +1764,12 @@ export class SalesInvoicesService {
 
     // Validate status transition
     if (
-      (invoice.status === InvoiceStatus.PAID || invoice.status === InvoiceStatus.TAX_INVOICE_BANK_RECEIVED || invoice.status === InvoiceStatus.TAX_INVOICE_CASH_RECEIVED) &&
-      status !== InvoiceStatus.PAID && status !== InvoiceStatus.TAX_INVOICE_BANK_RECEIVED && status !== InvoiceStatus.TAX_INVOICE_CASH_RECEIVED
+      (invoice.status === InvoiceStatus.PAID ||
+        invoice.status === InvoiceStatus.TAX_INVOICE_BANK_RECEIVED ||
+        invoice.status === InvoiceStatus.TAX_INVOICE_CASH_RECEIVED) &&
+      status !== InvoiceStatus.PAID &&
+      status !== InvoiceStatus.TAX_INVOICE_BANK_RECEIVED &&
+      status !== InvoiceStatus.TAX_INVOICE_CASH_RECEIVED
     ) {
       throw new BadRequestException('Cannot change status of paid invoice');
     }
@@ -1722,7 +1784,9 @@ export class SalesInvoicesService {
     }
 
     if (
-      (status === InvoiceStatus.PAID || status === InvoiceStatus.TAX_INVOICE_BANK_RECEIVED || status === InvoiceStatus.TAX_INVOICE_CASH_RECEIVED) &&
+      (status === InvoiceStatus.PAID ||
+        status === InvoiceStatus.TAX_INVOICE_BANK_RECEIVED ||
+        status === InvoiceStatus.TAX_INVOICE_CASH_RECEIVED) &&
       invoice.paymentStatus !== PaymentStatus.PAID
     ) {
       throw new BadRequestException(
@@ -1756,7 +1820,11 @@ export class SalesInvoicesService {
   ): Promise<void> {
     const invoice = await this.findById(organizationId, invoiceId);
 
-    if (invoice.status === InvoiceStatus.PAID || invoice.status === InvoiceStatus.TAX_INVOICE_BANK_RECEIVED || invoice.status === InvoiceStatus.TAX_INVOICE_CASH_RECEIVED) {
+    if (
+      invoice.status === InvoiceStatus.PAID ||
+      invoice.status === InvoiceStatus.TAX_INVOICE_BANK_RECEIVED ||
+      invoice.status === InvoiceStatus.TAX_INVOICE_CASH_RECEIVED
+    ) {
       throw new BadRequestException('Cannot delete paid invoice');
     }
 

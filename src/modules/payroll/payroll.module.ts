@@ -40,7 +40,12 @@ import { SettingsModule } from '../settings/settings.module';
     LicenseKeysModule,
     SettingsModule,
   ],
-  providers: [PayrollService, PayslipGeneratorService, TaxCalculationService, LicenseFeatureGuard],
+  providers: [
+    PayrollService,
+    PayslipGeneratorService,
+    TaxCalculationService,
+    LicenseFeatureGuard,
+  ],
   controllers: [PayrollController],
   exports: [PayrollService],
 })

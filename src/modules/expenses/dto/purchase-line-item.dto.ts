@@ -48,4 +48,3 @@ export class PurchaseLineItemDto {
   @IsString()
   description?: string;
 }
-

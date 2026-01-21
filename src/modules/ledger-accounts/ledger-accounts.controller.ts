@@ -28,9 +28,7 @@ export class LedgerAccountsController {
 
   @Get()
   @Roles(UserRole.ADMIN, UserRole.ACCOUNTANT)
-  async list(
-    @CurrentUser() user: AuthenticatedUser,
-  ) {
+  async list(@CurrentUser() user: AuthenticatedUser) {
     return this.ledgerAccountsService.findAllByOrganization(
       user?.organizationId as string,
       user?.userId as string,
@@ -74,4 +72,3 @@ export class LedgerAccountsController {
     return { success: true };
   }
 }
-

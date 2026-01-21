@@ -10,16 +10,10 @@ import { SalesInvoice } from '../../entities/sales-invoice.entity';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([
-      TaxForm,
-      Organization,
-      Expense,
-      SalesInvoice,
-    ]),
+    TypeOrmModule.forFeature([TaxForm, Organization, Expense, SalesInvoice]),
   ],
   providers: [TaxFormsService, TaxFormGeneratorService],
   controllers: [TaxFormsController],
   exports: [TaxFormsService, TaxFormGeneratorService],
 })
 export class TaxFormsModule {}
-

@@ -49,8 +49,12 @@ export class TaxFormGeneratorService {
   ): Promise<Buffer> {
     // For now, generate a simple text-based PDF
     // In production, use a library like pdfkit or puppeteer
-    const pdfContent = this.buildVATReturnPDFContent(formType, data, organization);
-    
+    const pdfContent = this.buildVATReturnPDFContent(
+      formType,
+      data,
+      organization,
+    );
+
     // This is a placeholder - in production, use actual PDF generation library
     // For now, return a buffer with text content
     return Buffer.from(pdfContent, 'utf-8');
@@ -66,7 +70,11 @@ export class TaxFormGeneratorService {
   ): Promise<Buffer> {
     // For now, generate CSV format (can be opened in Excel)
     // In production, use a library like exceljs
-    const csvContent = this.buildVATReturnCSVContent(formType, data, organization);
+    const csvContent = this.buildVATReturnCSVContent(
+      formType,
+      data,
+      organization,
+    );
     return Buffer.from(csvContent, 'utf-8');
   }
 
@@ -78,7 +86,11 @@ export class TaxFormGeneratorService {
     data: VATReturnData,
     organization: Organization,
   ): Promise<Buffer> {
-    const csvContent = this.buildVATReturnCSVContent(formType, data, organization);
+    const csvContent = this.buildVATReturnCSVContent(
+      formType,
+      data,
+      organization,
+    );
     return Buffer.from(csvContent, 'utf-8');
   }
 
@@ -219,4 +231,3 @@ export class TaxFormGeneratorService {
     return titles[formType] || 'Tax Return Form';
   }
 }
-
