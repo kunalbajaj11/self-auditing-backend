@@ -11,6 +11,7 @@ import { InvoicePayment } from '../../entities/invoice-payment.entity';
 import { JournalEntry } from '../../entities/journal-entry.entity';
 import { CreditNote } from '../../entities/credit-note.entity';
 import { DebitNote } from '../../entities/debit-note.entity';
+import { LedgerAccount } from '../../entities/ledger-account.entity';
 import { CreditNoteApplication } from '../../entities/credit-note-application.entity';
 import { DebitNoteApplication } from '../../entities/debit-note-application.entity';
 import { DebitNoteExpenseApplication } from '../../entities/debit-note-expense-application.entity';
@@ -52,6 +53,8 @@ export class ReportsService {
     private readonly invoicePaymentsRepository: Repository<InvoicePayment>,
     @InjectRepository(JournalEntry)
     private readonly journalEntriesRepository: Repository<JournalEntry>,
+    @InjectRepository(LedgerAccount)
+    private readonly ledgerAccountsRepository: Repository<LedgerAccount>,
     @InjectRepository(CreditNote)
     private readonly creditNotesRepository: Repository<CreditNote>,
     @InjectRepository(DebitNote)
@@ -69,6 +72,31 @@ export class ReportsService {
     private readonly settingsService: SettingsService,
     private readonly dataSource: DataSource,
   ) {}
+
+  private parseLedgerAccountId(
+    accountCode: string | null | undefined,
+  ): string | null {
+    if (!accountCode) return null;
+    if (!accountCode.startsWith('ledger:')) return null;
+    const id = accountCode.slice('ledger:'.length).trim();
+    return id.length > 0 ? id : null;
+  }
+
+  private async loadLedgerAccountsByIds(
+    organizationId: string,
+    ids: string[],
+  ): Promise<Map<string, LedgerAccount>> {
+    const uniqueIds = Array.from(new Set(ids)).filter(Boolean);
+    if (uniqueIds.length === 0) return new Map();
+
+    const accounts = await this.ledgerAccountsRepository.find({
+      where: uniqueIds.map((id) => ({
+        id,
+        organization: { id: organizationId } as any,
+      })),
+    });
+    return new Map(accounts.map((a) => [a.id, a]));
+  }
 
   async listHistory(
     organizationId: string,
@@ -1316,7 +1344,10 @@ export class ReportsService {
         balance: closingBankBalance,
       });
 
-      // Get journal entries grouped by account (excluding Cash and Bank which are handled separately)
+      // Get journal entries grouped by account.
+      // Note: We do NOT exclude entries that touch Cash/Bank here; instead we skip posting to Cash/Bank
+      // in the aggregation (Cash/Bank are handled separately). This avoids missing the non-cash side
+      // of cash/bank journal entries (e.g., custom expense paid in cash).
       const journalEntriesQuery = this.journalEntriesRepository
         .createQueryBuilder('entry')
         .select([
@@ -1327,8 +1358,6 @@ export class ReportsService {
         .where('entry.organization_id = :organizationId', { organizationId })
         .andWhere('entry.entry_date >= :startDate', { startDate })
         .andWhere('entry.entry_date <= :endDate', { endDate })
-        .andWhere("entry.debit_account NOT IN ('cash', 'bank')")
-        .andWhere("entry.credit_account NOT IN ('cash', 'bank')")
         .groupBy('entry.debit_account')
         .addGroupBy('entry.credit_account');
 
@@ -1336,11 +1365,17 @@ export class ReportsService {
 
       // Aggregate by account (debit side and credit side separately)
       const accountMap = new Map<string, { debit: number; credit: number }>();
+      const customLedgerIds: string[] = [];
 
       journalRows.forEach((row) => {
         const amount = Number(row.amount || 0);
         const debitAccount = row.debitaccount || row.debitAccount;
         const creditAccount = row.creditaccount || row.creditAccount;
+
+        const debitLedgerId = this.parseLedgerAccountId(debitAccount);
+        if (debitLedgerId) customLedgerIds.push(debitLedgerId);
+        const creditLedgerId = this.parseLedgerAccountId(creditAccount);
+        if (creditLedgerId) customLedgerIds.push(creditLedgerId);
 
         // Add to debit account (including liability accounts when they are debited)
         // This ensures liability accounts appear on the debit side when debited
@@ -1372,6 +1407,11 @@ export class ReportsService {
         }
       });
 
+      const ledgerAccountsById = await this.loadLedgerAccountsByIds(
+        organizationId,
+        customLedgerIds,
+      );
+
       // Convert to accounts array
       // Note: If journal entries use 'accounts_receivable' account, they will create an entry
       // with the same name "Accounts Receivable". We need to merge it with the main AR entry
@@ -1382,13 +1422,26 @@ export class ReportsService {
 
       accountMap.forEach((balances, accountCode) => {
         if (balances.debit > 0 || balances.credit > 0) {
+          const ledgerId = this.parseLedgerAccountId(accountCode);
+          const ledgerAccount = ledgerId
+            ? ledgerAccountsById.get(ledgerId)
+            : null;
+
           const accountMeta =
-            ACCOUNT_METADATA[accountCode as JournalEntryAccount];
-          const accountName = accountMeta?.name || accountCode;
-          const accountType = accountMeta?.category
-            ? accountMeta.category.charAt(0).toUpperCase() +
-              accountMeta.category.slice(1)
-            : 'Journal Entry';
+            !ledgerAccount &&
+            ACCOUNT_METADATA[accountCode as JournalEntryAccount]
+              ? ACCOUNT_METADATA[accountCode as JournalEntryAccount]
+              : null;
+
+          const accountName =
+            ledgerAccount?.name || accountMeta?.name || accountCode;
+          const accountType = ledgerAccount?.category
+            ? ledgerAccount.category.charAt(0).toUpperCase() +
+              ledgerAccount.category.slice(1)
+            : accountMeta?.category
+              ? accountMeta.category.charAt(0).toUpperCase() +
+                accountMeta.category.slice(1)
+              : 'Journal Entry';
 
           // If this is Accounts Receivable from journal entries, merge with existing entry
           if (accountName === 'Accounts Receivable' && existingARIndex >= 0) {
@@ -1437,10 +1490,20 @@ export class ReportsService {
       // For liability accounts that only have credits (no debits),
       // also add them to the debit list with debit: 0 so they appear in both lists
       accountMap.forEach((balances, accountCode) => {
+        const ledgerId = this.parseLedgerAccountId(accountCode);
+        const ledgerAccount = ledgerId
+          ? ledgerAccountsById.get(ledgerId)
+          : null;
         const accountMeta =
-          ACCOUNT_METADATA[accountCode as JournalEntryAccount];
-        if (accountMeta?.category === 'liability') {
-          const accountName = accountMeta?.name || accountCode;
+          !ledgerAccount && ACCOUNT_METADATA[accountCode as JournalEntryAccount]
+            ? ACCOUNT_METADATA[accountCode as JournalEntryAccount]
+            : null;
+
+        if (
+          (ledgerAccount?.category || accountMeta?.category) === 'liability'
+        ) {
+          const accountName =
+            ledgerAccount?.name || accountMeta?.name || accountCode;
           // If liability has credits but no debits, ensure it's in the list
           // (it should already be there from above, but this ensures visibility)
           const existingAccount = accounts.find(
@@ -1980,8 +2043,6 @@ export class ReportsService {
         ])
         .where('entry.organization_id = :organizationId', { organizationId })
         .andWhere('entry.entry_date < :startDate', { startDate })
-        .andWhere("entry.debit_account NOT IN ('cash', 'bank')")
-        .andWhere("entry.credit_account NOT IN ('cash', 'bank')")
         .groupBy('entry.debit_account')
         .addGroupBy('entry.credit_account');
 
@@ -1992,11 +2053,17 @@ export class ReportsService {
         string,
         { debit: number; credit: number }
       >();
+      const openingCustomLedgerIds: string[] = [];
 
       openingJournalRows.forEach((row) => {
         const amount = Number(row.amount || 0);
         const debitAccount = row.debitaccount || row.debitAccount;
         const creditAccount = row.creditaccount || row.creditAccount;
+
+        const debitLedgerId = this.parseLedgerAccountId(debitAccount);
+        if (debitLedgerId) openingCustomLedgerIds.push(debitLedgerId);
+        const creditLedgerId = this.parseLedgerAccountId(creditAccount);
+        if (creditLedgerId) openingCustomLedgerIds.push(creditLedgerId);
 
         if (
           debitAccount &&
@@ -2025,13 +2092,28 @@ export class ReportsService {
         }
       });
 
+      const openingLedgerAccountsById = await this.loadLedgerAccountsByIds(
+        organizationId,
+        openingCustomLedgerIds,
+      );
+
       // Convert to opening balances map
       openingAccountMap.forEach((balances, accountCode) => {
         if (balances.debit > 0 || balances.credit > 0) {
+          const ledgerId = this.parseLedgerAccountId(accountCode);
+          const ledgerAccount = ledgerId
+            ? openingLedgerAccountsById.get(ledgerId)
+            : null;
           const accountMeta =
-            ACCOUNT_METADATA[accountCode as JournalEntryAccount];
-          const accountName = accountMeta?.name || accountCode;
-          const accountType = accountMeta?.category || 'asset';
+            !ledgerAccount &&
+            ACCOUNT_METADATA[accountCode as JournalEntryAccount]
+              ? ACCOUNT_METADATA[accountCode as JournalEntryAccount]
+              : null;
+
+          const accountName =
+            ledgerAccount?.name || accountMeta?.name || accountCode;
+          const accountType =
+            ledgerAccount?.category || accountMeta?.category || 'asset';
 
           const isCreditAccount =
             accountType === 'equity' ||
@@ -2061,11 +2143,13 @@ export class ReportsService {
       const totalDebit = accounts.reduce((sum, acc) => sum + acc.debit, 0);
       const totalCredit = accounts.reduce((sum, acc) => sum + acc.credit, 0);
 
+      // Retained earnings should reflect net profit from ALL revenue/expense sources,
+      // including journal entries (fixed accounts + custom ledger:{id} accounts).
       const retainedEarningsRevenueCredit = accounts
-        .filter((acc) => acc.accountName === 'Sales Revenue')
+        .filter((acc) => acc.accountType === 'Revenue')
         .reduce((sum, acc) => sum + acc.credit, 0);
       const retainedEarningsRevenueDebit = accounts
-        .filter((acc) => acc.accountName === 'Sales Revenue')
+        .filter((acc) => acc.accountType === 'Revenue')
         .reduce((sum, acc) => sum + acc.debit, 0);
       const retainedEarningsNetRevenue =
         retainedEarningsRevenueCredit - retainedEarningsRevenueDebit;
@@ -2880,8 +2964,6 @@ export class ReportsService {
         ])
         .where('entry.organization_id = :organizationId', { organizationId })
         .andWhere('entry.entry_date <= :asOfDate', { asOfDate })
-        .andWhere("entry.debit_account NOT IN ('cash', 'bank')")
-        .andWhere("entry.credit_account NOT IN ('cash', 'bank')")
         .groupBy('entry.debit_account')
         .addGroupBy('entry.credit_account');
 
@@ -2933,31 +3015,37 @@ export class ReportsService {
       // For each account, calculate balance based on account type:
       // - Assets/Expenses: Debit increases, Credit decreases → Balance = Debits - Credits
       // - Liabilities/Equity/Revenue: Credit increases, Debit decreases → Balance = Credits - Debits
-      const accountAmounts = new Map<JournalEntryAccount, number>();
-      const accountDebits = new Map<JournalEntryAccount, number>();
-      const accountCredits = new Map<JournalEntryAccount, number>();
+      const accountAmounts = new Map<string, number>();
+      const accountDebits = new Map<string, number>();
+      const accountCredits = new Map<string, number>();
+      const customLedgerIds: string[] = [];
 
       journalRows.forEach((row) => {
         const amount = Number(row.amount || 0);
         const debitAccount = row.debitaccount || row.debitAccount;
         const creditAccount = row.creditaccount || row.creditAccount;
 
+        const debitId = this.parseLedgerAccountId(debitAccount);
+        if (debitId) customLedgerIds.push(debitId);
+        const creditId = this.parseLedgerAccountId(creditAccount);
+        if (creditId) customLedgerIds.push(creditId);
+
         // Track debits and credits separately
-        if (debitAccount) {
-          const existing =
-            accountDebits.get(debitAccount as JournalEntryAccount) || 0;
-          accountDebits.set(
-            debitAccount as JournalEntryAccount,
-            existing + amount,
-          );
+        if (
+          debitAccount &&
+          debitAccount !== 'cash' &&
+          debitAccount !== 'bank'
+        ) {
+          const existing = accountDebits.get(debitAccount as string) || 0;
+          accountDebits.set(debitAccount as string, existing + amount);
         }
-        if (creditAccount) {
-          const existing =
-            accountCredits.get(creditAccount as JournalEntryAccount) || 0;
-          accountCredits.set(
-            creditAccount as JournalEntryAccount,
-            existing + amount,
-          );
+        if (
+          creditAccount &&
+          creditAccount !== 'cash' &&
+          creditAccount !== 'bank'
+        ) {
+          const existing = accountCredits.get(creditAccount as string) || 0;
+          accountCredits.set(creditAccount as string, existing + amount);
         }
       });
 
@@ -2979,28 +3067,37 @@ export class ReportsService {
         ) {
           // Track debits (even if to Cash/Bank) for equity accounts
           if (debitAccount) {
-            const existing =
-              accountDebits.get(debitAccount as JournalEntryAccount) || 0;
-            accountDebits.set(
-              debitAccount as JournalEntryAccount,
-              existing + amount,
-            );
+            const existing = accountDebits.get(debitAccount as string) || 0;
+            accountDebits.set(debitAccount as string, existing + amount);
           }
           // Track credits for equity accounts
-          const existing =
-            accountCredits.get(creditAccount as JournalEntryAccount) || 0;
-          accountCredits.set(
-            creditAccount as JournalEntryAccount,
-            existing + amount,
-          );
+          const existing = accountCredits.get(creditAccount as string) || 0;
+          accountCredits.set(creditAccount as string, existing + amount);
         }
       });
 
+      const ledgerAccountsById = await this.loadLedgerAccountsByIds(
+        organizationId,
+        customLedgerIds,
+      );
+
       // Calculate balance for each account based on account type
-      Object.values(JournalEntryAccount).forEach((account) => {
+      const allAccountCodes = new Set<string>([
+        ...Array.from(accountDebits.keys()),
+        ...Array.from(accountCredits.keys()),
+      ]);
+      allAccountCodes.forEach((account) => {
         const debits = accountDebits.get(account) || 0;
         const credits = accountCredits.get(account) || 0;
-        const category = ACCOUNT_METADATA[account]?.category || 'asset';
+
+        const ledgerId = this.parseLedgerAccountId(account);
+        const ledgerAccount = ledgerId
+          ? ledgerAccountsById.get(ledgerId)
+          : null;
+        const category =
+          ledgerAccount?.category ||
+          ACCOUNT_METADATA[account as JournalEntryAccount]?.category ||
+          'asset';
 
         // Calculate balance based on account category
         let balance = 0;
@@ -3027,8 +3124,31 @@ export class ReportsService {
         accountAmounts.get(JournalEntryAccount.PREPAID_EXPENSES) || 0;
       const totalJournalAccruedIncome =
         accountAmounts.get(JournalEntryAccount.ACCOUNTS_RECEIVABLE) || 0;
-      const totalJournalDepreciation =
-        accountAmounts.get(JournalEntryAccount.GENERAL_EXPENSE) || 0;
+      const totalJournalRevenue = Array.from(accountAmounts.entries()).reduce(
+        (sum, [code, bal]) => {
+          const ledgerId = this.parseLedgerAccountId(code);
+          const ledgerAccount = ledgerId
+            ? ledgerAccountsById.get(ledgerId)
+            : null;
+          const category =
+            ledgerAccount?.category ||
+            ACCOUNT_METADATA[code as JournalEntryAccount]?.category;
+          return category === 'revenue' ? sum + bal : sum;
+        },
+        0,
+      );
+      const totalJournalDepreciation = Array.from(
+        accountAmounts.entries(),
+      ).reduce((sum, [code, bal]) => {
+        const ledgerId = this.parseLedgerAccountId(code);
+        const ledgerAccount = ledgerId
+          ? ledgerAccountsById.get(ledgerId)
+          : null;
+        const category =
+          ledgerAccount?.category ||
+          ACCOUNT_METADATA[code as JournalEntryAccount]?.category;
+        return category === 'expense' ? sum + bal : sum;
+      }, 0);
       const totalJournalOutstanding =
         accountAmounts.get(JournalEntryAccount.ACCOUNTS_PAYABLE) || 0;
 
@@ -3317,8 +3437,6 @@ export class ReportsService {
         ])
         .where('entry.organization_id = :organizationId', { organizationId })
         .andWhere('entry.entry_date < :startDate', { startDate })
-        .andWhere("entry.debit_account NOT IN ('cash', 'bank')")
-        .andWhere("entry.credit_account NOT IN ('cash', 'bank')")
         .groupBy('entry.debit_account')
         .addGroupBy('entry.credit_account');
 
@@ -3541,32 +3659,39 @@ export class ReportsService {
 
       // Aggregate opening journal entries by account
       // Use same logic as period aggregation: calculate balance based on account type
-      const openingAccountAmounts = new Map<JournalEntryAccount, number>();
-      const openingAccountDebits = new Map<JournalEntryAccount, number>();
-      const openingAccountCredits = new Map<JournalEntryAccount, number>();
+      const openingAccountAmounts = new Map<string, number>();
+      const openingAccountDebits = new Map<string, number>();
+      const openingAccountCredits = new Map<string, number>();
+      const openingCustomLedgerIds: string[] = [];
 
       openingJournalRows.forEach((row) => {
         const amount = Number(row.amount || 0);
         const debitAccount = row.debitaccount || row.debitAccount;
         const creditAccount = row.creditaccount || row.creditAccount;
 
+        const debitId = this.parseLedgerAccountId(debitAccount);
+        if (debitId) openingCustomLedgerIds.push(debitId);
+        const creditId = this.parseLedgerAccountId(creditAccount);
+        if (creditId) openingCustomLedgerIds.push(creditId);
+
         // Track debits and credits separately
-        if (debitAccount) {
+        if (
+          debitAccount &&
+          debitAccount !== 'cash' &&
+          debitAccount !== 'bank'
+        ) {
           const existing =
-            openingAccountDebits.get(debitAccount as JournalEntryAccount) || 0;
-          openingAccountDebits.set(
-            debitAccount as JournalEntryAccount,
-            existing + amount,
-          );
+            openingAccountDebits.get(debitAccount as string) || 0;
+          openingAccountDebits.set(debitAccount as string, existing + amount);
         }
-        if (creditAccount) {
+        if (
+          creditAccount &&
+          creditAccount !== 'cash' &&
+          creditAccount !== 'bank'
+        ) {
           const existing =
-            openingAccountCredits.get(creditAccount as JournalEntryAccount) ||
-            0;
-          openingAccountCredits.set(
-            creditAccount as JournalEntryAccount,
-            existing + amount,
-          );
+            openingAccountCredits.get(creditAccount as string) || 0;
+          openingAccountCredits.set(creditAccount as string, existing + amount);
         }
       });
 
@@ -3574,7 +3699,6 @@ export class ReportsService {
       // This ensures Share Capital entries are captured even when debited to Cash/Bank
       openingEquityRows.forEach((row) => {
         const amount = Number(row.amount || 0);
-        const debitAccount = row.debitaccount || row.debitAccount;
         const creditAccount = row.creditaccount || row.creditAccount;
 
         // Only process if credit account is an equity account
@@ -3586,32 +3710,35 @@ export class ReportsService {
             'owner_shareholder_account',
           ].includes(creditAccount)
         ) {
-          // Track debits (even if to Cash/Bank) for equity accounts
-          if (debitAccount) {
-            const existing =
-              openingAccountDebits.get(debitAccount as JournalEntryAccount) ||
-              0;
-            openingAccountDebits.set(
-              debitAccount as JournalEntryAccount,
-              existing + amount,
-            );
-          }
           // Track credits for equity accounts
           const existing =
-            openingAccountCredits.get(creditAccount as JournalEntryAccount) ||
-            0;
-          openingAccountCredits.set(
-            creditAccount as JournalEntryAccount,
-            existing + amount,
-          );
+            openingAccountCredits.get(creditAccount as string) || 0;
+          openingAccountCredits.set(creditAccount as string, existing + amount);
         }
       });
 
+      const openingLedgerAccountsById = await this.loadLedgerAccountsByIds(
+        organizationId,
+        openingCustomLedgerIds,
+      );
+
       // Calculate balance for each account based on account type
-      Object.values(JournalEntryAccount).forEach((account) => {
+      const openingAllAccountCodes = new Set<string>([
+        ...Array.from(openingAccountDebits.keys()),
+        ...Array.from(openingAccountCredits.keys()),
+      ]);
+      openingAllAccountCodes.forEach((account) => {
         const debits = openingAccountDebits.get(account) || 0;
         const credits = openingAccountCredits.get(account) || 0;
-        const category = ACCOUNT_METADATA[account]?.category || 'asset';
+
+        const ledgerId = this.parseLedgerAccountId(account);
+        const ledgerAccount = ledgerId
+          ? openingLedgerAccountsById.get(ledgerId)
+          : null;
+        const category =
+          ledgerAccount?.category ||
+          ACCOUNT_METADATA[account as JournalEntryAccount]?.category ||
+          'asset';
 
         // Calculate balance based on account category
         let balance = 0;
@@ -3639,8 +3766,30 @@ export class ReportsService {
         openingAccountAmounts.get(JournalEntryAccount.PREPAID_EXPENSES) || 0;
       const openingJournalAccruedIncome =
         openingAccountAmounts.get(JournalEntryAccount.ACCOUNTS_RECEIVABLE) || 0;
-      const openingJournalDepreciation =
-        openingAccountAmounts.get(JournalEntryAccount.GENERAL_EXPENSE) || 0;
+      const openingJournalRevenue = Array.from(
+        openingAccountAmounts.entries(),
+      ).reduce((sum, [code, bal]) => {
+        const ledgerId = this.parseLedgerAccountId(code);
+        const ledgerAccount = ledgerId
+          ? openingLedgerAccountsById.get(ledgerId)
+          : null;
+        const category =
+          ledgerAccount?.category ||
+          ACCOUNT_METADATA[code as JournalEntryAccount]?.category;
+        return category === 'revenue' ? sum + bal : sum;
+      }, 0);
+      const openingJournalDepreciation = Array.from(
+        openingAccountAmounts.entries(),
+      ).reduce((sum, [code, bal]) => {
+        const ledgerId = this.parseLedgerAccountId(code);
+        const ledgerAccount = ledgerId
+          ? openingLedgerAccountsById.get(ledgerId)
+          : null;
+        const category =
+          ledgerAccount?.category ||
+          ACCOUNT_METADATA[code as JournalEntryAccount]?.category;
+        return category === 'expense' ? sum + bal : sum;
+      }, 0);
       const openingJournalOutstanding =
         openingAccountAmounts.get(JournalEntryAccount.ACCOUNTS_PAYABLE) || 0;
 
@@ -3706,6 +3855,7 @@ export class ReportsService {
 
       const openingEquity =
         openingNetRevenue -
+        openingJournalRevenue -
         openingExpenses -
         openingJournalDepreciation +
         openingJournalEquity -
@@ -3716,6 +3866,7 @@ export class ReportsService {
       // Note: netRevenue and totalExpenses contain ALL amounts up to asOfDate, not just period
       const periodRevenue = netRevenue - openingNetRevenue;
       const periodExpenses = totalExpenses - openingExpenses;
+      const periodJournalRevenue = totalJournalRevenue - openingJournalRevenue;
 
       // Debug logging for period calculations
       this.logger.log(
@@ -3732,7 +3883,8 @@ export class ReportsService {
       // Recalculate totalEquity using period amounts (not total amounts)
       // This represents equity changes during the period (startDate to asOfDate)
       const totalEquity =
-        periodRevenue -
+        periodRevenue +
+        periodJournalRevenue -
         periodExpenses -
         periodJournalDepreciation +
         periodJournalEquity -
@@ -3771,8 +3923,17 @@ export class ReportsService {
       // Where: openingRetainedEarnings = openingRevenue - openingExpenses
       //        netProfit = periodRevenue - periodExpenses (period amounts, not cumulative)
       // Use the periodRevenue and periodExpenses already calculated above
-      const openingRetainedEarnings = openingNetRevenue - openingExpenses;
-      const periodNetProfit = periodRevenue - periodExpenses;
+      // Also include P&L-impacting journal entries (sales_revenue and general_expense) so retained earnings matches equity math.
+      const openingRetainedEarnings =
+        openingNetRevenue +
+        openingJournalRevenue -
+        openingExpenses -
+        openingJournalDepreciation;
+      const periodNetProfit =
+        periodRevenue +
+        periodJournalRevenue -
+        periodExpenses -
+        periodJournalDepreciation;
       const closingRetainedEarnings = openingRetainedEarnings + periodNetProfit;
 
       // Debug logging for retained earnings calculation
@@ -3893,6 +4054,79 @@ export class ReportsService {
     const endDate =
       filters?.['endDate'] || new Date().toISOString().split('T')[0];
 
+    // Journal Entries impact on P&L:
+    // - Revenue: credit to sales_revenue increases revenue; debit reduces revenue
+    // - Expense: debit to general_expense increases expense; credit reduces expense
+    const periodJournalPandLQuery = this.journalEntriesRepository
+      .createQueryBuilder('entry')
+      .select([
+        "SUM(CASE WHEN entry.credit_account = 'sales_revenue' THEN entry.amount ELSE 0 END) AS revenueCredit",
+        "SUM(CASE WHEN entry.debit_account = 'sales_revenue' THEN entry.amount ELSE 0 END) AS revenueDebit",
+        "SUM(CASE WHEN entry.credit_account = 'sales_revenue' THEN COALESCE(entry.vat_amount, 0) ELSE 0 END) AS revenueVatCredit",
+        "SUM(CASE WHEN entry.debit_account = 'sales_revenue' THEN COALESCE(entry.vat_amount, 0) ELSE 0 END) AS revenueVatDebit",
+        "SUM(CASE WHEN entry.debit_account = 'general_expense' THEN entry.amount ELSE 0 END) AS expenseDebit",
+        "SUM(CASE WHEN entry.credit_account = 'general_expense' THEN entry.amount ELSE 0 END) AS expenseCredit",
+        "SUM(CASE WHEN entry.debit_account = 'general_expense' THEN COALESCE(entry.vat_amount, 0) ELSE 0 END) AS expenseVatDebit",
+        "SUM(CASE WHEN entry.credit_account = 'general_expense' THEN COALESCE(entry.vat_amount, 0) ELSE 0 END) AS expenseVatCredit",
+      ])
+      .where('entry.organization_id = :organizationId', { organizationId })
+      .andWhere('entry.is_deleted = false')
+      .andWhere('entry.entry_date >= :startDate', { startDate })
+      .andWhere('entry.entry_date <= :endDate', { endDate });
+
+    const openingJournalPandLQuery = this.journalEntriesRepository
+      .createQueryBuilder('entry')
+      .select([
+        "SUM(CASE WHEN entry.credit_account = 'sales_revenue' THEN entry.amount ELSE 0 END) AS revenueCredit",
+        "SUM(CASE WHEN entry.debit_account = 'sales_revenue' THEN entry.amount ELSE 0 END) AS revenueDebit",
+        "SUM(CASE WHEN entry.credit_account = 'sales_revenue' THEN COALESCE(entry.vat_amount, 0) ELSE 0 END) AS revenueVatCredit",
+        "SUM(CASE WHEN entry.debit_account = 'sales_revenue' THEN COALESCE(entry.vat_amount, 0) ELSE 0 END) AS revenueVatDebit",
+        "SUM(CASE WHEN entry.debit_account = 'general_expense' THEN entry.amount ELSE 0 END) AS expenseDebit",
+        "SUM(CASE WHEN entry.credit_account = 'general_expense' THEN entry.amount ELSE 0 END) AS expenseCredit",
+        "SUM(CASE WHEN entry.debit_account = 'general_expense' THEN COALESCE(entry.vat_amount, 0) ELSE 0 END) AS expenseVatDebit",
+        "SUM(CASE WHEN entry.credit_account = 'general_expense' THEN COALESCE(entry.vat_amount, 0) ELSE 0 END) AS expenseVatCredit",
+      ])
+      .where('entry.organization_id = :organizationId', { organizationId })
+      .andWhere('entry.is_deleted = false')
+      .andWhere('entry.entry_date < :startDate', { startDate });
+
+    // Custom ledger accounts used in JEs: ledger:{id}
+    // We load all JE rows referencing ledger:* and then classify by ledger_accounts.category.
+    const periodCustomJournalRowsQuery = this.journalEntriesRepository
+      .createQueryBuilder('entry')
+      .select([
+        'entry.debit_account AS debitAccount',
+        'entry.credit_account AS creditAccount',
+        'SUM(entry.amount) AS amount',
+        'SUM(COALESCE(entry.vat_amount, 0)) AS vat',
+      ])
+      .where('entry.organization_id = :organizationId', { organizationId })
+      .andWhere('entry.is_deleted = false')
+      .andWhere('entry.entry_date >= :startDate', { startDate })
+      .andWhere('entry.entry_date <= :endDate', { endDate })
+      .andWhere(
+        "(entry.debit_account LIKE 'ledger:%' OR entry.credit_account LIKE 'ledger:%')",
+      )
+      .groupBy('entry.debit_account')
+      .addGroupBy('entry.credit_account');
+
+    const openingCustomJournalRowsQuery = this.journalEntriesRepository
+      .createQueryBuilder('entry')
+      .select([
+        'entry.debit_account AS debitAccount',
+        'entry.credit_account AS creditAccount',
+        'SUM(entry.amount) AS amount',
+        'SUM(COALESCE(entry.vat_amount, 0)) AS vat',
+      ])
+      .where('entry.organization_id = :organizationId', { organizationId })
+      .andWhere('entry.is_deleted = false')
+      .andWhere('entry.entry_date < :startDate', { startDate })
+      .andWhere(
+        "(entry.debit_account LIKE 'ledger:%' OR entry.credit_account LIKE 'ledger:%')",
+      )
+      .groupBy('entry.debit_account')
+      .addGroupBy('entry.credit_account');
+
     const revenueQuery = this.salesInvoicesRepository
       .createQueryBuilder('invoice')
       .select([
@@ -3964,12 +4198,23 @@ export class ReportsService {
       })
       .andWhere('debitNote.invoice_id IS NOT NULL'); // Only customer debit notes
 
-    const [revenueResult, creditNotesResult, debitNotesResult] =
-      await Promise.all([
-        revenueQuery.getRawOne(),
-        creditNotesQuery.getRawOne(),
-        debitNotesQuery.getRawOne(),
-      ]);
+    const [
+      revenueResult,
+      creditNotesResult,
+      debitNotesResult,
+      periodJournalPandLRow,
+      openingJournalPandLRow,
+      periodCustomJournalRows,
+      openingCustomJournalRows,
+    ] = await Promise.all([
+      revenueQuery.getRawOne(),
+      creditNotesQuery.getRawOne(),
+      debitNotesQuery.getRawOne(),
+      periodJournalPandLQuery.getRawOne(),
+      openingJournalPandLQuery.getRawOne(),
+      periodCustomJournalRowsQuery.getRawMany(),
+      openingCustomJournalRowsQuery.getRawMany(),
+    ]);
 
     const totalRevenue = Number(revenueResult?.revenue || 0);
     const revenueVat = Number(revenueResult?.vat || 0);
@@ -3978,8 +4223,169 @@ export class ReportsService {
     const debitNotesAmount = Number(debitNotesResult?.amount || 0);
     const debitNotesVat = Number(debitNotesResult?.vat || 0);
 
-    const netRevenue = totalRevenue - creditNotesAmount + debitNotesAmount;
-    const netRevenueVat = revenueVat - creditNotesVat + debitNotesVat;
+    // Handle both camelCase and lowercase field names
+    const periodJournalRevenueCredit = Number(
+      periodJournalPandLRow?.revenueCredit ||
+        periodJournalPandLRow?.revenuecredit ||
+        0,
+    );
+    const periodJournalRevenueDebit = Number(
+      periodJournalPandLRow?.revenueDebit ||
+        periodJournalPandLRow?.revenuedebit ||
+        0,
+    );
+    const periodJournalRevenueVatCredit = Number(
+      periodJournalPandLRow?.revenueVatCredit ||
+        periodJournalPandLRow?.revenuevatcredit ||
+        0,
+    );
+    const periodJournalRevenueVatDebit = Number(
+      periodJournalPandLRow?.revenueVatDebit ||
+        periodJournalPandLRow?.revenuevatdebit ||
+        0,
+    );
+    const periodJournalExpenseDebit = Number(
+      periodJournalPandLRow?.expenseDebit ||
+        periodJournalPandLRow?.expensedebit ||
+        0,
+    );
+    const periodJournalExpenseCredit = Number(
+      periodJournalPandLRow?.expenseCredit ||
+        periodJournalPandLRow?.expensecredit ||
+        0,
+    );
+    const periodJournalExpenseVatDebit = Number(
+      periodJournalPandLRow?.expenseVatDebit ||
+        periodJournalPandLRow?.expensevatdebit ||
+        0,
+    );
+    const periodJournalExpenseVatCredit = Number(
+      periodJournalPandLRow?.expenseVatCredit ||
+        periodJournalPandLRow?.expensevatcredit ||
+        0,
+    );
+
+    const periodJournalRevenue =
+      periodJournalRevenueCredit - periodJournalRevenueDebit;
+    const periodJournalRevenueVat =
+      periodJournalRevenueVatCredit - periodJournalRevenueVatDebit;
+    const periodJournalExpenses =
+      periodJournalExpenseDebit - periodJournalExpenseCredit;
+    const periodJournalExpensesVat =
+      periodJournalExpenseVatDebit - periodJournalExpenseVatCredit;
+
+    // Custom ledger JE P&L impact
+    const periodCustomLedgerIds: string[] = [];
+    periodCustomJournalRows.forEach((row) => {
+      const debitAccount = row.debitaccount || row.debitAccount;
+      const creditAccount = row.creditaccount || row.creditAccount;
+      const debitId = this.parseLedgerAccountId(debitAccount);
+      if (debitId) periodCustomLedgerIds.push(debitId);
+      const creditId = this.parseLedgerAccountId(creditAccount);
+      if (creditId) periodCustomLedgerIds.push(creditId);
+    });
+    const openingCustomLedgerIds: string[] = [];
+    openingCustomJournalRows.forEach((row) => {
+      const debitAccount = row.debitaccount || row.debitAccount;
+      const creditAccount = row.creditaccount || row.creditAccount;
+      const debitId = this.parseLedgerAccountId(debitAccount);
+      if (debitId) openingCustomLedgerIds.push(debitId);
+      const creditId = this.parseLedgerAccountId(creditAccount);
+      if (creditId) openingCustomLedgerIds.push(creditId);
+    });
+
+    const customLedgerAccountsById = await this.loadLedgerAccountsByIds(
+      organizationId,
+      [...periodCustomLedgerIds, ...openingCustomLedgerIds],
+    );
+
+    let periodCustomRevenue = 0;
+    let periodCustomRevenueVat = 0;
+    const periodCustomExpenseByName = new Map<
+      string,
+      { amount: number; vat: number }
+    >();
+
+    periodCustomJournalRows.forEach((row) => {
+      const amount = Number(row.amount || 0);
+      const vat = Number(row.vat || 0);
+      const debitAccount = row.debitaccount || row.debitAccount;
+      const creditAccount = row.creditaccount || row.creditAccount;
+
+      const debitId = this.parseLedgerAccountId(debitAccount);
+      if (debitId) {
+        const ledger = customLedgerAccountsById.get(debitId);
+        if (ledger?.category === 'expense') {
+          const key = `${ledger.name} (Journal Entry)`;
+          const existing = periodCustomExpenseByName.get(key) || {
+            amount: 0,
+            vat: 0,
+          };
+          periodCustomExpenseByName.set(key, {
+            amount: existing.amount + amount,
+            vat: existing.vat + vat,
+          });
+        } else if (ledger?.category === 'revenue') {
+          // Debit to revenue reduces revenue
+          periodCustomRevenue -= amount;
+          periodCustomRevenueVat -= vat;
+        }
+      }
+
+      const creditId = this.parseLedgerAccountId(creditAccount);
+      if (creditId) {
+        const ledger = customLedgerAccountsById.get(creditId);
+        if (ledger?.category === 'expense') {
+          // Credit to expense reduces expense
+          const key = `${ledger.name} (Journal Entry)`;
+          const existing = periodCustomExpenseByName.get(key) || {
+            amount: 0,
+            vat: 0,
+          };
+          periodCustomExpenseByName.set(key, {
+            amount: existing.amount - amount,
+            vat: existing.vat - vat,
+          });
+        } else if (ledger?.category === 'revenue') {
+          periodCustomRevenue += amount;
+          periodCustomRevenueVat += vat;
+        }
+      }
+    });
+
+    let openingCustomRevenue = 0;
+    let openingCustomExpenses = 0;
+    openingCustomJournalRows.forEach((row) => {
+      const amount = Number(row.amount || 0);
+      const debitAccount = row.debitaccount || row.debitAccount;
+      const creditAccount = row.creditaccount || row.creditAccount;
+
+      const debitId = this.parseLedgerAccountId(debitAccount);
+      if (debitId) {
+        const ledger = customLedgerAccountsById.get(debitId);
+        if (ledger?.category === 'expense') openingCustomExpenses += amount;
+        if (ledger?.category === 'revenue') openingCustomRevenue -= amount;
+      }
+      const creditId = this.parseLedgerAccountId(creditAccount);
+      if (creditId) {
+        const ledger = customLedgerAccountsById.get(creditId);
+        if (ledger?.category === 'expense') openingCustomExpenses -= amount;
+        if (ledger?.category === 'revenue') openingCustomRevenue += amount;
+      }
+    });
+
+    const netRevenue =
+      totalRevenue -
+      creditNotesAmount +
+      debitNotesAmount +
+      periodJournalRevenue +
+      periodCustomRevenue;
+    const netRevenueVat =
+      revenueVat -
+      creditNotesVat +
+      debitNotesVat +
+      periodJournalRevenueVat +
+      periodCustomRevenueVat;
 
     const expenseQuery = this.expensesRepository
       .createQueryBuilder('expense')
@@ -4137,6 +4543,31 @@ export class ReportsService {
       });
     }
 
+    // Add journal-entry expenses into the P&L expense breakdown
+    if (
+      Math.abs(periodJournalExpenses) > 0.01 ||
+      Math.abs(periodJournalExpensesVat) > 0.01
+    ) {
+      processedExpenseRows.push({
+        category: 'General Expense (Journal Entry)',
+        amount: periodJournalExpenses.toString(),
+        vat: periodJournalExpensesVat.toString(),
+        count: '0',
+      });
+    }
+
+    // Add custom-ledger JE expenses into breakdown (per ledger account)
+    periodCustomExpenseByName.forEach((v, name) => {
+      if (Math.abs(v.amount) > 0.01 || Math.abs(v.vat) > 0.01) {
+        processedExpenseRows.push({
+          category: name,
+          amount: v.amount.toString(),
+          vat: v.vat.toString(),
+          count: '0',
+        });
+      }
+    });
+
     const totalExpenses = processedExpenseRows.reduce(
       (sum, row) => sum + Number(row.amount || 0),
       0,
@@ -4175,7 +4606,38 @@ export class ReportsService {
 
     const openingRevenue = Number(openingRevenueRow?.revenue || 0);
     const openingExpenses = Number(openingExpensesRow?.amount || 0);
-    const openingRetainedEarnings = openingRevenue - openingExpenses;
+
+    const openingJournalRevenueCredit = Number(
+      openingJournalPandLRow?.revenueCredit ||
+        openingJournalPandLRow?.revenuecredit ||
+        0,
+    );
+    const openingJournalRevenueDebit = Number(
+      openingJournalPandLRow?.revenueDebit ||
+        openingJournalPandLRow?.revenuedebit ||
+        0,
+    );
+    const openingJournalExpenseDebit = Number(
+      openingJournalPandLRow?.expenseDebit ||
+        openingJournalPandLRow?.expensedebit ||
+        0,
+    );
+    const openingJournalExpenseCredit = Number(
+      openingJournalPandLRow?.expenseCredit ||
+        openingJournalPandLRow?.expensecredit ||
+        0,
+    );
+
+    const openingJournalRevenue =
+      openingJournalRevenueCredit - openingJournalRevenueDebit;
+    const openingJournalExpenses =
+      openingJournalExpenseDebit - openingJournalExpenseCredit;
+
+    const openingRetainedEarnings =
+      openingRevenue +
+      openingJournalRevenue +
+      openingCustomRevenue -
+      (openingExpenses + openingJournalExpenses + openingCustomExpenses);
 
     const closingRetainedEarnings = openingRetainedEarnings + netProfit;
 

@@ -14,6 +14,7 @@ import { InvoicePayment } from '../../entities/invoice-payment.entity';
 import { JournalEntry } from '../../entities/journal-entry.entity';
 import { CreditNote } from '../../entities/credit-note.entity';
 import { DebitNote } from '../../entities/debit-note.entity';
+import { LedgerAccount } from '../../entities/ledger-account.entity';
 import { CreditNoteApplication } from '../../entities/credit-note-application.entity';
 import { DebitNoteApplication } from '../../entities/debit-note-application.entity';
 import { DebitNoteExpenseApplication } from '../../entities/debit-note-expense-application.entity';
@@ -34,6 +35,7 @@ import { SettingsModule } from '../settings/settings.module';
       ExpensePayment,
       InvoicePayment,
       JournalEntry,
+      LedgerAccount,
       CreditNote,
       DebitNote,
       CreditNoteApplication,
