@@ -3230,6 +3230,7 @@ export class ReportsService {
         vendor: string;
         amount: number;
         status: string;
+        expectedDate?: string | null;
         category?: string;
       }> = [];
       let totalLiabilities = 0;
@@ -3283,6 +3284,8 @@ export class ReportsService {
           `(${expensePaymentsSubquery}) AS paidAmount`,
           `(${debitNoteExpenseApplicationsSubquery}) AS debitNoteAppliedAmount`,
           `(${debitNotesLinkedToExpenseSubquery}) AS debitNoteLinkedAmount`,
+          'accrual.expected_payment_date AS expectedDate',
+          'accrual.status AS status',
         ])
         .where('accrual.organization_id = :organizationId', { organizationId })
         .andWhere('accrual.is_deleted = false')
@@ -3293,8 +3296,11 @@ export class ReportsService {
 
       const accrualsRows = await accrualsQuery.getRawMany();
 
-      // Group by vendor and calculate outstanding amounts
-      const vendorPayables = new Map<string, number>();
+      // Group by vendor and calculate outstanding amounts (+ earliest expected date)
+      const vendorPayables = new Map<
+        string,
+        { amount: number; expectedDate?: string | null; status?: string | null }
+      >();
 
       accrualsRows.forEach((row) => {
         const expenseTotal = Number(
@@ -3314,21 +3320,43 @@ export class ReportsService {
 
         if (outstanding > 0) {
           const vendor = row.vendor || 'N/A';
-          const currentAmount = vendorPayables.get(vendor) || 0;
-          vendorPayables.set(vendor, currentAmount + outstanding);
+          const expectedDate = row.expecteddate || row.expectedDate || null;
+          const status = row.status || null;
+
+          const existing = vendorPayables.get(vendor) || {
+            amount: 0,
+            expectedDate: null,
+            status: null,
+          };
+          existing.amount += outstanding;
+
+          // Keep earliest expected date for display
+          if (expectedDate) {
+            if (!existing.expectedDate) {
+              existing.expectedDate = expectedDate;
+            } else {
+              const existingDate = new Date(existing.expectedDate);
+              const newDate = new Date(expectedDate);
+              if (newDate < existingDate) existing.expectedDate = expectedDate;
+            }
+          }
+          if (!existing.status && status) existing.status = status;
+
+          vendorPayables.set(vendor, existing);
         }
       });
 
       // Add to liabilities
-      vendorPayables.forEach((amount, vendor) => {
-        if (amount > 0) {
+      vendorPayables.forEach((data, vendor) => {
+        if (data.amount > 0) {
           liabilities.push({
             vendor,
-            amount,
-            status: 'Unpaid',
+            amount: data.amount,
+            expectedDate: data.expectedDate || null,
+            status: (data.status as any) || 'pending_settlement',
             category: 'Accounts Payable',
           });
-          totalLiabilities += amount;
+          totalLiabilities += data.amount;
         }
       });
 
@@ -3777,19 +3805,37 @@ export class ReportsService {
         }
       }
 
-      // Add Accounts Payable from journal entries to liabilities
-      if (totalJournalOutstanding > 0) {
-        liabilities.push({
-          vendor: 'Accounts Payable (Journal Entries)',
-          amount: totalJournalOutstanding,
-          status: 'Unpaid',
-          category: 'Accounts Payable',
-        });
-        totalLiabilities += totalJournalOutstanding;
-        this.logger.debug(
-          `Balance Sheet - Added Accounts Payable from journal entries: ${totalJournalOutstanding}, organizationId=${organizationId}`,
-        );
-      }
+      // Add Accounts Payable from journal entries to liabilities (vendor-wise, like Payables report)
+      // We include VAT in the payable (amount + vat_amount) to match Trial Balance logic.
+      const journalApRows = await this.journalEntriesRepository
+        .createQueryBuilder('entry')
+        .select([
+          "COALESCE(entry.customer_vendor_name, 'N/A') AS vendor",
+          'SUM(entry.amount) AS amount',
+          'SUM(COALESCE(entry.vat_amount, 0)) AS vatAmount',
+        ])
+        .where('entry.organization_id = :organizationId', { organizationId })
+        .andWhere("entry.credit_account = 'accounts_payable'")
+        .andWhere('entry.entry_date <= :asOfDate', { asOfDate })
+        .groupBy('entry.customer_vendor_name')
+        .getRawMany();
+
+      journalApRows.forEach((row) => {
+        const vendor = row.vendor || row.VENDOR || 'N/A';
+        const amount = Number(row.amount || 0);
+        const vatAmount = Number(row.vatamount || row.vatAmount || 0);
+        const total = amount + vatAmount;
+        if (total > 0) {
+          liabilities.push({
+            vendor,
+            amount: total,
+            expectedDate: null,
+            status: 'pending_settlement',
+            category: 'Accounts Payable',
+          });
+          totalLiabilities += total;
+        }
+      });
 
       // Add all custom ledger accounts that are liabilities (including Salary Payables, etc.)
       accountAmounts.forEach((balance, accountCode) => {
@@ -3823,21 +3869,6 @@ export class ReportsService {
           }
         }
       });
-
-      // Add a non-counting "Accounts Payable (Total)" row to make Balance Sheet reconcile 1:1 with Trial Balance.
-      // TB typically shows a single "Accounts Payable" balance, while BS lists vendor-level payables plus JE payables.
-      // IMPORTANT: Do NOT add this to totalLiabilities; it's display-only.
-      const accountsPayableTotal = liabilities
-        .filter((l) => l.category === 'Accounts Payable')
-        .reduce((sum, l) => sum + Number(l.amount || 0), 0);
-      if (accountsPayableTotal > 0) {
-        liabilities.unshift({
-          vendor: 'Accounts Payable (Total)',
-          amount: accountsPayableTotal,
-          status: 'Summary',
-          category: 'Accounts Payable',
-        });
-      }
 
       // totalEquity will be recalculated after we get opening amounts
       // It's calculated later with period amounts (see line 2397)
@@ -5489,8 +5520,6 @@ export class ReportsService {
       periodAmount = totalAmount;
     }
 
-    const closingBalance = openingBalance + periodAmount;
-
     // Group by supplier to calculate pending balance per supplier
     const supplierBalances = new Map<
       string,
@@ -5538,6 +5567,89 @@ export class ReportsService {
       supplierBalances.set(vendor, existing);
     });
 
+    // Query journal entries with Accounts Payable as credit account
+    const journalPayablesQuery = this.journalEntriesRepository
+      .createQueryBuilder('entry')
+      .select([
+        'entry.id AS journalEntryId',
+        'entry.customer_vendor_name AS vendor',
+        'entry.entry_date AS entryDate',
+        'entry.description AS description',
+        'entry.amount AS amount',
+        'entry.vat_amount AS vatAmount',
+        'entry.reference_number AS referenceNumber',
+      ])
+      .where('entry.organization_id = :organizationId', { organizationId })
+      .andWhere("entry.credit_account = 'accounts_payable'")
+      .andWhere('entry.entry_date <= :asOfDate', { asOfDate });
+
+    if (filters?.['startDate']) {
+      journalPayablesQuery.andWhere('entry.entry_date >= :startDate', {
+        startDate: filters.startDate,
+      });
+    }
+
+    if (filters?.['vendorName']) {
+      const vendors = Array.isArray(filters.vendorName)
+        ? filters.vendorName
+        : [filters.vendorName];
+      journalPayablesQuery.andWhere(
+        'entry.customer_vendor_name IN (:...vendors)',
+        {
+          vendors,
+        },
+      );
+    }
+
+    journalPayablesQuery.orderBy('entry.entry_date', 'DESC');
+
+    const journalPayablesRows = await journalPayablesQuery.getRawMany();
+
+    // Convert journal entries to payables format
+    const journalPayables = journalPayablesRows.map((row) => {
+      const baseAmount = Number(row.amount || 0);
+      const vatAmount = Number(row.vatamount || row.vatAmount || 0);
+      const totalAmount = baseAmount + vatAmount; // Include VAT for Accounts Payable
+
+      return {
+        journalEntryId: row.journalentryid || row.journalEntryId,
+        vendor: row.vendor || row.customer_vendor_name || 'N/A',
+        amount: totalAmount, // Total amount including VAT
+        expectedDate: null, // Journal entries don't have expected payment dates
+        settlementDate: null,
+        status: 'PENDING_SETTLEMENT', // Treat as pending
+        category: 'Journal Entry',
+        description:
+          row.description ||
+          row.referencenumber ||
+          row.referenceNumber ||
+          'Journal Entry',
+        isOverdue: false, // Journal entries don't have due dates
+        isJournalEntry: true, // Flag to identify journal entries
+      };
+    });
+
+    // Add journal entry payables to supplier balances
+    journalPayables.forEach((je) => {
+      const vendor = je.vendor || 'N/A';
+      const existing = supplierBalances.get(vendor) || {
+        vendor,
+        totalAmount: 0,
+        itemCount: 0,
+        overdueAmount: 0,
+        overdueCount: 0,
+      };
+
+      if (je.amount > 0) {
+        existing.totalAmount += je.amount;
+      }
+      if (je.amount !== 0) {
+        existing.itemCount += 1;
+      }
+
+      supplierBalances.set(vendor, existing);
+    });
+
     // Convert supplier balances to array
     // Filter out suppliers with 0 pending balance
     const supplierSummary = Array.from(supplierBalances.values())
@@ -5551,11 +5663,9 @@ export class ReportsService {
       }))
       .sort((a, b) => b.pendingBalance - a.pendingBalance); // Sort by balance descending
 
-    const result = {
-      asOfDate,
-      period: startDate ? { startDate, endDate: asOfDate } : undefined,
-      // Include all items with non-zero outstanding (positive = we owe, negative = supplier owes us)
-      items: payables
+    // Combine accrual payables and journal entry payables
+    const allPayables = [
+      ...payables
         .filter((row) => row.outstandingAmount !== 0)
         .map((row) => ({
           accrualId: row.accrualid || row.accrualId,
@@ -5572,23 +5682,38 @@ export class ReportsService {
             new Date(row.expecteddate || row.expectedDate) <
               new Date(asOfDate) &&
             row.outstandingAmount > 0,
+          isJournalEntry: false,
         })),
+      ...journalPayables,
+    ];
+
+    // Recalculate totals including journal entries
+    const totalAmountWithJournal = allPayables.reduce(
+      (sum, row) => sum + (row.amount > 0 ? row.amount : 0),
+      0,
+    );
+
+    const result = {
+      asOfDate,
+      period: startDate ? { startDate, endDate: asOfDate } : undefined,
+      // Include all items with non-zero outstanding (positive = we owe, negative = supplier owes us)
+      items: allPayables,
       supplierSummary, // Add supplier-level summary with pending balances
       summary: {
         openingBalance: Number(openingBalance.toFixed(2)),
         periodAmount: Number(periodAmount.toFixed(2)),
-        closingBalance: Number(closingBalance.toFixed(2)),
-        totalItems: payables.filter((r) => r.outstandingAmount !== 0).length,
-        totalAmount: Number(totalAmount.toFixed(2)),
+        closingBalance: Number(
+          (openingBalance + totalAmountWithJournal).toFixed(2),
+        ),
+        totalItems: allPayables.filter((r) => r.amount !== 0).length,
+        totalAmount: Number(totalAmountWithJournal.toFixed(2)),
         overdueItems: overdueItems.length,
         overdueAmount: Number(overdueAmount.toFixed(2)),
-        paidItems: payables.filter(
-          (r) => r.status === AccrualStatus.SETTLED || r.outstandingAmount <= 0,
+        paidItems: allPayables.filter(
+          (r) => r.status === AccrualStatus.SETTLED || r.amount <= 0,
         ).length,
-        pendingItems: payables.filter(
-          (r) =>
-            r.status === AccrualStatus.PENDING_SETTLEMENT &&
-            r.outstandingAmount > 0,
+        pendingItems: allPayables.filter(
+          (r) => r.status === AccrualStatus.PENDING_SETTLEMENT && r.amount > 0,
         ).length,
         totalSuppliers: supplierSummary.length,
       },
