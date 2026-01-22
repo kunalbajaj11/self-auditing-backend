@@ -7,6 +7,18 @@ import * as hpp from 'hpp';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
+  const runMode = process.env.RUN_MODE || 'web';
+
+  // If running as worker, skip HTTP server setup
+  if (runMode === 'worker') {
+    const app = await NestFactory.createApplicationContext(AppModule);
+    console.log('🚀 OCR Worker started - processing jobs from queue');
+    // Keep the application context alive to process jobs
+    // The worker will automatically process jobs from the queue
+    return;
+  }
+
+  // Web server mode (default)
   const app = await NestFactory.create(AppModule);
   const expressApp = app.getHttpAdapter().getInstance?.();
   if (expressApp?.set) {

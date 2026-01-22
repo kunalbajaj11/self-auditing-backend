@@ -5116,7 +5116,7 @@ export class ReportGeneratorService {
       data.accounts.length > 0
     ) {
       const accountsSheet = workbook.addWorksheet('Accounts');
-      
+
       // Add header row with formula column
       const headerRowValues = [
         'Account Name',
@@ -5193,7 +5193,19 @@ export class ReportGeneratorService {
 
       // Add total row (optional)
       const totalRowNum = data.accounts.length + 2;
-      accountsSheet.addRow(['Sum Total', '', '', '', '', '', '', '', '', '', '']);
+      accountsSheet.addRow([
+        'Sum Total',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+      ]);
       const totalRow = accountsSheet.getRow(totalRowNum);
       totalRow.font = { bold: true };
       totalRow.fill = {
@@ -5201,7 +5213,7 @@ export class ReportGeneratorService {
         pattern: 'solid',
         fgColor: { argb: 'FFE8EEF5' },
       };
-      
+
       // Add sum formula for closing balance column (K)
       const closingBalanceSumCell = accountsSheet.getCell(`K${totalRowNum}`);
       closingBalanceSumCell.value = { formula: `SUM(K2:K${totalRowNum - 1})` };
@@ -5506,17 +5518,11 @@ export class ReportGeneratorService {
       headerRow.alignment = { horizontal: 'center', vertical: 'middle' };
 
       data.expenses.items.forEach((item: any) => {
-        expensesSheet.addRow([
-          item.category || 'N/A',
-          item.amount || 0,
-        ]);
+        expensesSheet.addRow([item.category || 'N/A', item.amount || 0]);
       });
 
       // Add total row
-      expensesSheet.addRow([
-        'Total Expenses',
-        data.expenses.total || 0,
-      ]);
+      expensesSheet.addRow(['Total Expenses', data.expenses.total || 0]);
       const totalRow = expensesSheet.getRow(expensesSheet.rowCount);
       totalRow.font = { bold: true };
       totalRow.fill = {

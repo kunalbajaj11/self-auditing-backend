@@ -41,6 +41,7 @@ import { ProductsModule } from './modules/products/products.module';
 import { TaxRulesModule } from './modules/tax-rules/tax-rules.module';
 import { TaxFormsModule } from './modules/tax-forms/tax-forms.module';
 import { ComplianceModule } from './modules/compliance/compliance.module';
+import { QueueModule } from './modules/queue/queue.module';
 import { AppBootstrapService } from './bootstrap/app-bootstrap.service';
 import { SanitizeAttachmentsInterceptor } from './common/interceptors/sanitize-attachments.interceptor';
 import { TimeoutInterceptor } from './common/interceptors/timeout.interceptor';
@@ -102,6 +103,7 @@ import { TimeoutInterceptor } from './common/interceptors/timeout.interceptor';
     TaxRulesModule,
     TaxFormsModule,
     ComplianceModule,
+    QueueModule,
   ],
   controllers: [AppController],
   providers: [

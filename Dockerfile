@@ -41,9 +41,17 @@ RUN groupadd -g 1001 nodejs && \
 # Copy package files
 COPY package*.json ./
 
-# Install only production dependencies
-RUN npm ci --omit=dev && \
-    npm cache clean --force
+# Install build dependencies, install production dependencies, then remove build deps
+# This ensures bcrypt can compile from source if pre-built binaries aren't available
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 \
+    make \
+    g++ \
+  && npm ci --omit=dev \
+  && npm cache clean --force \
+  && apt-get remove -y python3 make g++ \
+  && apt-get autoremove -y \
+  && rm -rf /var/lib/apt/lists/*
 
 # Copy built application from builder stage
 COPY --from=builder --chown=nestjs:nodejs /app/dist ./dist

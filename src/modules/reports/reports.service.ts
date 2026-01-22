@@ -333,209 +333,220 @@ export class ReportsService {
     );
 
     try {
-      // Optimized queries for dashboard - only fetch summary metrics
-      const [
-        revenueResult,
-        expenseResult,
-        journalRevenueResult,
-        journalExpenseResult,
-        payablesSummary,
-        receivablesSummary,
-      ] = await Promise.all([
-        // Revenue from invoices (matching P&L logic - includes customer debit notes)
-        Promise.all([
-          this.salesInvoicesRepository
-            .createQueryBuilder('invoice')
-            .select([
-              'SUM(COALESCE(invoice.base_amount, invoice.amount)) AS revenue',
-              'SUM(invoice.vat_amount) AS vat',
-            ])
-            .where('invoice.organization_id = :organizationId', {
-              organizationId,
-            })
-            .andWhere('invoice.is_deleted = false')
-            .andWhere('invoice.invoice_date >= :startDate', { startDate })
-            .andWhere('invoice.invoice_date <= :endDate', { endDate })
-            .getRawOne(),
-          // Credit notes (matching P&L logic)
-          this.creditNotesRepository
-            .createQueryBuilder('creditNote')
-            .leftJoin('creditNote.applications', 'cna')
-            .select([
-              'SUM(COALESCE(creditNote.base_amount, creditNote.amount)) AS amount',
-              'SUM(creditNote.vat_amount) AS vat',
-            ])
-            .where('creditNote.organization_id = :organizationId', {
-              organizationId,
-            })
-            .andWhere('creditNote.credit_note_date >= :startDate', { startDate })
-            .andWhere('creditNote.credit_note_date <= :endDate', { endDate })
-            .andWhere(
-              '(creditNote.status IN (:...statuses) OR creditNote.id IN (SELECT DISTINCT cna.credit_note_id FROM credit_note_applications cna WHERE cna.organization_id = :organizationId) OR (creditNote.status = :draftStatus AND creditNote.invoice_id IS NOT NULL))',
-              {
-                statuses: [CreditNoteStatus.ISSUED, CreditNoteStatus.APPLIED],
-                draftStatus: CreditNoteStatus.DRAFT,
-              },
-            )
-            .getRawOne(),
-          // Customer debit notes (matching P&L logic - increases revenue)
-          this.debitNotesRepository
-            .createQueryBuilder('debitNote')
-            .select([
-              'SUM(COALESCE(debitNote.base_amount, debitNote.amount)) AS amount',
-              'SUM(debitNote.vat_amount) AS vat',
-            ])
-            .where('debitNote.organization_id = :organizationId', {
-              organizationId,
-            })
-            .andWhere('debitNote.debit_note_date >= :startDate', { startDate })
-            .andWhere('debitNote.debit_note_date <= :endDate', { endDate })
-            .andWhere('debitNote.status IN (:...statuses)', {
+      // OPTIMIZATION: Split queries into sequential batches to avoid connection pool exhaustion
+      // With PgBouncer session mode (pool_size=5), we can only use 3-4 connections at a time
+      // Original code had 12+ queries in parallel, causing "MaxClientsInSessionMode" errors
+
+      // Batch 1: Revenue queries (3 queries in parallel - safe for pool_size=5)
+      const revenueResult = await Promise.all([
+        // Revenue from invoices
+        this.salesInvoicesRepository
+          .createQueryBuilder('invoice')
+          .select([
+            'SUM(COALESCE(invoice.base_amount, invoice.amount)) AS revenue',
+            'SUM(invoice.vat_amount) AS vat',
+          ])
+          .where('invoice.organization_id = :organizationId', {
+            organizationId,
+          })
+          .andWhere('invoice.is_deleted = false')
+          .andWhere('invoice.invoice_date >= :startDate', { startDate })
+          .andWhere('invoice.invoice_date <= :endDate', { endDate })
+          .getRawOne(),
+        // Credit notes (matching P&L logic)
+        this.creditNotesRepository
+          .createQueryBuilder('creditNote')
+          .leftJoin('creditNote.applications', 'cna')
+          .select([
+            'SUM(COALESCE(creditNote.base_amount, creditNote.amount)) AS amount',
+            'SUM(creditNote.vat_amount) AS vat',
+          ])
+          .where('creditNote.organization_id = :organizationId', {
+            organizationId,
+          })
+          .andWhere('creditNote.credit_note_date >= :startDate', { startDate })
+          .andWhere('creditNote.credit_note_date <= :endDate', { endDate })
+          .andWhere(
+            '(creditNote.status IN (:...statuses) OR creditNote.id IN (SELECT DISTINCT cna.credit_note_id FROM credit_note_applications cna WHERE cna.organization_id = :organizationId) OR (creditNote.status = :draftStatus AND creditNote.invoice_id IS NOT NULL))',
+            {
+              statuses: [CreditNoteStatus.ISSUED, CreditNoteStatus.APPLIED],
+              draftStatus: CreditNoteStatus.DRAFT,
+            },
+          )
+          .getRawOne(),
+        // Customer debit notes (matching P&L logic - increases revenue)
+        this.debitNotesRepository
+          .createQueryBuilder('debitNote')
+          .select([
+            'SUM(COALESCE(debitNote.base_amount, debitNote.amount)) AS amount',
+            'SUM(debitNote.vat_amount) AS vat',
+          ])
+          .where('debitNote.organization_id = :organizationId', {
+            organizationId,
+          })
+          .andWhere('debitNote.debit_note_date >= :startDate', { startDate })
+          .andWhere('debitNote.debit_note_date <= :endDate', { endDate })
+          .andWhere('debitNote.status IN (:...statuses)', {
+            statuses: [DebitNoteStatus.ISSUED, DebitNoteStatus.APPLIED],
+          })
+          .andWhere('debitNote.invoice_id IS NOT NULL') // Only customer debit notes
+          .getRawOne(),
+      ]).then(([invoiceResult, creditNoteResult, debitNoteResult]) => {
+        return {
+          revenue: invoiceResult?.revenue || 0,
+          vat: invoiceResult?.vat || 0,
+          creditNoteApplied: creditNoteResult?.amount || 0,
+          creditNoteVat: creditNoteResult?.vat || 0,
+          debitNoteAmount: debitNoteResult?.amount || 0,
+          debitNoteVat: debitNoteResult?.vat || 0,
+        };
+      });
+
+      // Batch 2: Expense queries (2 queries in parallel)
+      const expenseResult = await Promise.all([
+        this.expensesRepository
+          .createQueryBuilder('expense')
+          .select([
+            'SUM(COALESCE(expense.base_amount, expense.amount)) AS total',
+            'SUM(expense.vat_amount) AS vat',
+          ])
+          .where('expense.organization_id = :organizationId', {
+            organizationId,
+          })
+          .andWhere('expense.is_deleted = false')
+          .andWhere('expense.expense_date >= :startDate', { startDate })
+          .andWhere('expense.expense_date <= :endDate', { endDate })
+          .andWhere("(expense.type IS NULL OR expense.type != 'credit')")
+          .getRawOne(),
+        // Supplier debit notes (reduce expenses, matching P&L)
+        this.debitNotesRepository
+          .createQueryBuilder('debitNote')
+          .select([
+            'SUM(COALESCE(debitNote.base_amount, debitNote.amount)) AS amount',
+            'SUM(debitNote.vat_amount) AS vat',
+          ])
+          .where('debitNote.organization_id = :organizationId', {
+            organizationId,
+          })
+          .andWhere('debitNote.debit_note_date >= :startDate', { startDate })
+          .andWhere('debitNote.debit_note_date <= :endDate', { endDate })
+          .andWhere('debitNote.expense_id IS NOT NULL') // Only supplier debit notes
+          .andWhere(
+            '(debitNote.status IN (:...statuses) OR debitNote.id IN (' +
+              this.debitNoteExpenseApplicationsRepository
+                .createQueryBuilder('dnea')
+                .select('DISTINCT dnea.debit_note_id')
+                .where('dnea.organization_id = :organizationId', {
+                  organizationId,
+                })
+                .getQuery() +
+              ') OR (debitNote.status = :draftStatus AND debitNote.expense_id IS NOT NULL))',
+            {
               statuses: [DebitNoteStatus.ISSUED, DebitNoteStatus.APPLIED],
-            })
-            .andWhere('debitNote.invoice_id IS NOT NULL') // Only customer debit notes
-            .getRawOne(),
-        ]).then(([invoiceResult, creditNoteResult, debitNoteResult]) => {
-          return {
-            revenue: invoiceResult?.revenue || 0,
-            vat: invoiceResult?.vat || 0,
-            creditNoteApplied: creditNoteResult?.amount || 0,
-            creditNoteVat: creditNoteResult?.vat || 0,
-            debitNoteAmount: debitNoteResult?.amount || 0,
-            debitNoteVat: debitNoteResult?.vat || 0,
-          };
-        }),
+              draftStatus: DebitNoteStatus.DRAFT,
+            },
+          )
+          .getRawOne(),
+      ]).then(([expenseResult, supplierDebitNoteResult]) => {
+        const supplierDebitNoteAmount = Number(
+          supplierDebitNoteResult?.amount || 0,
+        );
+        const supplierDebitNoteVat = Number(supplierDebitNoteResult?.vat || 0);
+        return {
+          total: Number(expenseResult?.total || 0) - supplierDebitNoteAmount,
+          vat: Number(expenseResult?.vat || 0) - supplierDebitNoteVat,
+          supplierDebitNoteVat: supplierDebitNoteVat, // Keep for Input VAT calculation
+        };
+      });
 
-            // Expenses (matching P&L: includes supplier debit notes reduction)
-            Promise.all([
-              this.expensesRepository
-                .createQueryBuilder('expense')
-                .select([
-                  'SUM(COALESCE(expense.base_amount, expense.amount)) AS total',
-                  'SUM(expense.vat_amount) AS vat',
-                ])
-                .where('expense.organization_id = :organizationId', {
-                  organizationId,
-                })
-                .andWhere('expense.is_deleted = false')
-                .andWhere('expense.expense_date >= :startDate', { startDate })
-                .andWhere('expense.expense_date <= :endDate', { endDate })
-                .andWhere("(expense.type IS NULL OR expense.type != 'credit')")
-                .getRawOne(),
-              // Supplier debit notes (reduce expenses, matching P&L)
-              this.debitNotesRepository
-                .createQueryBuilder('debitNote')
-                .select([
-                  'SUM(COALESCE(debitNote.base_amount, debitNote.amount)) AS amount',
-                  'SUM(debitNote.vat_amount) AS vat',
-                ])
-                .where('debitNote.organization_id = :organizationId', {
-                  organizationId,
-                })
-                .andWhere('debitNote.debit_note_date >= :startDate', { startDate })
-                .andWhere('debitNote.debit_note_date <= :endDate', { endDate })
-                .andWhere('debitNote.expense_id IS NOT NULL') // Only supplier debit notes
-                .andWhere(
-                  '(debitNote.status IN (:...statuses) OR debitNote.id IN (' +
-                    this.debitNoteExpenseApplicationsRepository
-                      .createQueryBuilder('dnea')
-                      .select('DISTINCT dnea.debit_note_id')
-                      .where('dnea.organization_id = :organizationId', {
-                        organizationId,
-                      })
-                      .getQuery() +
-                    ') OR (debitNote.status = :draftStatus AND debitNote.expense_id IS NOT NULL))',
-                  {
-                    statuses: [DebitNoteStatus.ISSUED, DebitNoteStatus.APPLIED],
-                    draftStatus: DebitNoteStatus.DRAFT,
-                  },
-                )
-                .getRawOne(),
-            ]).then(([expenseResult, supplierDebitNoteResult]) => {
-              const supplierDebitNoteAmount = Number(supplierDebitNoteResult?.amount || 0);
-              const supplierDebitNoteVat = Number(supplierDebitNoteResult?.vat || 0);
-              return {
-                total: Number(expenseResult?.total || 0) - supplierDebitNoteAmount,
-                vat: Number(expenseResult?.vat || 0) - supplierDebitNoteVat,
-                supplierDebitNoteVat: supplierDebitNoteVat, // Keep for Input VAT calculation
-              };
-            }),
+      // Batch 3: Journal entry revenue (1 query)
+      const journalRevenueResult = await this.journalEntriesRepository
+        .createQueryBuilder('entry')
+        .leftJoin('entry.organization', 'org')
+        .select([
+          "SUM(CASE WHEN entry.credit_account = 'sales_revenue' THEN entry.amount ELSE 0 END) AS revenueCredit",
+          "SUM(CASE WHEN entry.debit_account = 'sales_revenue' THEN entry.amount ELSE 0 END) AS revenueDebit",
+          "SUM(CASE WHEN entry.credit_account = 'sales_revenue' THEN COALESCE(entry.vat_amount, 0) ELSE 0 END) AS revenueVatCredit",
+          "SUM(CASE WHEN entry.debit_account = 'sales_revenue' THEN COALESCE(entry.vat_amount, 0) ELSE 0 END) AS revenueVatDebit",
+        ])
+        .where('entry.organization_id = :organizationId', { organizationId })
+        .andWhere('entry.is_deleted = false')
+        .andWhere('entry.entry_date >= :startDate', { startDate })
+        .andWhere('entry.entry_date <= :endDate', { endDate })
+        .getRawOne();
 
-        // Journal entry revenue (custom ledger accounts with Revenue category)
+      // Batch 4: Journal entry expenses (2 queries in parallel)
+      const journalExpenseResult = await Promise.all([
         this.journalEntriesRepository
           .createQueryBuilder('entry')
-          .leftJoin('entry.organization', 'org')
           .select([
-            "SUM(CASE WHEN entry.credit_account = 'sales_revenue' THEN entry.amount ELSE 0 END) AS revenueCredit",
-            "SUM(CASE WHEN entry.debit_account = 'sales_revenue' THEN entry.amount ELSE 0 END) AS revenueDebit",
-            "SUM(CASE WHEN entry.credit_account = 'sales_revenue' THEN COALESCE(entry.vat_amount, 0) ELSE 0 END) AS revenueVatCredit",
-            "SUM(CASE WHEN entry.debit_account = 'sales_revenue' THEN COALESCE(entry.vat_amount, 0) ELSE 0 END) AS revenueVatDebit",
+            "SUM(CASE WHEN entry.debit_account = 'general_expense' THEN entry.amount ELSE 0 END) AS expenseDebit",
+            "SUM(CASE WHEN entry.credit_account = 'general_expense' THEN entry.amount ELSE 0 END) AS expenseCredit",
+            "SUM(CASE WHEN entry.debit_account = 'general_expense' THEN COALESCE(entry.vat_amount, 0) ELSE 0 END) AS expenseVatDebit",
+            "SUM(CASE WHEN entry.credit_account = 'general_expense' THEN COALESCE(entry.vat_amount, 0) ELSE 0 END) AS expenseVatCredit",
+            // Input VAT from all journal entries where debit is expense/asset (matching TB logic)
+            "SUM(CASE WHEN entry.debit_account NOT IN ('sales_revenue', 'accounts_receivable', 'cash', 'bank', 'accounts_payable', 'vat_payable', 'vat_receivable') AND entry.vat_amount > 0 THEN COALESCE(entry.vat_amount, 0) ELSE 0 END) AS journalInputVat",
           ])
           .where('entry.organization_id = :organizationId', { organizationId })
           .andWhere('entry.is_deleted = false')
           .andWhere('entry.entry_date >= :startDate', { startDate })
           .andWhere('entry.entry_date <= :endDate', { endDate })
           .getRawOne(),
+        // Custom ledger journal entries (matching P&L logic)
+        this.journalEntriesRepository
+          .createQueryBuilder('entry')
+          .select([
+            'entry.debit_account AS debitAccount',
+            'entry.credit_account AS creditAccount',
+            'SUM(entry.amount) AS amount',
+            'SUM(COALESCE(entry.vat_amount, 0)) AS vat',
+          ])
+          .where('entry.organization_id = :organizationId', { organizationId })
+          .andWhere('entry.is_deleted = false')
+          .andWhere('entry.entry_date >= :startDate', { startDate })
+          .andWhere('entry.entry_date <= :endDate', { endDate })
+          .andWhere(
+            "(entry.debit_account LIKE 'ledger:%' OR entry.credit_account LIKE 'ledger:%')",
+          )
+          .groupBy('entry.debit_account')
+          .addGroupBy('entry.credit_account')
+          .getRawMany(),
+      ]).then(([generalExpenseResult, customLedgerRows]) => {
+        return {
+          expenseDebit:
+            generalExpenseResult?.expensedebit ||
+            generalExpenseResult?.expenseDebit ||
+            0,
+          expenseCredit:
+            generalExpenseResult?.expensecredit ||
+            generalExpenseResult?.expenseCredit ||
+            0,
+          expenseVatDebit:
+            generalExpenseResult?.expensevatdebit ||
+            generalExpenseResult?.expenseVatDebit ||
+            0,
+          expenseVatCredit:
+            generalExpenseResult?.expensevatcredit ||
+            generalExpenseResult?.expenseVatCredit ||
+            0,
+          journalInputVat:
+            generalExpenseResult?.journalinputvat ||
+            generalExpenseResult?.journalInputVat ||
+            0,
+          customLedgerRows: customLedgerRows || [],
+        };
+      });
 
-        // Journal entry expenses (custom ledger accounts with Expense category)
-        // Also get VAT from all journal entries where debit is expense/asset (Input VAT)
-        // Match P&L logic: include custom ledger accounts categorized as expenses
-        Promise.all([
-          this.journalEntriesRepository
-            .createQueryBuilder('entry')
-            .select([
-              "SUM(CASE WHEN entry.debit_account = 'general_expense' THEN entry.amount ELSE 0 END) AS expenseDebit",
-              "SUM(CASE WHEN entry.credit_account = 'general_expense' THEN entry.amount ELSE 0 END) AS expenseCredit",
-              "SUM(CASE WHEN entry.debit_account = 'general_expense' THEN COALESCE(entry.vat_amount, 0) ELSE 0 END) AS expenseVatDebit",
-              "SUM(CASE WHEN entry.credit_account = 'general_expense' THEN COALESCE(entry.vat_amount, 0) ELSE 0 END) AS expenseVatCredit",
-              // Input VAT from all journal entries where debit is expense/asset (matching TB logic)
-              "SUM(CASE WHEN entry.debit_account NOT IN ('sales_revenue', 'accounts_receivable', 'cash', 'bank', 'accounts_payable', 'vat_payable', 'vat_receivable') AND entry.vat_amount > 0 THEN COALESCE(entry.vat_amount, 0) ELSE 0 END) AS journalInputVat",
-            ])
-            .where('entry.organization_id = :organizationId', { organizationId })
-            .andWhere('entry.is_deleted = false')
-            .andWhere('entry.entry_date >= :startDate', { startDate })
-            .andWhere('entry.entry_date <= :endDate', { endDate })
-            .getRawOne(),
-          // Custom ledger journal entries (matching P&L logic)
-          this.journalEntriesRepository
-            .createQueryBuilder('entry')
-            .select([
-              'entry.debit_account AS debitAccount',
-              'entry.credit_account AS creditAccount',
-              'SUM(entry.amount) AS amount',
-              'SUM(COALESCE(entry.vat_amount, 0)) AS vat',
-            ])
-            .where('entry.organization_id = :organizationId', { organizationId })
-            .andWhere('entry.is_deleted = false')
-            .andWhere('entry.entry_date >= :startDate', { startDate })
-            .andWhere('entry.entry_date <= :endDate', { endDate })
-            .andWhere(
-              "(entry.debit_account LIKE 'ledger:%' OR entry.credit_account LIKE 'ledger:%')",
-            )
-            .groupBy('entry.debit_account')
-            .addGroupBy('entry.credit_account')
-            .getRawMany(),
-        ]).then(([generalExpenseResult, customLedgerRows]) => {
-          return {
-            expenseDebit: generalExpenseResult?.expensedebit || generalExpenseResult?.expenseDebit || 0,
-            expenseCredit: generalExpenseResult?.expensecredit || generalExpenseResult?.expenseCredit || 0,
-            expenseVatDebit: generalExpenseResult?.expensevatdebit || generalExpenseResult?.expenseVatDebit || 0,
-            expenseVatCredit: generalExpenseResult?.expensevatcredit || generalExpenseResult?.expenseVatCredit || 0,
-            journalInputVat: generalExpenseResult?.journalinputvat || generalExpenseResult?.journalInputVat || 0,
-            customLedgerRows: customLedgerRows || [],
-          };
-        }),
-
-        // Payables summary - includes accruals + journal entries (matching TB calculation exactly)
-        Promise.all([
-          // Accruals calculation matching TB (includes debit notes exclusion, using same logic as TB)
-          this.accrualsRepository
-            .createQueryBuilder('accrual')
-            .leftJoin('accrual.expense', 'expense')
-            .select([
-              `COUNT(DISTINCT accrual.id) FILTER (WHERE accrual.status = :status) AS pending_items`,
-              `COUNT(DISTINCT accrual.id) FILTER (WHERE accrual.status = :settledStatus) AS paid_items`,
-              `SUM(GREATEST(0, 
+      // Batch 5: Payables summary (2 queries in parallel)
+      const payablesSummary = await Promise.all([
+        // Accruals calculation matching TB (includes debit notes exclusion, using same logic as TB)
+        this.accrualsRepository
+          .createQueryBuilder('accrual')
+          .leftJoin('accrual.expense', 'expense')
+          .select([
+            `COUNT(DISTINCT accrual.id) FILTER (WHERE accrual.status = :status) AS pending_items`,
+            `COUNT(DISTINCT accrual.id) FILTER (WHERE accrual.status = :settledStatus) AS paid_items`,
+            `SUM(GREATEST(0, 
                 COALESCE(expense.total_amount, 0) - 
                 COALESCE((
                   SELECT SUM(ep.amount) 
@@ -577,56 +588,64 @@ export class ReportsService {
                   )
                 ), 0)
               )) AS total_amount`,
-            ])
-            .where('accrual.organization_id = :organizationId', { organizationId })
-            .andWhere('accrual.is_deleted = false')
-            .andWhere('expense.is_deleted = false')
-            .andWhere('expense.expense_date <= :endDate', { endDate })
-            .setParameter('status', AccrualStatus.PENDING_SETTLEMENT)
-            .setParameter('settledStatus', AccrualStatus.SETTLED)
-            .setParameter('debitNoteStatuses', [DebitNoteStatus.ISSUED, DebitNoteStatus.APPLIED])
-            .setParameter('draftStatus', DebitNoteStatus.DRAFT)
-            .getRawOne()
-            .then((row) => {
-              return {
-                totalAmount: Number(row?.total_amount || 0),
-                pendingItems: Number(row?.pending_items || 0),
-                paidItems: Number(row?.paid_items || 0),
-              };
-            }),
-          // Journal entries with Accounts Payable (VAT-inclusive, matching TB closing balance)
-          this.journalEntriesRepository
-            .createQueryBuilder('entry')
-            .select([
-              "SUM(CASE WHEN entry.credit_account = 'accounts_payable' THEN (entry.amount + COALESCE(entry.vat_amount, 0)) ELSE 0 END) AS credit",
-              "SUM(CASE WHEN entry.debit_account = 'accounts_payable' THEN (entry.amount + COALESCE(entry.vat_amount, 0)) ELSE 0 END) AS debit",
-            ])
-            .where('entry.organization_id = :organizationId', { organizationId })
-            .andWhere('entry.is_deleted = false')
-            .andWhere('entry.entry_date <= :endDate', { endDate })
-            .getRawOne()
-            .then((row) => {
-              const journalApCredit = Number(row?.credit || 0);
-              const journalApDebit = Number(row?.debit || 0);
-              return {
-                journalApAmount: journalApCredit - journalApDebit,
-              };
-            }),
-        ]).then(([accrualsResult, journalApResult]) => {
-          return {
-            totalAmount: Number((accrualsResult.totalAmount + journalApResult.journalApAmount).toFixed(2)),
-            pendingItems: accrualsResult.pendingItems,
-            paidItems: accrualsResult.paidItems,
-          };
-        }),
+          ])
+          .where('accrual.organization_id = :organizationId', {
+            organizationId,
+          })
+          .andWhere('accrual.is_deleted = false')
+          .andWhere('expense.is_deleted = false')
+          .andWhere('expense.expense_date <= :endDate', { endDate })
+          .setParameter('status', AccrualStatus.PENDING_SETTLEMENT)
+          .setParameter('settledStatus', AccrualStatus.SETTLED)
+          .setParameter('debitNoteStatuses', [
+            DebitNoteStatus.ISSUED,
+            DebitNoteStatus.APPLIED,
+          ])
+          .setParameter('draftStatus', DebitNoteStatus.DRAFT)
+          .getRawOne()
+          .then((row) => {
+            return {
+              totalAmount: Number(row?.total_amount || 0),
+              pendingItems: Number(row?.pending_items || 0),
+              paidItems: Number(row?.paid_items || 0),
+            };
+          }),
+        // Journal entries with Accounts Payable (VAT-inclusive, matching TB closing balance)
+        this.journalEntriesRepository
+          .createQueryBuilder('entry')
+          .select([
+            "SUM(CASE WHEN entry.credit_account = 'accounts_payable' THEN (entry.amount + COALESCE(entry.vat_amount, 0)) ELSE 0 END) AS credit",
+            "SUM(CASE WHEN entry.debit_account = 'accounts_payable' THEN (entry.amount + COALESCE(entry.vat_amount, 0)) ELSE 0 END) AS debit",
+          ])
+          .where('entry.organization_id = :organizationId', { organizationId })
+          .andWhere('entry.is_deleted = false')
+          .andWhere('entry.entry_date <= :endDate', { endDate })
+          .getRawOne()
+          .then((row) => {
+            const journalApCredit = Number(row?.credit || 0);
+            const journalApDebit = Number(row?.debit || 0);
+            return {
+              journalApAmount: journalApCredit - journalApDebit,
+            };
+          }),
+      ]).then(([accrualsResult, journalApResult]) => {
+        return {
+          totalAmount: Number(
+            (
+              accrualsResult.totalAmount + journalApResult.journalApAmount
+            ).toFixed(2),
+          ),
+          pendingItems: accrualsResult.pendingItems,
+          paidItems: accrualsResult.paidItems,
+        };
+      });
 
-        // Receivables summary - match Trial Balance calculation exactly
-        // Uses payment_status filter and includes customer debit notes
-        Promise.all([
-          this.salesInvoicesRepository
-            .createQueryBuilder('invoice')
-            .select([
-              `SUM(GREATEST(0, COALESCE(invoice.total_amount, 0) - COALESCE(invoice.paid_amount, 0) - COALESCE((
+      // Batch 6: Receivables summary (2 queries in parallel)
+      const receivablesSummary = await Promise.all([
+        this.salesInvoicesRepository
+          .createQueryBuilder('invoice')
+          .select([
+            `SUM(GREATEST(0, COALESCE(invoice.total_amount, 0) - COALESCE(invoice.paid_amount, 0) - COALESCE((
                 SELECT SUM(cna."appliedAmount") 
                 FROM credit_note_applications cna
                 INNER JOIN credit_notes cn ON cna.credit_note_id = cn.id
@@ -646,68 +665,68 @@ export class ReportsService {
                 AND cn.organization_id = invoice.organization_id
                 AND cn.status IN ('${CreditNoteStatus.DRAFT}', '${CreditNoteStatus.ISSUED}', '${CreditNoteStatus.APPLIED}')
               ), 0))) AS total_outstanding`,
-              `COUNT(DISTINCT invoice.id) FILTER (WHERE COALESCE(invoice.paid_amount, 0) = 0) AS unpaid_invoices`,
-              `COUNT(DISTINCT invoice.id) FILTER (WHERE COALESCE(invoice.paid_amount, 0) > 0 AND COALESCE(invoice.paid_amount, 0) < invoice.total_amount) AS partial_invoices`,
-              `COUNT(DISTINCT invoice.id) FILTER (WHERE invoice.due_date < CURRENT_DATE AND COALESCE(invoice.paid_amount, 0) < invoice.total_amount) AS overdue_invoices`,
-            ])
-            .where('invoice.organization_id = :organizationId', { organizationId })
-            .andWhere('invoice.is_deleted = false')
-            .andWhere('invoice.invoice_date <= :endDate', { endDate })
-            .andWhere('invoice.payment_status IN (:...statuses)', {
-              statuses: [PaymentStatus.UNPAID, PaymentStatus.PARTIAL],
-            })
-            .setParameter('draftStatus', CreditNoteStatus.DRAFT)
-            .getRawOne()
-            .then((row) => {
-              return {
-                invoiceOutstanding: Number(row?.total_outstanding || 0),
-                unpaidInvoices: Number(row?.unpaid_invoices || 0),
-                partialInvoices: Number(row?.partial_invoices || 0),
-                overdueInvoices: Number(row?.overdue_invoices || 0),
-              };
-            }),
-          // Customer debit notes (matching TB logic)
-          this.debitNotesRepository
-            .createQueryBuilder('debitNote')
-            .select(['SUM(COALESCE(debitNote.total_amount, 0)) AS debit'])
-            .where('debitNote.organization_id = :organizationId', { organizationId })
-            .andWhere('debitNote.is_deleted = false')
-            .andWhere('debitNote.debit_note_date <= :endDate', { endDate })
-            .andWhere('debitNote.invoice_id IS NOT NULL') // Only customer debit notes
-            .andWhere('debitNote.status IN (:...statuses)', {
-              statuses: [DebitNoteStatus.ISSUED, DebitNoteStatus.APPLIED],
-            })
-            .getRawOne()
-            .then((row) => {
-              return {
-                debitNotesAmount: Number(row?.debit || 0),
-              };
-            }),
-        ]).then(([invoiceResult, debitNoteResult]) => {
-          return {
-            totalOutstanding: Number((invoiceResult.invoiceOutstanding + debitNoteResult.debitNotesAmount).toFixed(2)),
-            unpaidInvoices: invoiceResult.unpaidInvoices,
-            partialInvoices: invoiceResult.partialInvoices,
-            overdueInvoices: invoiceResult.overdueInvoices,
-          };
-        }),
-      ]);
+            `COUNT(DISTINCT invoice.id) FILTER (WHERE COALESCE(invoice.paid_amount, 0) = 0) AS unpaid_invoices`,
+            `COUNT(DISTINCT invoice.id) FILTER (WHERE COALESCE(invoice.paid_amount, 0) > 0 AND COALESCE(invoice.paid_amount, 0) < invoice.total_amount) AS partial_invoices`,
+            `COUNT(DISTINCT invoice.id) FILTER (WHERE invoice.due_date < CURRENT_DATE AND COALESCE(invoice.paid_amount, 0) < invoice.total_amount) AS overdue_invoices`,
+          ])
+          .where('invoice.organization_id = :organizationId', {
+            organizationId,
+          })
+          .andWhere('invoice.is_deleted = false')
+          .andWhere('invoice.invoice_date <= :endDate', { endDate })
+          .andWhere('invoice.payment_status IN (:...statuses)', {
+            statuses: [PaymentStatus.UNPAID, PaymentStatus.PARTIAL],
+          })
+          .setParameter('draftStatus', CreditNoteStatus.DRAFT)
+          .getRawOne()
+          .then((row) => {
+            return {
+              invoiceOutstanding: Number(row?.total_outstanding || 0),
+              unpaidInvoices: Number(row?.unpaid_invoices || 0),
+              partialInvoices: Number(row?.partial_invoices || 0),
+              overdueInvoices: Number(row?.overdue_invoices || 0),
+            };
+          }),
+        // Customer debit notes (matching TB logic)
+        this.debitNotesRepository
+          .createQueryBuilder('debitNote')
+          .select(['SUM(COALESCE(debitNote.total_amount, 0)) AS debit'])
+          .where('debitNote.organization_id = :organizationId', {
+            organizationId,
+          })
+          .andWhere('debitNote.is_deleted = false')
+          .andWhere('debitNote.debit_note_date <= :endDate', { endDate })
+          .andWhere('debitNote.invoice_id IS NOT NULL') // Only customer debit notes
+          .andWhere('debitNote.status IN (:...statuses)', {
+            statuses: [DebitNoteStatus.ISSUED, DebitNoteStatus.APPLIED],
+          })
+          .getRawOne()
+          .then((row) => {
+            return {
+              debitNotesAmount: Number(row?.debit || 0),
+            };
+          }),
+      ]).then(([invoiceResult, debitNoteResult]) => {
+        return {
+          totalOutstanding: Number(
+            (
+              invoiceResult.invoiceOutstanding +
+              debitNoteResult.debitNotesAmount
+            ).toFixed(2),
+          ),
+          unpaidInvoices: invoiceResult.unpaidInvoices,
+          partialInvoices: invoiceResult.partialInvoices,
+          overdueInvoices: invoiceResult.overdueInvoices,
+        };
+      });
 
       // Calculate revenue (matching P&L logic: invoices - credit notes + customer debit notes + journal revenue)
       const revenueAmount = Number(revenueResult?.revenue || 0);
       const revenueVat = Number(revenueResult?.vat || 0);
-      const creditNotesAmount = Number(
-        revenueResult?.creditNoteApplied || 0,
-      );
-      const creditNotesVat = Number(
-        revenueResult?.creditNoteVat || 0,
-      );
-      const debitNotesAmount = Number(
-        revenueResult?.debitNoteAmount || 0,
-      );
-      const debitNotesVat = Number(
-        revenueResult?.debitNoteVat || 0,
-      );
+      const creditNotesAmount = Number(revenueResult?.creditNoteApplied || 0);
+      const creditNotesVat = Number(revenueResult?.creditNoteVat || 0);
+      const debitNotesAmount = Number(revenueResult?.debitNoteAmount || 0);
+      const debitNotesVat = Number(revenueResult?.debitNoteVat || 0);
 
       // Add journal entry revenue
       const journalRevenue =
@@ -734,7 +753,8 @@ export class ReportsService {
         );
 
       // Process custom ledger journal entries for revenue (matching P&L logic)
-      const customLedgerRows: any[] = (journalExpenseResult?.customLedgerRows || []) as any[];
+      const customLedgerRows: any[] = (journalExpenseResult?.customLedgerRows ||
+        []) as any[];
       let customRevenue = 0;
       let customRevenueVat = 0;
       if (Array.isArray(customLedgerRows) && customLedgerRows.length > 0) {
@@ -789,7 +809,7 @@ export class ReportsService {
       // Note: journalRevenueVat and customRevenueVat are already included in revenueVat from invoices
       // Only customer debit note VAT needs to be added separately
       const outputVatGross = revenueVat + debitNotesVat;
-      
+
       // Calculate Output VAT net (after credit note reduction) for net calculation
       const outputVat = outputVatGross - creditNotesVat;
 
@@ -801,7 +821,9 @@ export class ReportsService {
 
       // Add Input VAT from all journal entries (not just general_expense)
       // This matches TB logic where VAT from expense/asset journal entries goes to VAT Receivable
-      const journalInputVat = Number(journalExpenseResult?.journalInputVat || 0);
+      const journalInputVat = Number(
+        journalExpenseResult?.journalInputVat || 0,
+      );
 
       // Process custom ledger journal entries for expenses (matching TB logic)
       // TB shows custom ledger accounts separately, so we need to include them in expenses
@@ -817,10 +839,11 @@ export class ReportsService {
           const creditId = this.parseLedgerAccountId(creditAccount);
           if (creditId) expenseCustomLedgerIds.push(creditId);
         });
-        const expenseCustomLedgerAccountsById = await this.loadLedgerAccountsByIds(
-          organizationId,
-          expenseCustomLedgerIds,
-        );
+        const expenseCustomLedgerAccountsById =
+          await this.loadLedgerAccountsByIds(
+            organizationId,
+            expenseCustomLedgerIds,
+          );
         customLedgerRows.forEach((row: any) => {
           const amount = Number(row.amount || 0);
           const vat = Number(row.vat || 0);
@@ -848,7 +871,7 @@ export class ReportsService {
       // Total expenses = expense categories (already net of supplier debit notes) + custom ledger expenses
       // Note: Do NOT add journalExpense (general_expense) as TB doesn't have this account
       const totalExpenses = expenseTotal + customExpenses;
-      
+
       // Input VAT (matching TB period NET debit, after supplier debit note reduction)
       // TB shows Input VAT period debit = expense VAT + journal entry VAT = 1,275
       // TB shows Input VAT period credit = supplier debit note VAT = 50
@@ -860,114 +883,146 @@ export class ReportsService {
       // Calculate net profit
       const netProfit = netRevenue - totalExpenses;
 
-      // Calculate Cash Balance (matching TB logic)
-      const [
-        openingExpensePaymentsRow,
-        openingInvoicePaymentsRow,
-        periodExpensePaymentsRow,
-        periodInvoicePaymentsRow,
-        openingCashJournalEntriesRow,
-        periodCashJournalEntriesRow,
-        openingBankJournalEntriesRow,
-        periodBankJournalEntriesRow,
-      ] = await Promise.all([
-        // Opening cash payments
-        this.expensePaymentsRepository
-          .createQueryBuilder('payment')
-          .select([
-            `SUM(CASE WHEN payment.payment_method = '${PaymentMethod.CASH}' THEN COALESCE(payment.amount, 0) ELSE 0 END) AS cashPayments`,
-            `SUM(CASE WHEN payment.payment_method = '${PaymentMethod.BANK_TRANSFER}' THEN COALESCE(payment.amount, 0) ELSE 0 END) AS bankPayments`,
-          ])
-          .where('payment.organization_id = :organizationId', { organizationId })
-          .andWhere('payment.is_deleted = false')
-          .andWhere('payment.payment_date < :startDate', { startDate })
-          .getRawOne(),
-        // Opening cash receipts
-        this.invoicePaymentsRepository
-          .createQueryBuilder('payment')
-          .select([
-            "SUM(CASE WHEN payment.payment_method = 'cash' THEN COALESCE(payment.amount, 0) ELSE 0 END) AS cashReceipts",
-            "SUM(CASE WHEN payment.payment_method = 'bank_transfer' THEN COALESCE(payment.amount, 0) ELSE 0 END) AS bankReceipts",
-          ])
-          .where('payment.organization_id = :organizationId', { organizationId })
-          .andWhere('payment.is_deleted = false')
-          .andWhere('payment.payment_date < :startDate', { startDate })
-          .getRawOne(),
-        // Period cash payments
-        this.expensePaymentsRepository
-          .createQueryBuilder('payment')
-          .select([
-            `SUM(CASE WHEN payment.payment_method = '${PaymentMethod.CASH}' THEN COALESCE(payment.amount, 0) ELSE 0 END) AS cashPayments`,
-            `SUM(CASE WHEN payment.payment_method = '${PaymentMethod.BANK_TRANSFER}' THEN COALESCE(payment.amount, 0) ELSE 0 END) AS bankPayments`,
-          ])
-          .where('payment.organization_id = :organizationId', { organizationId })
-          .andWhere('payment.is_deleted = false')
-          .andWhere('payment.payment_date >= :startDate', { startDate })
-          .andWhere('payment.payment_date <= :endDate', { endDate })
-          .getRawOne(),
-        // Period cash receipts
-        this.invoicePaymentsRepository
-          .createQueryBuilder('payment')
-          .select([
-            "SUM(CASE WHEN payment.payment_method = 'cash' THEN COALESCE(payment.amount, 0) ELSE 0 END) AS cashReceipts",
-            "SUM(CASE WHEN payment.payment_method = 'bank_transfer' THEN COALESCE(payment.amount, 0) ELSE 0 END) AS bankReceipts",
-          ])
-          .where('payment.organization_id = :organizationId', { organizationId })
-          .andWhere('payment.is_deleted = false')
-          .andWhere('payment.payment_date >= :startDate', { startDate })
-          .andWhere('payment.payment_date <= :endDate', { endDate })
-          .getRawOne(),
-        // Opening cash journal entries
-        this.journalEntriesRepository
-          .createQueryBuilder('entry')
-          .select([
-            "SUM(CASE WHEN entry.debit_account = 'cash' THEN entry.amount ELSE 0 END) AS received",
-            "SUM(CASE WHEN entry.credit_account = 'cash' THEN entry.amount ELSE 0 END) AS paid",
-          ])
-          .where('entry.organization_id = :organizationId', { organizationId })
-          .andWhere('entry.is_deleted = false')
-          .andWhere('entry.entry_date < :startDate', { startDate })
-          .andWhere("(entry.debit_account = 'cash' OR entry.credit_account = 'cash')")
-          .getRawOne(),
-        // Period cash journal entries
-        this.journalEntriesRepository
-          .createQueryBuilder('entry')
-          .select([
-            "SUM(CASE WHEN entry.debit_account = 'cash' THEN entry.amount ELSE 0 END) AS received",
-            "SUM(CASE WHEN entry.credit_account = 'cash' THEN entry.amount ELSE 0 END) AS paid",
-          ])
-          .where('entry.organization_id = :organizationId', { organizationId })
-          .andWhere('entry.is_deleted = false')
-          .andWhere('entry.entry_date >= :startDate', { startDate })
-          .andWhere('entry.entry_date <= :endDate', { endDate })
-          .andWhere("(entry.debit_account = 'cash' OR entry.credit_account = 'cash')")
-          .getRawOne(),
-        // Opening bank journal entries
-        this.journalEntriesRepository
-          .createQueryBuilder('entry')
-          .select([
-            "SUM(CASE WHEN entry.debit_account = 'bank' THEN entry.amount ELSE 0 END) AS received",
-            "SUM(CASE WHEN entry.credit_account = 'bank' THEN entry.amount ELSE 0 END) AS paid",
-          ])
-          .where('entry.organization_id = :organizationId', { organizationId })
-          .andWhere('entry.is_deleted = false')
-          .andWhere('entry.entry_date < :startDate', { startDate })
-          .andWhere("(entry.debit_account = 'bank' OR entry.credit_account = 'bank')")
-          .getRawOne(),
-        // Period bank journal entries
-        this.journalEntriesRepository
-          .createQueryBuilder('entry')
-          .select([
-            "SUM(CASE WHEN entry.debit_account = 'bank' THEN entry.amount ELSE 0 END) AS received",
-            "SUM(CASE WHEN entry.credit_account = 'bank' THEN entry.amount ELSE 0 END) AS paid",
-          ])
-          .where('entry.organization_id = :organizationId', { organizationId })
-          .andWhere('entry.is_deleted = false')
-          .andWhere('entry.entry_date >= :startDate', { startDate })
-          .andWhere('entry.entry_date <= :endDate', { endDate })
-          .andWhere("(entry.debit_account = 'bank' OR entry.credit_account = 'bank')")
-          .getRawOne(),
-      ]);
+      // Batch 7: Cash/Bank balance queries - split into smaller batches
+      // Batch 7a: Opening payments (2 queries)
+      const [openingExpensePaymentsRow, openingInvoicePaymentsRow] =
+        await Promise.all([
+          // Opening cash payments
+          this.expensePaymentsRepository
+            .createQueryBuilder('payment')
+            .select([
+              `SUM(CASE WHEN payment.payment_method = '${PaymentMethod.CASH}' THEN COALESCE(payment.amount, 0) ELSE 0 END) AS cashPayments`,
+              `SUM(CASE WHEN payment.payment_method = '${PaymentMethod.BANK_TRANSFER}' THEN COALESCE(payment.amount, 0) ELSE 0 END) AS bankPayments`,
+            ])
+            .where('payment.organization_id = :organizationId', {
+              organizationId,
+            })
+            .andWhere('payment.is_deleted = false')
+            .andWhere('payment.payment_date < :startDate', { startDate })
+            .getRawOne(),
+          // Opening cash receipts
+          this.invoicePaymentsRepository
+            .createQueryBuilder('payment')
+            .select([
+              "SUM(CASE WHEN payment.payment_method = 'cash' THEN COALESCE(payment.amount, 0) ELSE 0 END) AS cashReceipts",
+              "SUM(CASE WHEN payment.payment_method = 'bank_transfer' THEN COALESCE(payment.amount, 0) ELSE 0 END) AS bankReceipts",
+            ])
+            .where('payment.organization_id = :organizationId', {
+              organizationId,
+            })
+            .andWhere('payment.is_deleted = false')
+            .andWhere('payment.payment_date < :startDate', { startDate })
+            .getRawOne(),
+        ]);
+
+      // Batch 7b: Period payments (2 queries)
+      const [periodExpensePaymentsRow, periodInvoicePaymentsRow] =
+        await Promise.all([
+          // Period cash payments
+          this.expensePaymentsRepository
+            .createQueryBuilder('payment')
+            .select([
+              `SUM(CASE WHEN payment.payment_method = '${PaymentMethod.CASH}' THEN COALESCE(payment.amount, 0) ELSE 0 END) AS cashPayments`,
+              `SUM(CASE WHEN payment.payment_method = '${PaymentMethod.BANK_TRANSFER}' THEN COALESCE(payment.amount, 0) ELSE 0 END) AS bankPayments`,
+            ])
+            .where('payment.organization_id = :organizationId', {
+              organizationId,
+            })
+            .andWhere('payment.is_deleted = false')
+            .andWhere('payment.payment_date >= :startDate', { startDate })
+            .andWhere('payment.payment_date <= :endDate', { endDate })
+            .getRawOne(),
+          // Period cash receipts
+          this.invoicePaymentsRepository
+            .createQueryBuilder('payment')
+            .select([
+              "SUM(CASE WHEN payment.payment_method = 'cash' THEN COALESCE(payment.amount, 0) ELSE 0 END) AS cashReceipts",
+              "SUM(CASE WHEN payment.payment_method = 'bank_transfer' THEN COALESCE(payment.amount, 0) ELSE 0 END) AS bankReceipts",
+            ])
+            .where('payment.organization_id = :organizationId', {
+              organizationId,
+            })
+            .andWhere('payment.is_deleted = false')
+            .andWhere('payment.payment_date >= :startDate', { startDate })
+            .andWhere('payment.payment_date <= :endDate', { endDate })
+            .getRawOne(),
+        ]);
+
+      // Batch 7c: Cash journal entries (2 queries)
+      const [openingCashJournalEntriesRow, periodCashJournalEntriesRow] =
+        await Promise.all([
+          // Opening cash journal entries
+          this.journalEntriesRepository
+            .createQueryBuilder('entry')
+            .select([
+              "SUM(CASE WHEN entry.debit_account = 'cash' THEN entry.amount ELSE 0 END) AS received",
+              "SUM(CASE WHEN entry.credit_account = 'cash' THEN entry.amount ELSE 0 END) AS paid",
+            ])
+            .where('entry.organization_id = :organizationId', {
+              organizationId,
+            })
+            .andWhere('entry.is_deleted = false')
+            .andWhere('entry.entry_date < :startDate', { startDate })
+            .andWhere(
+              "(entry.debit_account = 'cash' OR entry.credit_account = 'cash')",
+            )
+            .getRawOne(),
+          // Period cash journal entries
+          this.journalEntriesRepository
+            .createQueryBuilder('entry')
+            .select([
+              "SUM(CASE WHEN entry.debit_account = 'cash' THEN entry.amount ELSE 0 END) AS received",
+              "SUM(CASE WHEN entry.credit_account = 'cash' THEN entry.amount ELSE 0 END) AS paid",
+            ])
+            .where('entry.organization_id = :organizationId', {
+              organizationId,
+            })
+            .andWhere('entry.is_deleted = false')
+            .andWhere('entry.entry_date >= :startDate', { startDate })
+            .andWhere('entry.entry_date <= :endDate', { endDate })
+            .andWhere(
+              "(entry.debit_account = 'cash' OR entry.credit_account = 'cash')",
+            )
+            .getRawOne(),
+        ]);
+
+      // Batch 7d: Bank journal entries (2 queries)
+      const [openingBankJournalEntriesRow, periodBankJournalEntriesRow] =
+        await Promise.all([
+          // Opening bank journal entries
+          this.journalEntriesRepository
+            .createQueryBuilder('entry')
+            .select([
+              "SUM(CASE WHEN entry.debit_account = 'bank' THEN entry.amount ELSE 0 END) AS received",
+              "SUM(CASE WHEN entry.credit_account = 'bank' THEN entry.amount ELSE 0 END) AS paid",
+            ])
+            .where('entry.organization_id = :organizationId', {
+              organizationId,
+            })
+            .andWhere('entry.is_deleted = false')
+            .andWhere('entry.entry_date < :startDate', { startDate })
+            .andWhere(
+              "(entry.debit_account = 'bank' OR entry.credit_account = 'bank')",
+            )
+            .getRawOne(),
+          // Period bank journal entries
+          this.journalEntriesRepository
+            .createQueryBuilder('entry')
+            .select([
+              "SUM(CASE WHEN entry.debit_account = 'bank' THEN entry.amount ELSE 0 END) AS received",
+              "SUM(CASE WHEN entry.credit_account = 'bank' THEN entry.amount ELSE 0 END) AS paid",
+            ])
+            .where('entry.organization_id = :organizationId', {
+              organizationId,
+            })
+            .andWhere('entry.is_deleted = false')
+            .andWhere('entry.entry_date >= :startDate', { startDate })
+            .andWhere('entry.entry_date <= :endDate', { endDate })
+            .andWhere(
+              "(entry.debit_account = 'bank' OR entry.credit_account = 'bank')",
+            )
+            .getRawOne(),
+        ]);
 
       // Calculate cash balance (matching TB logic)
       const openingCashReceipts = Number(
@@ -1114,7 +1169,11 @@ export class ReportsService {
         // Wait a bit for connections to be released, then retry once
         await new Promise((resolve) => setTimeout(resolve, 1000));
         try {
-          return await this.getDashboardSummary(organizationId, filters, retryCount + 1);
+          return await this.getDashboardSummary(
+            organizationId,
+            filters,
+            retryCount + 1,
+          );
         } catch (retryError) {
           this.logger.error(
             `Error getting dashboard summary after retry: organizationId=${organizationId}, error=${retryError.message}`,

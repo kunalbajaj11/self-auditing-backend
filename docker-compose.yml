@@ -22,6 +22,40 @@ services:
     networks:
       - smart-expense-network
 
+  # Redis for Queue
+  redis:
+    image: redis:7-alpine
+    container_name: smart-expense-redis
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    command: >
+      sh -c "
+      if [ -n \"$$REDIS_PASSWORD\" ]; then
+        redis-server --appendonly yes --requirepass \"$$REDIS_PASSWORD\"
+      else
+        redis-server --appendonly yes
+      fi
+      "
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: >
+        sh -c "
+        if [ -n \"$$REDIS_PASSWORD\" ]; then
+          redis-cli -a \"$$REDIS_PASSWORD\" ping
+        else
+          redis-cli ping
+        fi
+        "
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - smart-expense-network
+
   # NestJS Backend API
   api:
     build:
@@ -43,6 +77,16 @@ services:
       DB_RUN_MIGRATIONS: ${DB_RUN_MIGRATIONS:-false}
       DB_LOGGING: ${DB_LOGGING:-false}
       DB_SSL: ${DB_SSL:-false}
+      
+      # Database Connection Pool Configuration
+      # Default: 20 connections per instance (for direct PostgreSQL connection)
+      # Set to 5 if using PgBouncer in session mode
+      # For high-traffic: 30-50 connections per instance
+      DB_POOL_MAX: ${DB_POOL_MAX:-20}
+      DB_POOL_MIN: ${DB_POOL_MIN:-2}
+      DB_POOL_IDLE_TIMEOUT: ${DB_POOL_IDLE_TIMEOUT:-20000}
+      DB_POOL_CONNECTION_TIMEOUT: ${DB_POOL_CONNECTION_TIMEOUT:-10000}
+      DB_QUERY_TIMEOUT: ${DB_QUERY_TIMEOUT:-30000}
       
       # Application configuration
       PORT: 3000
@@ -73,8 +117,19 @@ services:
       SMTP_USER: ${SMTP_USER:-}
       SMTP_PASS: ${SMTP_PASS:-}
       SMTP_FROM: ${SMTP_FROM:-}
+      
+      # Redis Configuration
+      REDIS_HOST: ${REDIS_HOST:-redis}
+      REDIS_PORT: ${REDIS_PORT:-6379}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      REDIS_URL: ${REDIS_URL:-}
+      
+      # Application Mode (web or worker)
+      RUN_MODE: ${RUN_MODE:-web}
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     volumes:
       # Mount Google credentials if needed (use secrets in production)
@@ -88,8 +143,63 @@ services:
       retries: 3
       start_period: 40s
 
+  # OCR Worker Service
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: smart-expense-worker
+    restart: unless-stopped
+    environment:
+      # Database configuration (same as API)
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USERNAME: ${DB_USERNAME:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-postgres}
+      DB_NAME: ${DB_NAME:-smart_expense_uae}
+      DB_SYNCHRONIZE: ${DB_SYNCHRONIZE:-false}
+      DB_RUN_MIGRATIONS: ${DB_RUN_MIGRATIONS:-false}
+      DB_LOGGING: ${DB_LOGGING:-false}
+      DB_SSL: ${DB_SSL:-false}
+      DB_POOL_MAX: ${DB_POOL_MAX:-20}
+      DB_POOL_MIN: ${DB_POOL_MIN:-2}
+      
+      # Application configuration
+      NODE_ENV: ${NODE_ENV:-production}
+      
+      # Redis Configuration
+      REDIS_HOST: ${REDIS_HOST:-redis}
+      REDIS_PORT: ${REDIS_PORT:-6379}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      REDIS_URL: ${REDIS_URL:-}
+      
+      # Application Mode - Worker
+      RUN_MODE: worker
+      
+      # Google Cloud Vision API (if needed)
+      GOOGLE_APPLICATION_CREDENTIALS: ${GOOGLE_APPLICATION_CREDENTIALS:-}
+      
+      # AWS S3 Configuration (if needed)
+      AWS_REGION: ${AWS_REGION:-}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_S3_BUCKET_NAME: ${AWS_S3_BUCKET_NAME:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./google-credentials.json:/app/google-credentials.json:ro
+    networks:
+      - smart-expense-network
+    command: ["node", "dist/main.js"]
+
 volumes:
   postgres_data:
+    driver: local
+  redis_data:
     driver: local
 
 networks:
