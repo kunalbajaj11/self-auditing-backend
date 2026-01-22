@@ -51,6 +51,15 @@ COPY --from=builder --chown=nestjs:nodejs /app/dist ./dist
 # Copy assets if needed
 COPY --chown=nestjs:nodejs assets ./assets
 
+# Create OCR debug directory with proper permissions for non-root user
+# This directory is used for temporary PDF to image conversion files
+RUN mkdir -p /app/ocr-debug && \
+    chown -R nestjs:nodejs /app/ocr-debug && \
+    chmod -R 755 /app/ocr-debug
+
+# Verify poppler-utils is installed and pdftoppm is available
+RUN which pdftoppm || (echo "ERROR: pdftoppm not found in PATH" && exit 1)
+
 # Switch to non-root user
 USER nestjs
 

@@ -55,10 +55,10 @@ export class OcrService {
 
     let result: OcrResult;
     try {
-      switch (provider.toLowerCase()) {
-        case 'google':
+    switch (provider.toLowerCase()) {
+      case 'google':
           console.log('[OCR] Using Google Vision provider');
-          if (isPdf) {
+        if (isPdf) {
             result = await this.processPdfWithGoogleVision(
               file,
               organizationId,
@@ -67,14 +67,14 @@ export class OcrService {
             result = await this.processWithGoogleVision(file, organizationId);
           }
           break;
-        case 'azure':
+      case 'azure':
           console.log('[OCR] Using Azure Form Recognizer provider');
           result = await this.processWithAzureFormRecognizer(
             file,
             organizationId,
           );
           break;
-        default:
+      default:
           console.log('[OCR] Using mock provider');
           result = await this.processMock(file, organizationId);
       }
@@ -337,6 +337,10 @@ export class OcrService {
       );
       const credentialsPath = this.configService.get<string>(
         'GOOGLE_APPLICATION_CREDENTIALS',
+      );
+
+      console.log(
+        `[OCR] [GOOGLE-VISION] Checking credentials: BASE64=${!!credentialsBase64}, JSON=${!!credentialsJson}, PATH=${!!credentialsPath}`,
       );
 
       if (credentialsBase64) {
@@ -779,13 +783,13 @@ export class OcrService {
           );
           // Skip this page - don't process it
         } else {
-          primaryResult = await this.processWithGoogleVision(
-            imageFile,
-            organizationId,
-          );
-          primaryText = primaryResult.fields?.fullText || '';
-          totalConfidence = primaryResult.confidence || 0;
-          processedPages.add(invoicePageIndex);
+        primaryResult = await this.processWithGoogleVision(
+          imageFile,
+          organizationId,
+        );
+        primaryText = primaryResult.fields?.fullText || '';
+        totalConfidence = primaryResult.confidence || 0;
+        processedPages.add(invoicePageIndex);
 
           // Check if we got meaningful text (not just from mock fallback)
           const hasText = primaryText && primaryText.trim().length > 50;
@@ -804,19 +808,19 @@ export class OcrService {
             );
           }
 
-          allDetections.push({
-            page: invoicePageIndex + 1,
-            confidence: primaryResult.confidence,
-            pageType: 'invoice',
-            isPrimary: true,
+        allDetections.push({
+          page: invoicePageIndex + 1,
+          confidence: primaryResult.confidence,
+          pageType: 'invoice',
+          isPrimary: true,
             hasText: hasText,
             provider: primaryResult.fields?.provider,
-          });
+        });
 
           if (hasText) {
-            console.log(
-              `[OCR] Successfully processed invoice page with ${primaryText.length} characters`,
-            );
+        console.log(
+          `[OCR] Successfully processed invoice page with ${primaryText.length} characters`,
+        );
           }
         }
       } catch (pageError: any) {
@@ -887,14 +891,39 @@ export class OcrService {
     }
 
     if (!primaryText || primaryText.trim().length === 0) {
-      // Check if Google Vision was attempted but failed
-      const attemptedGoogleVision = allDetections.some(
-        (d) => d.provider === 'google' || d.provider === 'mock',
+      // Check what providers were actually used
+      const providersUsed = allDetections.map((d) => d.provider).filter(Boolean);
+      const hasGoogleAttempt = allDetections.some((d) => d.provider === 'google');
+      const hasMockFallback = allDetections.some(
+        (d) => d.provider === 'mock' || d.provider === 'mock-pdf-parse',
       );
-      const errorMessage = attemptedGoogleVision
-        ? 'No text extracted from PDF pages. Google Vision API may not be properly configured or the PDF image quality is too low. Falling back to basic extraction.'
-        : 'No text extracted from PDF pages. This appears to be a scanned PDF that requires OCR. Please configure Google Vision API or Azure Form Recognizer for scanned documents.';
+
+      console.error(`[OCR] ========== DIAGNOSTIC INFO ==========`);
+      console.error(`[OCR] Providers attempted: ${providersUsed.join(', ') || 'none'}`);
+      console.error(`[OCR] Google Vision attempted: ${hasGoogleAttempt}`);
+      console.error(`[OCR] Mock fallback used: ${hasMockFallback}`);
+      console.error(`[OCR] Pages processed: ${processedPages.size}`);
+      console.error(`[OCR] All detections:`, JSON.stringify(allDetections, null, 2));
+
+      // Check Google credentials configuration
+      const hasCredentialsBase64 = !!this.configService.get<string>(
+        'GOOGLE_CREDENTIALS_BASE64',
+      );
+      const hasCredentialsJson = !!this.configService.get<string>(
+        'GOOGLE_CREDENTIALS_JSON',
+      );
+      const hasCredentialsPath = !!this.configService.get<string>(
+        'GOOGLE_APPLICATION_CREDENTIALS',
+      );
+      console.error(
+        `[OCR] Google credentials configured: BASE64=${!!hasCredentialsBase64}, JSON=${!!hasCredentialsJson}, PATH=${!!hasCredentialsPath}`,
+      );
+
+      const errorMessage = hasGoogleAttempt
+        ? 'No text extracted from PDF pages. Google Vision API was called but returned no text. This could indicate: 1) Invalid credentials, 2) API quota exceeded, 3) Image quality too low, or 4) Blank/corrupted images.'
+        : 'No text extracted from PDF pages. Google Vision API was not called. Please configure GOOGLE_CREDENTIALS_BASE64, GOOGLE_CREDENTIALS_JSON, or GOOGLE_APPLICATION_CREDENTIALS environment variable.';
       console.error(`[OCR] ${errorMessage}`);
+      console.error(`[OCR] ========================================`);
       throw new Error(errorMessage);
     }
 
@@ -1603,14 +1632,14 @@ export class OcrService {
         );
         try {
           // Fallback to regular build
-          const pdfjsModule = await import('pdfjs-dist');
-          pdfjsLib = pdfjsModule.default || pdfjsModule;
+        const pdfjsModule = await import('pdfjs-dist');
+        pdfjsLib = pdfjsModule.default || pdfjsModule;
           console.log(
             '[OCR] [PDF-TO-IMAGE] Using regular pdfjs-dist build (may have issues)',
           );
-        } catch {
-          // eslint-disable-next-line @typescript-eslint/no-require-imports
-          pdfjsLib = require('pdfjs-dist');
+      } catch {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        pdfjsLib = require('pdfjs-dist');
           console.log('[OCR] [PDF-TO-IMAGE] Using pdfjs-dist via require');
         }
       }
