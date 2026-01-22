@@ -5892,39 +5892,25 @@ export class ReportsService {
         endDate,
       },
       revenue: {
-        amount: Number(totalRevenue.toFixed(2)),
-        vat: Number(revenueVat.toFixed(2)),
-        total: Number((totalRevenue + revenueVat).toFixed(2)),
+        amount: Number(netRevenue.toFixed(2)),
         count: Number(revenueResult?.count || 0),
         creditNotes: {
           amount: Number(creditNotesAmount.toFixed(2)),
-          vat: Number(creditNotesVat.toFixed(2)),
-          total: Number((creditNotesAmount + creditNotesVat).toFixed(2)),
           count: Number(creditNotesResult?.count || 0),
         },
         debitNotes: {
           amount: Number(debitNotesAmount.toFixed(2)),
-          vat: Number(debitNotesVat.toFixed(2)),
-          total: Number((debitNotesAmount + debitNotesVat).toFixed(2)),
           count: Number(debitNotesResult?.count || 0),
         },
         netAmount: Number(netRevenue.toFixed(2)),
-        netVat: Number(netRevenueVat.toFixed(2)),
-        netTotal: Number((netRevenue + netRevenueVat).toFixed(2)),
       },
       expenses: {
         items: processedExpenseRows.map((row) => ({
           category: row.category,
           amount: Number(row.amount || 0),
-          vat: Number(row.vat || 0),
-          total: Number(
-            (Number(row.amount || 0) + Number(row.vat || 0)).toFixed(2),
-          ),
           count: Number(row.count || 0),
         })),
         total: Number(totalExpenses.toFixed(2)),
-        vat: Number(expenseVat.toFixed(2)),
-        grandTotal: Number((totalExpenses + expenseVat).toFixed(2)),
       },
       summary: {
         openingRetainedEarnings: Number(openingRetainedEarnings.toFixed(2)),

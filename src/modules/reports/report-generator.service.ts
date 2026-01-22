@@ -3035,15 +3035,7 @@ export class ReportGeneratorService {
     doc.moveDown(0.3);
     doc.fontSize(10).font('Helvetica').fillColor(textDark);
     doc.text(
-      `Amount: ${this.formatCurrency(data.revenue?.amount || 0, currency)}`,
-      margin,
-    );
-    doc.text(
-      `VAT: ${this.formatCurrency(data.revenue?.vat || 0, currency)}`,
-      margin,
-    );
-    doc.text(
-      `Total: ${this.formatCurrency(data.revenue?.total || 0, currency)}`,
+      `Amount: ${this.formatCurrency(data.revenue?.netAmount || data.revenue?.amount || 0, currency)}`,
       margin,
     );
     doc.text(`Invoice Count: ${data.revenue?.count || 0}`, margin);
@@ -3065,7 +3057,7 @@ export class ReportGeneratorService {
       this.addPDFTable(
         doc,
         data.expenses.items,
-        ['category', 'amount', 'vat', 'total'],
+        ['category', 'amount'],
         currency,
       );
     }
@@ -3073,7 +3065,7 @@ export class ReportGeneratorService {
     doc.moveDown(0.3);
     doc.fontSize(10).font('Helvetica-Bold').fillColor(textDark);
     doc.text(
-      `Total Expenses: ${this.formatCurrency(data.expenses?.grandTotal || data.expenses?.total || 0, currency)}`,
+      `Total Expenses: ${this.formatCurrency(data.expenses?.total || 0, currency)}`,
       margin,
     );
   }
@@ -5448,7 +5440,7 @@ export class ReportGeneratorService {
     // Revenue sheet
     if (data.revenue) {
       const revenueSheet = workbook.addWorksheet('Revenue');
-      revenueSheet.addRow(['Description', 'Amount', 'VAT', 'Total']);
+      revenueSheet.addRow(['Description', 'Amount']);
       const headerRow = revenueSheet.getRow(1);
       headerRow.font = {
         bold: true,
@@ -5471,17 +5463,15 @@ export class ReportGeneratorService {
 
       revenueSheet.addRow([
         'Total Revenue',
-        data.revenue.amount || 0,
-        data.revenue.vat || 0,
-        data.revenue.total || 0,
+        data.revenue.netAmount || data.revenue.amount || 0,
       ]);
 
-      ['B', 'C', 'D'].forEach((col) => {
+      ['B'].forEach((col) => {
         revenueSheet.getColumn(col).numFmt = `"${currency}" #,##0.00`;
         revenueSheet.getColumn(col).alignment = { horizontal: 'right' };
       });
       revenueSheet.getColumn('A').width = 25;
-      ['B', 'C', 'D'].forEach((col) => {
+      ['B'].forEach((col) => {
         revenueSheet.getColumn(col).width = 18;
       });
     }
@@ -5494,7 +5484,7 @@ export class ReportGeneratorService {
       data.expenses.items.length > 0
     ) {
       const expensesSheet = workbook.addWorksheet('Expenses');
-      expensesSheet.addRow(['Category', 'Amount', 'VAT', 'Total']);
+      expensesSheet.addRow(['Category', 'Amount']);
       const headerRow = expensesSheet.getRow(1);
       headerRow.font = {
         bold: true,
@@ -5519,16 +5509,12 @@ export class ReportGeneratorService {
         expensesSheet.addRow([
           item.category || 'N/A',
           item.amount || 0,
-          item.vat || 0,
-          item.total || 0,
         ]);
       });
 
       // Add total row
       expensesSheet.addRow([
         'Total Expenses',
-        data.expenses.total || 0,
-        data.expenses.vat || 0,
         data.expenses.total || 0,
       ]);
       const totalRow = expensesSheet.getRow(expensesSheet.rowCount);
@@ -5539,12 +5525,12 @@ export class ReportGeneratorService {
         fgColor: { argb: 'FFE8EEF5' },
       };
 
-      ['B', 'C', 'D'].forEach((col) => {
+      ['B'].forEach((col) => {
         expensesSheet.getColumn(col).numFmt = `"${currency}" #,##0.00`;
         expensesSheet.getColumn(col).alignment = { horizontal: 'right' };
       });
       expensesSheet.getColumn('A').width = 25;
-      ['B', 'C', 'D'].forEach((col) => {
+      ['B'].forEach((col) => {
         expensesSheet.getColumn(col).width = 18;
       });
     }
