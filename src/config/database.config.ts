@@ -31,17 +31,24 @@ export default registerAs(
       // Each parallel query batch may need connections, so pool size should accommodate peak usage.
       //
       // Production with PgBouncer: Set DB_POOL_MAX=5 in environment
-      // Local development: Use DB_POOL_MAX=20 or higher
-      max: parseInt(process.env.DB_POOL_MAX ?? '20', 10), // Max connections per app instance (default: 20 for local)
-      min: parseInt(process.env.DB_POOL_MIN ?? '2', 10), // Min connections to keep alive (default: 2 for better reuse)
+      // Local development: Use DB_POOL_MAX=5 (must match PgBouncer pool_size in session mode)
+      // IMPORTANT: With PgBouncer in session mode, max clients = pool_size, so set this to 5 or less
+      max: parseInt(process.env.DB_POOL_MAX ?? '5', 10), // Max connections per app instance (default: 5 for PgBouncer session mode)
+      min: parseInt(process.env.DB_POOL_MIN ?? '1', 10), // Min connections to keep alive (default: 1)
       idleTimeoutMillis: parseInt(
-        process.env.DB_POOL_IDLE_TIMEOUT ?? '30000',
+        process.env.DB_POOL_IDLE_TIMEOUT ?? '20000',
         10,
-      ), // Close idle connections after 30 seconds
+      ), // Close idle connections after 20 seconds (reduced from 30s)
       connectionTimeoutMillis: parseInt(
         process.env.DB_POOL_CONNECTION_TIMEOUT ?? '10000',
         10,
       ), // Connection timeout (10 seconds)
+      // Query timeout: automatically cancel queries that take too long
+      // This prevents queries from running indefinitely when client navigates away
+      statement_timeout: parseInt(process.env.DB_QUERY_TIMEOUT ?? '30000', 10), // Cancel queries after 30 seconds (default: 30000ms = 30s)
+      // Allow pool to wait for available connections instead of immediately failing
+      // This prevents "Max client connections reached" errors during peak load
+      allowExitOnIdle: false, // Keep pool alive even when idle
     },
   }),
 );

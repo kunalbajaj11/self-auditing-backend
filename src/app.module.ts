@@ -43,6 +43,7 @@ import { TaxFormsModule } from './modules/tax-forms/tax-forms.module';
 import { ComplianceModule } from './modules/compliance/compliance.module';
 import { AppBootstrapService } from './bootstrap/app-bootstrap.service';
 import { SanitizeAttachmentsInterceptor } from './common/interceptors/sanitize-attachments.interceptor';
+import { TimeoutInterceptor } from './common/interceptors/timeout.interceptor';
 
 @Module({
   imports: [
@@ -53,10 +54,17 @@ import { SanitizeAttachmentsInterceptor } from './common/interceptors/sanitize-a
     }),
     TypeOrmModule.forRootAsync({
       inject: [ConfigService],
-      useFactory: (configService: ConfigService) => ({
-        ...configService.get('database'),
-        autoLoadEntities: true,
-      }),
+      useFactory: (configService: ConfigService) => {
+        const dbConfig = configService.get('database');
+        return {
+          ...dbConfig,
+          autoLoadEntities: true,
+          // Add connection error handling
+          logging: dbConfig.logging ? ['error', 'warn'] : false,
+          // Ensure connections are properly released
+          maxQueryExecutionTime: 30000, // Log queries taking longer than 30s
+        };
+      },
     }),
     AuthModule,
     UsersModule,
@@ -102,6 +110,10 @@ import { SanitizeAttachmentsInterceptor } from './common/interceptors/sanitize-a
     {
       provide: APP_INTERCEPTOR,
       useClass: SanitizeAttachmentsInterceptor,
+    },
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: TimeoutInterceptor,
     },
   ],
 })
