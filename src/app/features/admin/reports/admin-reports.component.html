@@ -1,0 +1,1211 @@
+<section class="reports-container">
+  <!-- Report Configuration View -->
+  <div class="report-config" *ngIf="selectedReport && !generatedReport">
+    <div class="config-header">
+      <div>
+        <h2>
+          <mat-icon [style.color]="selectedReport.color">{{ selectedReport.icon }}</mat-icon>
+          {{ selectedReport.label }}
+        </h2>
+        <p>{{ selectedReport.description }}</p>
+      </div>
+    </div>
+
+    <mat-card class="config-card" [formGroup]="form">
+      <mat-card-content>
+        <div class="form-grid">
+          <!-- Date Range -->
+          <div class="form-section">
+            <h3 class="section-title">
+              <mat-icon>date_range</mat-icon>
+              Date Range
+            </h3>
+            <div class="form-row">
+              <mat-form-field appearance="outline">
+                <mat-label>Preset</mat-label>
+                <mat-select formControlName="dateRangePreset" (selectionChange)="onDateRangePresetChange($event.value)">
+                  <mat-option *ngFor="let preset of dateRangePresets" [value]="preset.value">
+                    {{ preset.label }}
+                  </mat-option>
+                </mat-select>
+              </mat-form-field>
+
+              <mat-form-field appearance="outline">
+                <mat-label>Start Date</mat-label>
+                <input matInput [matDatepicker]="startPicker" formControlName="startDate" />
+                <mat-datepicker-toggle matIconSuffix [for]="startPicker"></mat-datepicker-toggle>
+                <mat-datepicker #startPicker></mat-datepicker>
+              </mat-form-field>
+
+              <mat-form-field appearance="outline">
+                <mat-label>End Date</mat-label>
+                <input matInput [matDatepicker]="endPicker" formControlName="endDate" />
+                <mat-datepicker-toggle matIconSuffix [for]="endPicker"></mat-datepicker-toggle>
+                <mat-datepicker #endPicker></mat-datepicker>
+              </mat-form-field>
+            </div>
+          </div>
+
+          <!-- Additional Filters (conditional based on report type) -->
+          <div class="form-section" *ngIf="selectedReport.value === 'payables' || selectedReport.value === 'receivables'">
+            <h3 class="section-title">
+              <mat-icon>filter_list</mat-icon>
+              Filters
+            </h3>
+            <div class="form-row">
+              <mat-form-field appearance="outline" *ngIf="selectedReport.value === 'payables'">
+                <mat-label>Status</mat-label>
+                <mat-select formControlName="status" multiple>
+                  <mat-option value="pending_settlement">Pending Settlement</mat-option>
+                  <mat-option value="settled">Settled</mat-option>
+                  <mat-option value="auto_settled">Auto Settled</mat-option>
+                </mat-select>
+              </mat-form-field>
+
+              <mat-form-field appearance="outline" *ngIf="selectedReport.value === 'payables'">
+                <mat-label>Vendor</mat-label>
+                <mat-select formControlName="vendorName" multiple>
+                  <mat-option *ngFor="let vendor of vendors" [value]="vendor">
+                    {{ vendor }}
+                  </mat-option>
+                </mat-select>
+              </mat-form-field>
+
+              <mat-form-field appearance="outline" *ngIf="selectedReport.value === 'receivables'">
+                <mat-label>Payment Status</mat-label>
+                <mat-select formControlName="paymentStatus" multiple>
+                  <mat-option value="unpaid">Unpaid</mat-option>
+                  <mat-option value="partial">Partial</mat-option>
+                  <mat-option value="paid">Paid</mat-option>
+                </mat-select>
+              </mat-form-field>
+
+              <mat-form-field appearance="outline" *ngIf="selectedReport.value === 'receivables'">
+                <mat-label>Customer</mat-label>
+                <mat-select formControlName="customerName" multiple>
+                  <mat-option *ngFor="let customer of customers" [value]="customer">
+                    {{ customer }}
+                  </mat-option>
+                </mat-select>
+              </mat-form-field>
+            </div>
+          </div>
+        </div>
+
+        <div class="form-actions">
+          <button mat-raised-button color="primary" (click)="generate()" [disabled]="loading" class="generate-btn">
+            <mat-progress-spinner *ngIf="loading" [diameter]="20" mode="indeterminate" class="btn-spinner"></mat-progress-spinner>
+            <mat-icon *ngIf="!loading">assessment</mat-icon>
+            <span>{{ loading ? 'Generating...' : 'Generate Report' }}</span>
+          </button>
+        </div>
+      </mat-card-content>
+    </mat-card>
+  </div>
+
+  <!-- Generated Report View -->
+  <div class="report-results" *ngIf="selectedReport && generatedReport" #reportPreviewCard>
+    <div class="results-header">
+      <div>
+        <h2>
+          <mat-icon [style.color]="selectedReport.color">{{ selectedReport.icon }}</mat-icon>
+          {{ selectedReport.label }}
+        </h2>
+        <p>Generated on {{ generatedReport.generatedAt | date: 'medium' }}</p>
+      </div>
+      <div class="download-actions">
+        <button mat-stroked-button (click)="generateAndDownload('pdf')" [disabled]="loading">
+          <mat-icon>picture_as_pdf</mat-icon>
+          PDF
+        </button>
+        <button mat-stroked-button (click)="generateAndDownload('xlsx')" [disabled]="loading">
+          <mat-icon>table_chart</mat-icon>
+          Excel
+        </button>
+        <button mat-stroked-button (click)="generateAndDownload('csv')" [disabled]="loading">
+          <mat-icon>description</mat-icon>
+          CSV
+        </button>
+      </div>
+    </div>
+
+    <mat-card class="report-preview-card">
+      <mat-card-content>
+        <!-- Trial Balance Report -->
+        <div *ngIf="generatedReport.type === 'trial_balance'">
+          <!-- Trial Balance Validation Warning -->
+          <div *ngIf="generatedReport.data.summary && generatedReport.data.summary.warning" class="trial-balance-warning">
+            <mat-icon color="warn">warning</mat-icon>
+            <div class="warning-content">
+              <strong>Trial Balance Not Balanced!</strong>
+              <p>{{ generatedReport.data.summary.warning }}</p>
+              <p class="warning-note">
+                <strong>Note:</strong> In double-entry bookkeeping, a trial balance should always balance (Total Debits = Total Credits). 
+                A difference indicates an accounting error that needs investigation. Please review your transactions and ensure all entries are properly recorded.
+              </p>
+            </div>
+          </div>
+          
+          <!-- Opening/Closing Balance Summary -->
+          <div class="balance-summary" *ngIf="generatedReport.data.summary && (generatedReport.data.summary.openingDebit !== undefined || generatedReport.data.summary.openingCredit !== undefined)">
+            <div class="balance-card">
+              <div class="balance-label">Opening Balance</div>
+              <div class="balance-amount">
+                <div class="balance-row">
+                  <span>Debit:</span>
+                  <span>{{ formatCurrency(generatedReport.data.summary.openingDebit || 0) }}</span>
+                </div>
+                <div class="balance-row">
+                  <span>Credit:</span>
+                  <span>{{ formatCurrency(generatedReport.data.summary.openingCredit || 0) }}</span>
+                </div>
+                <div class="balance-row total">
+                  <span>Balance:</span>
+                  <span [class.positive-amount]="(generatedReport.data.summary.openingBalance || 0) >= 0" [class.negative-amount]="(generatedReport.data.summary.openingBalance || 0) < 0">
+                    {{ formatCurrency(generatedReport.data.summary.openingBalance || 0, true) }}
+                  </span>
+                </div>
+              </div>
+            </div>
+            <div class="balance-card">
+              <div class="balance-label">Period Total</div>
+              <div class="balance-amount">
+                <div class="balance-row">
+                  <span>Debit:</span>
+                  <span>{{ formatCurrency(generatedReport.data.summary.periodDebit || 0) }}</span>
+                </div>
+                <div class="balance-row">
+                  <span>Credit:</span>
+                  <span>{{ formatCurrency(generatedReport.data.summary.periodCredit || 0) }}</span>
+                </div>
+                <div class="balance-row total">
+                  <span>Balance:</span>
+                  <span [class.positive-amount]="(generatedReport.data.summary.periodBalance || 0) >= 0" [class.negative-amount]="(generatedReport.data.summary.periodBalance || 0) < 0">
+                    {{ formatCurrency(generatedReport.data.summary.periodBalance || 0, true) }}
+                  </span>
+                </div>
+              </div>
+            </div>
+            <div class="balance-card">
+              <div class="balance-label">Closing Balance</div>
+              <div class="balance-amount">
+                <div class="balance-row">
+                  <span>Debit:</span>
+                  <span>{{ formatCurrency(generatedReport.data.summary.closingDebit || 0) }}</span>
+                </div>
+                <div class="balance-row">
+                  <span>Credit:</span>
+                  <span>{{ formatCurrency(generatedReport.data.summary.closingCredit || 0) }}</span>
+                </div>
+                <div class="balance-row total">
+                  <span>Balance:</span>
+                  <span [class.positive-amount]="(generatedReport.data.summary.closingBalance || 0) >= 0" [class.negative-amount]="(generatedReport.data.summary.closingBalance || 0) < 0">
+                    {{ formatCurrency(generatedReport.data.summary.closingBalance || 0, true) }}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+          
+          <div class="report-summary" *ngIf="generatedReport.data.summary">
+            <div class="summary-card">
+              <div class="summary-label">Total Debit</div>
+              <div class="summary-value">{{ formatCurrency(generatedReport.data.summary.closingDebit || generatedReport.data.summary.totalDebit || 0) }}</div>
+            </div>
+            <div class="summary-card">
+              <div class="summary-label">Total Credit</div>
+              <div class="summary-value">{{ formatCurrency(generatedReport.data.summary.closingCredit || generatedReport.data.summary.totalCredit || 0) }}</div>
+            </div>
+            <div class="summary-card">
+              <div class="summary-label">Balance</div>
+              <div class="summary-value" [class.positive]="(generatedReport.data.summary.closingBalance || generatedReport.data.summary.totalBalance || 0) >= 0" [class.negative]="(generatedReport.data.summary.closingBalance || generatedReport.data.summary.totalBalance || 0) < 0">
+                {{ formatCurrency(generatedReport.data.summary.closingBalance || generatedReport.data.summary.totalBalance || 0, true) }}
+              </div>
+            </div>
+          </div>
+
+          <!-- Charts -->
+          <div class="charts-container" *ngIf="trialBalanceChartData || trialBalanceAccountsChartData">
+            <div class="chart-wrapper" *ngIf="trialBalanceChartData">
+              <h4>Debit vs Credit Overview</h4>
+              <canvas baseChart
+                [data]="trialBalanceChartData"
+                [type]="'bar'"
+                [options]="chartOptions">
+              </canvas>
+            </div>
+            <div class="chart-wrapper" *ngIf="trialBalanceAccountsChartData">
+              <h4>Top Accounts by Balance</h4>
+              <canvas baseChart
+                [data]="trialBalanceAccountsChartData"
+                [type]="'pie'"
+                [options]="pieChartOptions">
+              </canvas>
+            </div>
+          </div>
+
+          <!-- All Accounts Table -->
+          <h3 class="section-title" style="margin-top: 2rem;">
+            <mat-icon>account_balance</mat-icon>
+            All Accounts
+          </h3>
+          <table mat-table [dataSource]="generatedReport.data?.accounts || []" class="report-table">
+            <ng-container matColumnDef="accountName">
+              <th mat-header-cell *matHeaderCellDef>Account Name</th>
+              <td mat-cell *matCellDef="let row">{{ resolveAccountName(row.accountName) }}</td>
+            </ng-container>
+            <ng-container matColumnDef="accountType">
+              <th mat-header-cell *matHeaderCellDef>Type</th>
+              <td mat-cell *matCellDef="let row">{{ row.accountType }}</td>
+            </ng-container>
+            <ng-container matColumnDef="openingDebit">
+              <th mat-header-cell *matHeaderCellDef class="text-right">Opening Debit</th>
+              <td mat-cell *matCellDef="let row" class="text-right">{{ formatCurrency(row.openingDebit || 0) }}</td>
+            </ng-container>
+            <ng-container matColumnDef="openingCredit">
+              <th mat-header-cell *matHeaderCellDef class="text-right">Opening Credit</th>
+              <td mat-cell *matCellDef="let row" class="text-right">{{ formatCurrency(row.openingCredit || 0) }}</td>
+            </ng-container>
+              <ng-container matColumnDef="openingBalance">
+              <th mat-header-cell *matHeaderCellDef class="text-right">Opening Balance</th>
+              <td mat-cell *matCellDef="let row" class="text-right" 
+                  [class.positive-amount]="(row.openingBalance || 0) >= 0 && (row.accountType === 'Asset' || row.accountType === 'Expense')" 
+                  [class.credit-amount]="(row.openingBalance || 0) >= 0 && (row.accountType === 'Liability' || row.accountType === 'Revenue' || row.accountType === 'Equity')"
+                  [class.negative-amount]="(row.openingBalance || 0) < 0">
+                {{ formatTrialBalanceCurrency(row.openingBalance || 0, row.accountType, true) }}
+              </td>
+            </ng-container>
+            <ng-container matColumnDef="debit">
+              <th mat-header-cell *matHeaderCellDef class="text-right">Period Debit</th>
+              <td mat-cell *matCellDef="let row" class="text-right">{{ formatCurrency(row.debit) }}</td>
+            </ng-container>
+            <ng-container matColumnDef="credit">
+              <th mat-header-cell *matHeaderCellDef class="text-right">Period Credit</th>
+              <td mat-cell *matCellDef="let row" class="text-right">{{ formatCurrency(row.credit) }}</td>
+            </ng-container>
+            <ng-container matColumnDef="balance">
+              <th mat-header-cell *matHeaderCellDef class="text-right">Period Balance</th>
+              <td mat-cell *matCellDef="let row" class="text-right" 
+                  [class.positive-amount]="row.balance >= 0 && (row.accountType === 'Asset' || row.accountType === 'Expense')" 
+                  [class.credit-amount]="row.balance >= 0 && (row.accountType === 'Liability' || row.accountType === 'Revenue' || row.accountType === 'Equity')"
+                  [class.negative-amount]="row.balance < 0">
+                {{ formatTrialBalanceCurrency(row.balance, row.accountType, true) }}
+              </td>
+            </ng-container>
+            <ng-container matColumnDef="closingDebit">
+              <th mat-header-cell *matHeaderCellDef class="text-right">Closing Debit</th>
+              <td mat-cell *matCellDef="let row" class="text-right">{{ formatCurrency(row.closingDebit || 0) }}</td>
+            </ng-container>
+            <ng-container matColumnDef="closingCredit">
+              <th mat-header-cell *matHeaderCellDef class="text-right">Closing Credit</th>
+              <td mat-cell *matCellDef="let row" class="text-right">{{ formatCurrency(row.closingCredit || 0) }}</td>
+            </ng-container>
+            <ng-container matColumnDef="closingBalance">
+              <th mat-header-cell *matHeaderCellDef class="text-right">Closing Balance</th>
+              <td mat-cell *matCellDef="let row" class="text-right" 
+                  [class.positive-amount]="(row.closingBalance || 0) >= 0 && (row.accountType === 'Asset' || row.accountType === 'Expense')" 
+                  [class.credit-amount]="(row.closingBalance || 0) >= 0 && (row.accountType === 'Liability' || row.accountType === 'Revenue' || row.accountType === 'Equity')"
+                  [class.negative-amount]="(row.closingBalance || 0) < 0">
+                {{ formatTrialBalanceCurrency(row.closingBalance || 0, row.accountType, true) }}
+              </td>
+            </ng-container>
+            <tr mat-header-row *matHeaderRowDef="['accountName', 'accountType', 'openingDebit', 'openingCredit', 'openingBalance', 'debit', 'credit', 'balance', 'closingDebit', 'closingCredit', 'closingBalance']"></tr>
+            <tr mat-row *matRowDef="let row; columns: ['accountName', 'accountType', 'openingDebit', 'openingCredit', 'openingBalance', 'debit', 'credit', 'balance', 'closingDebit', 'closingCredit', 'closingBalance']"></tr>
+          </table>
+        </div>
+
+        <!-- Balance Sheet Report -->
+        <div *ngIf="generatedReport.type === 'balance_sheet'">
+          <!-- Opening/Closing Balance Summary -->
+          <div class="balance-summary" *ngIf="generatedReport.data.summary && (generatedReport.data.summary.openingAssets !== undefined || generatedReport.data.summary.openingLiabilities !== undefined)">
+            <div class="balance-card">
+              <div class="balance-label">Opening Balance</div>
+              <div class="balance-amount">
+                <div class="balance-row">
+                  <span>Assets:</span>
+                  <span [class.positive-amount]="(generatedReport.data.summary.openingAssets || 0) >= 0" [class.negative-amount]="(generatedReport.data.summary.openingAssets || 0) < 0">
+                    {{ formatCurrency(generatedReport.data.summary.openingAssets || 0, true) }}
+                  </span>
+                </div>
+                <div class="balance-row">
+                  <span>Liabilities:</span>
+                  <span [class.credit-amount]="(generatedReport.data.summary.openingLiabilities || 0) >= 0" [class.negative-amount]="(generatedReport.data.summary.openingLiabilities || 0) < 0">
+                    {{ formatCurrency(generatedReport.data.summary.openingLiabilities || 0, true) }}
+                  </span>
+                </div>
+                <div class="balance-row">
+                  <span>Equity:</span>
+                  <span [class.credit-amount]="(generatedReport.data.summary.openingEquity || 0) >= 0" [class.negative-amount]="(generatedReport.data.summary.openingEquity || 0) < 0">
+                    {{ formatCurrency(generatedReport.data.summary.openingEquity || 0, true) }}
+                  </span>
+                </div>
+              </div>
+            </div>
+            <div class="balance-card">
+              <div class="balance-label">Period Total</div>
+              <div class="balance-amount">
+                <div class="balance-row">
+                  <span>Assets:</span>
+                  <span [class.positive-amount]="(generatedReport.data.summary.closingAssets || generatedReport.data.summary.totalAssets || 0) >= 0" [class.negative-amount]="(generatedReport.data.summary.closingAssets || generatedReport.data.summary.totalAssets || 0) < 0">
+                    {{ formatCurrency(generatedReport.data.summary.closingAssets || generatedReport.data.summary.totalAssets || 0, true) }}
+                  </span>
+                </div>
+                <div class="balance-row">
+                  <span>Liabilities:</span>
+                  <span [class.credit-amount]="(generatedReport.data.summary.closingLiabilities || generatedReport.data.summary.totalLiabilities || 0) >= 0" [class.negative-amount]="(generatedReport.data.summary.closingLiabilities || generatedReport.data.summary.totalLiabilities || 0) < 0">
+                    {{ formatCurrency(generatedReport.data.summary.closingLiabilities || generatedReport.data.summary.totalLiabilities || 0, true) }}
+                  </span>
+                </div>
+                <div class="balance-row">
+                  <span>Equity:</span>
+                  <span [class.credit-amount]="(generatedReport.data.summary.closingEquity || generatedReport.data.summary.totalEquity || 0) >= 0" [class.negative-amount]="(generatedReport.data.summary.closingEquity || generatedReport.data.summary.totalEquity || 0) < 0">
+                    {{ formatCurrency(generatedReport.data.summary.closingEquity || generatedReport.data.summary.totalEquity || 0, true) }}
+                  </span>
+                </div>
+              </div>
+            </div>
+            <div class="balance-card">
+              <div class="balance-label">Closing Balance</div>
+              <div class="balance-amount">
+                <div class="balance-row">
+                  <span>Assets:</span>
+                  <span [class.positive-amount]="(generatedReport.data.summary.closingAssets || 0) >= 0" [class.negative-amount]="(generatedReport.data.summary.closingAssets || 0) < 0">
+                    {{ formatCurrency(generatedReport.data.summary.closingAssets || 0, true) }}
+                  </span>
+                </div>
+                <div class="balance-row">
+                  <span>Liabilities:</span>
+                  <span [class.credit-amount]="(generatedReport.data.summary.closingLiabilities || 0) >= 0" [class.negative-amount]="(generatedReport.data.summary.closingLiabilities || 0) < 0">
+                    {{ formatCurrency(generatedReport.data.summary.closingLiabilities || 0, true) }}
+                  </span>
+                </div>
+                <div class="balance-row">
+                  <span>Equity:</span>
+                  <span [class.credit-amount]="(generatedReport.data.summary.closingEquity || 0) >= 0" [class.negative-amount]="(generatedReport.data.summary.closingEquity || 0) < 0">
+                    {{ formatCurrency(generatedReport.data.summary.closingEquity || 0, true) }}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+          
+          <div class="report-summary" *ngIf="generatedReport.data.summary">
+            <div class="summary-card">
+              <div class="summary-label">Total Assets</div>
+              <div class="summary-value" [class.positive-amount]="(generatedReport.data.summary.closingAssets || generatedReport.data.summary.totalAssets || 0) >= 0" [class.negative-amount]="(generatedReport.data.summary.closingAssets || generatedReport.data.summary.totalAssets || 0) < 0">
+                {{ formatCurrency(generatedReport.data.summary.closingAssets || generatedReport.data.summary.totalAssets || 0, true) }}
+              </div>
+            </div>
+            <div class="summary-card">
+              <div class="summary-label">Total Liabilities</div>
+              <div class="summary-value" [class.credit-amount]="(generatedReport.data.summary.closingLiabilities || generatedReport.data.summary.totalLiabilities || 0) >= 0" [class.negative-amount]="(generatedReport.data.summary.closingLiabilities || generatedReport.data.summary.totalLiabilities || 0) < 0">
+                {{ formatCurrency(generatedReport.data.summary.closingLiabilities || generatedReport.data.summary.totalLiabilities || 0, true) }}
+              </div>
+            </div>
+            <div class="summary-card">
+              <div class="summary-label">Total Equity</div>
+              <div class="summary-value" [class.credit-amount]="(generatedReport.data.summary.closingEquity || generatedReport.data.summary.totalEquity || 0) >= 0" [class.negative-amount]="(generatedReport.data.summary.closingEquity || generatedReport.data.summary.totalEquity || 0) < 0">
+                {{ formatCurrency(generatedReport.data.summary.closingEquity || generatedReport.data.summary.totalEquity || 0, true) }}
+              </div>
+            </div>
+          </div>
+
+          <!-- Charts -->
+          <div class="charts-container" *ngIf="balanceSheetChartData || balanceSheetAssetsChartData">
+            <div class="chart-wrapper" *ngIf="balanceSheetChartData">
+              <h4>Assets, Liabilities & Equity</h4>
+              <canvas baseChart
+                [data]="balanceSheetChartData"
+                [type]="'pie'"
+                [options]="pieChartOptions">
+              </canvas>
+            </div>
+            <div class="chart-wrapper" *ngIf="balanceSheetAssetsChartData">
+              <h4>Assets Breakdown</h4>
+              <canvas baseChart
+                [data]="balanceSheetAssetsChartData"
+                [type]="'bar'"
+                [options]="chartOptions">
+              </canvas>
+            </div>
+          </div>
+
+          <div class="balance-sheet-sections">
+            <div class="section">
+              <h3>Assets</h3>
+              <table mat-table [dataSource]="generatedReport.data.assets.items" class="report-table">
+                <ng-container matColumnDef="category">
+                  <th mat-header-cell *matHeaderCellDef>Category</th>
+                  <td mat-cell *matCellDef="let row">{{ row.category }}</td>
+                </ng-container>
+                <ng-container matColumnDef="amount">
+                  <th mat-header-cell *matHeaderCellDef class="text-right">Amount</th>
+                  <td mat-cell *matCellDef="let row" class="text-right" [class.positive-amount]="(row.amount || 0) >= 0" [class.negative-amount]="(row.amount || 0) < 0">
+                    {{ formatCurrency(row.amount, true) }}
+                  </td>
+                </ng-container>
+                <tr mat-header-row *matHeaderRowDef="['category', 'amount']"></tr>
+                <tr mat-row *matRowDef="let row; columns: ['category', 'amount']"></tr>
+              </table>
+              <div class="section-total" [class.positive-amount]="(generatedReport.data.assets?.total || 0) >= 0" [class.negative-amount]="(generatedReport.data.assets?.total || 0) < 0">
+                Total Assets: {{ formatCurrency(generatedReport.data.assets?.total || 0, true) }}
+              </div>
+            </div>
+
+            <div class="section">
+              <h3>Liabilities</h3>
+              <table mat-table [dataSource]="generatedReport.data.liabilities.items" class="report-table">
+                <ng-container matColumnDef="vendor">
+                  <th mat-header-cell *matHeaderCellDef>Liability</th>
+                  <td mat-cell *matCellDef="let row">{{ row.vendor }}</td>
+                </ng-container>
+                <ng-container matColumnDef="amount">
+                  <th mat-header-cell *matHeaderCellDef class="text-right">Amount</th>
+                  <td mat-cell *matCellDef="let row" class="text-right" [class.positive-amount]="(row.amount || 0) >= 0" [class.negative-amount]="(row.amount || 0) < 0">
+                    {{ formatCurrency(row.amount, true) }}
+                  </td>
+                </ng-container>
+                <tr mat-header-row *matHeaderRowDef="['vendor', 'amount']"></tr>
+                <tr mat-row *matRowDef="let row; columns: ['vendor', 'amount']"></tr>
+              </table>
+              <div class="section-total" [class.credit-amount]="(generatedReport.data.liabilities?.total || 0) >= 0" [class.negative-amount]="(generatedReport.data.liabilities?.total || 0) < 0">
+                Total Liabilities: {{ formatCurrency(generatedReport.data.liabilities?.total || 0, true) }}
+              </div>
+            </div>
+
+            <div class="section">
+              <h3>Equity</h3>
+              <table mat-table [dataSource]="generatedReport.data.equity?.items || []" class="report-table">
+                <ng-container matColumnDef="account">
+                  <th mat-header-cell *matHeaderCellDef>Account</th>
+                  <td mat-cell *matCellDef="let row">{{ row.account }}</td>
+                </ng-container>
+                <ng-container matColumnDef="amount">
+                  <th mat-header-cell *matHeaderCellDef class="text-right">Amount</th>
+                  <!-- Balance Sheet should show CLOSING balances for Equity accounts -->
+                  <td mat-cell *matCellDef="let row" class="text-right" [class.credit-amount]="(row.closing || 0) >= 0" [class.negative-amount]="(row.closing || 0) < 0">
+                    {{ formatCurrency(row.closing || 0, true) }}
+                  </td>
+                </ng-container>
+                <tr mat-header-row *matHeaderRowDef="['account', 'amount']"></tr>
+                <tr mat-row *matRowDef="let row; columns: ['account', 'amount']"></tr>
+              </table>
+              <div class="section-total" [class.credit-amount]="(generatedReport.data.equity?.total || 0) >= 0" [class.negative-amount]="(generatedReport.data.equity?.total || 0) < 0">
+                Total Equity: {{ formatCurrency(generatedReport.data.equity?.total || 0, true) }}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Profit and Loss Report -->
+        <div *ngIf="generatedReport.type === 'profit_and_loss'">
+          <!-- Opening/Closing Balance Summary -->
+          <div class="balance-summary" *ngIf="generatedReport.data.summary && generatedReport.data.summary.openingRetainedEarnings !== undefined">
+            <div class="balance-card">
+              <div class="balance-label">Opening Retained Earnings</div>
+              <div class="balance-amount">
+                <span [class.credit-amount]="(generatedReport.data.summary.openingRetainedEarnings || 0) >= 0" [class.negative-amount]="(generatedReport.data.summary.openingRetainedEarnings || 0) < 0">
+                  {{ formatCurrency(generatedReport.data.summary.openingRetainedEarnings || 0, true) }}
+                </span>
+              </div>
+            </div>
+            <div class="balance-card">
+              <div class="balance-label">Period Net Profit</div>
+              <div class="balance-amount">
+                <span [class.credit-amount]="(generatedReport.data.summary.netProfit || 0) >= 0" [class.negative-amount]="(generatedReport.data.summary.netProfit || 0) < 0">
+                  {{ formatCurrency(generatedReport.data.summary.netProfit || 0, true) }}
+                </span>
+              </div>
+            </div>
+            <div class="balance-card">
+              <div class="balance-label">Closing Retained Earnings</div>
+              <div class="balance-amount">
+                <span [class.credit-amount]="(generatedReport.data.summary.closingRetainedEarnings || 0) >= 0" [class.negative-amount]="(generatedReport.data.summary.closingRetainedEarnings || 0) < 0">
+                  {{ formatCurrency(generatedReport.data.summary.closingRetainedEarnings || 0, true) }}
+                </span>
+              </div>
+            </div>
+          </div>
+          
+          <div class="report-summary" *ngIf="generatedReport.data.summary">
+            <div class="summary-card">
+              <div class="summary-label">Revenue</div>
+              <div class="summary-value" [class.credit-amount]="(generatedReport.data.summary.grossProfit || 0) >= 0" [class.negative-amount]="(generatedReport.data.summary.grossProfit || 0) < 0">
+                {{ formatCurrency(generatedReport.data.summary.grossProfit || 0, true) }}
+              </div>
+            </div>
+            <div class="summary-card">
+              <div class="summary-label">Total Expenses</div>
+              <div class="summary-value" [class.positive-amount]="(generatedReport.data.summary.totalExpenses || 0) >= 0" [class.negative-amount]="(generatedReport.data.summary.totalExpenses || 0) < 0">
+                {{ formatCurrency(generatedReport.data.summary.totalExpenses || 0, true) }}
+              </div>
+            </div>
+            <div class="summary-card">
+              <div class="summary-label">Net Profit</div>
+              <div class="summary-value" [class.credit-amount]="(generatedReport.data.summary.netProfit || 0) >= 0" [class.negative-amount]="(generatedReport.data.summary.netProfit || 0) < 0">
+                {{ formatCurrency(generatedReport.data.summary.netProfit || 0, true) }}
+              </div>
+            </div>
+            <div class="summary-card" *ngIf="generatedReport.data.summary.netProfitMargin">
+              <div class="summary-label">Profit Margin</div>
+              <div class="summary-value">{{ generatedReport.data.summary.netProfitMargin }}%</div>
+            </div>
+          </div>
+
+          <!-- Charts -->
+          <div class="charts-container" *ngIf="profitAndLossChartData">
+            <div class="chart-wrapper">
+              <h4>Revenue vs Expenses</h4>
+              <canvas baseChart
+                [data]="profitAndLossChartData"
+                [type]="'bar'"
+                [options]="chartOptions">
+              </canvas>
+            </div>
+            <div class="chart-wrapper" *ngIf="expensesByCategoryChartData">
+              <h4>Expenses by Category</h4>
+              <canvas baseChart
+                [data]="expensesByCategoryChartData"
+                [type]="'pie'"
+                [options]="pieChartOptions">
+              </canvas>
+            </div>
+          </div>
+
+          <div class="pnl-sections">
+            <div class="section">
+              <h3>Revenue</h3>
+              <div class="section-details">
+                <div class="detail-row">
+                  <span>Amount:</span>
+                  <span [class.credit-amount]="((generatedReport.data.revenue?.netAmount ?? generatedReport.data.revenue?.amount) || 0) >= 0" [class.negative-amount]="((generatedReport.data.revenue?.netAmount ?? generatedReport.data.revenue?.amount) || 0) < 0">
+                    {{ formatCurrency((generatedReport.data.revenue?.netAmount ?? generatedReport.data.revenue?.amount) || 0, true) }}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div class="section">
+              <h3>Expenses</h3>
+              <table mat-table [dataSource]="generatedReport.data.expenses.items" class="report-table">
+                <ng-container matColumnDef="category">
+                  <th mat-header-cell *matHeaderCellDef>Category</th>
+                  <td mat-cell *matCellDef="let row">{{ row.category }}</td>
+                </ng-container>
+                <ng-container matColumnDef="amount">
+                  <th mat-header-cell *matHeaderCellDef class="text-right">Amount</th>
+                  <td mat-cell *matCellDef="let row" class="text-right" [class.positive-amount]="(row.amount || 0) >= 0" [class.negative-amount]="(row.amount || 0) < 0">
+                    {{ formatCurrency(row.amount, true) }}
+                  </td>
+                </ng-container>
+                <tr mat-header-row *matHeaderRowDef="['category', 'amount']"></tr>
+                <tr mat-row *matRowDef="let row; columns: ['category', 'amount']"></tr>
+              </table>
+              <div class="section-total" [class.positive-amount]="(generatedReport.data.expenses?.total || 0) >= 0" [class.negative-amount]="(generatedReport.data.expenses?.total || 0) < 0">
+                Total Expenses: {{ formatCurrency(generatedReport.data.expenses?.total || 0, true) }}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Payables Report -->
+        <div *ngIf="generatedReport.type === 'payables'">
+          <!-- Opening/Closing Balance Summary -->
+          <div class="balance-summary" *ngIf="generatedReport.data.summary && generatedReport.data.summary.openingBalance !== undefined">
+            <div class="balance-card">
+              <div class="balance-label">Opening Balance</div>
+              <div class="balance-amount">
+                <span [class.credit-amount]="(generatedReport.data.summary.openingBalance || 0) >= 0" [class.negative-amount]="(generatedReport.data.summary.openingBalance || 0) < 0">
+                  {{ formatCurrency(generatedReport.data.summary.openingBalance || 0, true) }}
+                </span>
+              </div>
+            </div>
+            <div class="balance-card">
+              <div class="balance-label">Period Amount</div>
+              <div class="balance-amount">
+                <span [class.credit-amount]="(generatedReport.data.summary.periodAmount || 0) >= 0" [class.negative-amount]="(generatedReport.data.summary.periodAmount || 0) < 0">
+                  {{ formatCurrency(generatedReport.data.summary.periodAmount || 0, true) }}
+                </span>
+              </div>
+            </div>
+            <div class="balance-card">
+              <div class="balance-label">Closing Balance</div>
+              <div class="balance-amount">
+                <span [class.credit-amount]="(generatedReport.data.summary.closingBalance || 0) >= 0" [class.negative-amount]="(generatedReport.data.summary.closingBalance || 0) < 0">
+                  {{ formatCurrency(generatedReport.data.summary.closingBalance || 0, true) }}
+                </span>
+              </div>
+            </div>
+          </div>
+          
+          <div class="report-summary" *ngIf="generatedReport.data.summary">
+            <div class="summary-card">
+              <div class="summary-label">Total Items</div>
+              <div class="summary-value">{{ generatedReport.data.summary.totalItems }}</div>
+            </div>
+            <div class="summary-card">
+              <div class="summary-label">Total Amount</div>
+              <div class="summary-value" [class.credit-amount]="(generatedReport.data.summary.totalAmount || 0) >= 0" [class.negative-amount]="(generatedReport.data.summary.totalAmount || 0) < 0">
+                {{ formatCurrency(generatedReport.data.summary.totalAmount || 0, true) }}
+              </div>
+            </div>
+            <div class="summary-card">
+              <div class="summary-label">Overdue Items</div>
+              <div class="summary-value">{{ generatedReport.data.summary.overdueItems || 0 }}</div>
+            </div>
+            <div class="summary-card">
+              <div class="summary-label">Overdue Amount</div>
+              <div class="summary-value" [class.credit-amount]="(generatedReport.data.summary.overdueAmount || 0) >= 0" [class.negative-amount]="(generatedReport.data.summary.overdueAmount || 0) < 0">
+                {{ formatCurrency(generatedReport.data.summary.overdueAmount || 0, true) }}
+              </div>
+            </div>
+          </div>
+
+          <!-- Chart -->
+          <div class="chart-wrapper" *ngIf="payablesChartData">
+            <h4>Payables by Vendor</h4>
+            <canvas baseChart
+              [data]="payablesChartData"
+              [type]="'bar'"
+              [options]="chartOptions">
+            </canvas>
+          </div>
+
+          <table mat-table [dataSource]="generatedReport.data.items" class="report-table">
+            <ng-container matColumnDef="vendor">
+              <th mat-header-cell *matHeaderCellDef>Vendor</th>
+              <td mat-cell *matCellDef="let row">{{ row.vendor }}</td>
+            </ng-container>
+            <ng-container matColumnDef="amount">
+              <th mat-header-cell *matHeaderCellDef class="text-right">Amount</th>
+              <td mat-cell *matCellDef="let row" class="text-right" [class.credit-amount]="(row.amount || 0) >= 0" [class.negative-amount]="(row.amount || 0) < 0">
+                {{ formatCurrency(row.amount, true) }}
+              </td>
+            </ng-container>
+            <ng-container matColumnDef="expectedDate">
+              <th mat-header-cell *matHeaderCellDef>Expected Date</th>
+              <td mat-cell *matCellDef="let row">{{ formatDate(row.expectedDate) }}</td>
+            </ng-container>
+            <ng-container matColumnDef="status">
+              <th mat-header-cell *matHeaderCellDef>Status</th>
+              <td mat-cell *matCellDef="let row">
+                <span [class.overdue]="row.isOverdue">{{ row.status }}</span>
+              </td>
+            </ng-container>
+            <tr mat-header-row *matHeaderRowDef="['vendor', 'amount', 'expectedDate', 'status']"></tr>
+            <tr mat-row *matRowDef="let row; columns: ['vendor', 'amount', 'expectedDate', 'status']"></tr>
+          </table>
+
+          <!-- Supplier Summary Section -->
+          <div class="supplier-summary-section" *ngIf="generatedReport.data.supplierSummary && generatedReport.data.supplierSummary.length > 0">
+            <h3 class="section-title">
+              <mat-icon>business</mat-icon>
+              Supplier Summary (Pending Balances)
+            </h3>
+            <table mat-table [dataSource]="generatedReport.data.supplierSummary" class="report-table supplier-summary-table">
+              <ng-container matColumnDef="vendor">
+                <th mat-header-cell *matHeaderCellDef>Supplier</th>
+                <td mat-cell *matCellDef="let row">{{ row.vendor }}</td>
+              </ng-container>
+              <ng-container matColumnDef="pendingBalance">
+                <th mat-header-cell *matHeaderCellDef class="text-right">Pending Balance</th>
+                <td mat-cell *matCellDef="let row" class="text-right" [class.credit-amount]="(row.pendingBalance || 0) >= 0" [class.negative-amount]="(row.pendingBalance || 0) < 0">
+                  {{ formatCurrency(row.pendingBalance || 0, true) }}
+                </td>
+              </ng-container>
+              <ng-container matColumnDef="itemCount">
+                <th mat-header-cell *matHeaderCellDef class="text-center">Item Count</th>
+                <td mat-cell *matCellDef="let row" class="text-center">{{ row.itemCount || 0 }}</td>
+              </ng-container>
+              <ng-container matColumnDef="overdueAmount">
+                <th mat-header-cell *matHeaderCellDef class="text-right">Overdue Amount</th>
+                <td mat-cell *matCellDef="let row" class="text-right" [class.overdue]="(row.overdueAmount || 0) > 0">
+                  {{ formatCurrency(row.overdueAmount || 0, true) }}
+                </td>
+              </ng-container>
+              <ng-container matColumnDef="overdueCount">
+                <th mat-header-cell *matHeaderCellDef class="text-center">Overdue Count</th>
+                <td mat-cell *matCellDef="let row" class="text-center" [class.overdue]="(row.overdueCount || 0) > 0">
+                  {{ row.overdueCount || 0 }}
+                </td>
+              </ng-container>
+              <tr mat-header-row *matHeaderRowDef="['vendor', 'pendingBalance', 'itemCount', 'overdueAmount', 'overdueCount']"></tr>
+              <tr mat-row *matRowDef="let row; columns: ['vendor', 'pendingBalance', 'itemCount', 'overdueAmount', 'overdueCount']"></tr>
+            </table>
+          </div>
+        </div>
+
+        <!-- Receivables Report -->
+        <div *ngIf="generatedReport.type === 'receivables'">
+          <!-- Opening/Closing Balance Summary -->
+          <div class="balance-summary" *ngIf="generatedReport.data.summary && generatedReport.data.summary.openingBalance !== undefined">
+            <div class="balance-card">
+              <div class="balance-label">Opening Balance</div>
+              <div class="balance-amount">
+                <span [class.positive-amount]="(generatedReport.data.summary.openingBalance || 0) >= 0" [class.negative-amount]="(generatedReport.data.summary.openingBalance || 0) < 0">
+                  {{ formatCurrency(generatedReport.data.summary.openingBalance || 0, true) }}
+                </span>
+              </div>
+            </div>
+            <div class="balance-card">
+              <div class="balance-label">Period Amount</div>
+              <div class="balance-amount">
+                <span [class.positive-amount]="(generatedReport.data.summary.periodAmount || 0) >= 0" [class.negative-amount]="(generatedReport.data.summary.periodAmount || 0) < 0">
+                  {{ formatCurrency(generatedReport.data.summary.periodAmount || 0, true) }}
+                </span>
+              </div>
+            </div>
+            <div class="balance-card">
+              <div class="balance-label">Closing Balance</div>
+              <div class="balance-amount">
+                <span [class.positive-amount]="(generatedReport.data.summary.closingBalance || 0) >= 0" [class.negative-amount]="(generatedReport.data.summary.closingBalance || 0) < 0">
+                  {{ formatCurrency(generatedReport.data.summary.closingBalance || 0, true) }}
+                </span>
+              </div>
+            </div>
+          </div>
+          
+          <div class="report-summary" *ngIf="generatedReport.data.summary">
+            <div class="summary-card">
+              <div class="summary-label">Total Invoices</div>
+              <div class="summary-value">{{ generatedReport.data.summary.totalInvoices }}</div>
+            </div>
+            <div class="summary-card">
+              <div class="summary-label">Total Outstanding</div>
+              <div class="summary-value" [class.positive-amount]="(generatedReport.data.summary.totalOutstanding || 0) >= 0" [class.negative-amount]="(generatedReport.data.summary.totalOutstanding || 0) < 0">
+                {{ formatCurrency(generatedReport.data.summary.totalOutstanding || 0, true) }}
+              </div>
+            </div>
+            <div class="summary-card">
+              <div class="summary-label">Overdue Invoices</div>
+              <div class="summary-value">{{ generatedReport.data.summary.overdueInvoices || 0 }}</div>
+            </div>
+            <div class="summary-card">
+              <div class="summary-label">Overdue Amount</div>
+              <div class="summary-value" [class.positive-amount]="(generatedReport.data.summary.overdueAmount || 0) >= 0" [class.negative-amount]="(generatedReport.data.summary.overdueAmount || 0) < 0">
+                {{ formatCurrency(generatedReport.data.summary.overdueAmount || 0, true) }}
+              </div>
+            </div>
+          </div>
+
+          <!-- Chart -->
+          <div class="chart-wrapper" *ngIf="receivablesChartData">
+            <h4>Receivables by Customer</h4>
+            <canvas baseChart
+              [data]="receivablesChartData"
+              [type]="'bar'"
+              [options]="chartOptions">
+            </canvas>
+          </div>
+
+          <table mat-table [dataSource]="generatedReport.data.items" class="report-table">
+            <ng-container matColumnDef="invoiceNumber">
+              <th mat-header-cell *matHeaderCellDef>Invoice #</th>
+              <td mat-cell *matCellDef="let row">{{ row.invoiceNumber }}</td>
+            </ng-container>
+            <ng-container matColumnDef="customer">
+              <th mat-header-cell *matHeaderCellDef>Customer</th>
+              <td mat-cell *matCellDef="let row">{{ row.customer }}</td>
+            </ng-container>
+            <ng-container matColumnDef="total">
+              <th mat-header-cell *matHeaderCellDef class="text-right">Total</th>
+              <td mat-cell *matCellDef="let row" class="text-right" [class.positive-amount]="(row.total || 0) >= 0" [class.negative-amount]="(row.total || 0) < 0">
+                {{ formatCurrency(row.total, true) }}
+              </td>
+            </ng-container>
+            <ng-container matColumnDef="paid">
+              <th mat-header-cell *matHeaderCellDef class="text-right">Paid</th>
+              <td mat-cell *matCellDef="let row" class="text-right" [class.positive-amount]="(row.paid || 0) >= 0" [class.negative-amount]="(row.paid || 0) < 0">
+                {{ formatCurrency(row.paid, true) }}
+              </td>
+            </ng-container>
+            <ng-container matColumnDef="outstanding">
+              <th mat-header-cell *matHeaderCellDef class="text-right">Outstanding</th>
+              <td mat-cell *matCellDef="let row" class="text-right" [class.positive-amount]="(row.outstanding || 0) >= 0" [class.negative-amount]="(row.outstanding || 0) < 0">
+                {{ formatCurrency(row.outstanding, true) }}
+              </td>
+            </ng-container>
+            <ng-container matColumnDef="dueDate">
+              <th mat-header-cell *matHeaderCellDef>Due Date</th>
+              <td mat-cell *matCellDef="let row">{{ formatDate(row.dueDate) }}</td>
+            </ng-container>
+            <ng-container matColumnDef="paymentStatus">
+              <th mat-header-cell *matHeaderCellDef>Status</th>
+              <td mat-cell *matCellDef="let row">
+                <span [class.overdue]="row.isOverdue">{{ row.paymentStatus }}</span>
+              </td>
+            </ng-container>
+            <tr mat-header-row *matHeaderRowDef="['invoiceNumber', 'customer', 'total', 'paid', 'outstanding', 'dueDate', 'paymentStatus']"></tr>
+            <tr mat-row *matRowDef="let row; columns: ['invoiceNumber', 'customer', 'total', 'paid', 'outstanding', 'dueDate', 'paymentStatus']"></tr>
+          </table>
+        </div>
+
+        <!-- VAT Control Account Report -->
+        <div *ngIf="generatedReport.type === 'vat_control_account'">
+          <div class="report-summary" *ngIf="generatedReport.data.summary">
+            <div class="summary-card">
+              <div class="summary-label">VAT Input</div>
+              <div class="summary-value" [class.positive-amount]="(generatedReport.data.summary.netVatInput ?? generatedReport.data.summary.vatInput ?? 0) >= 0" [class.negative-amount]="(generatedReport.data.summary.netVatInput ?? generatedReport.data.summary.vatInput ?? 0) < 0">
+                {{ formatCurrency((generatedReport.data.summary.netVatInput ?? generatedReport.data.summary.vatInput ?? 0), true) }}
+              </div>
+            </div>
+            <div class="summary-card">
+              <div class="summary-label">VAT Output</div>
+              <div class="summary-value" [class.credit-amount]="(generatedReport.data.summary.netVatOutput ?? generatedReport.data.summary.vatOutput ?? 0) >= 0" [class.negative-amount]="(generatedReport.data.summary.netVatOutput ?? generatedReport.data.summary.vatOutput ?? 0) < 0">
+                {{ formatCurrency((generatedReport.data.summary.netVatOutput ?? generatedReport.data.summary.vatOutput ?? 0), true) }}
+              </div>
+            </div>
+            <div class="summary-card">
+              <div class="summary-label">Net VAT</div>
+              <div class="summary-value" [class.credit-amount]="(generatedReport.data.summary.netVat || 0) >= 0" [class.negative-amount]="(generatedReport.data.summary.netVat || 0) < 0">
+                {{ formatCurrency(generatedReport.data.summary.netVat || 0, true) }}
+              </div>
+            </div>
+            <div class="summary-card" *ngIf="generatedReport.data.summary.totalTransactions">
+              <div class="summary-label">Total Transactions</div>
+              <div class="summary-value">{{ generatedReport.data.summary.totalTransactions }}</div>
+            </div>
+          </div>
+
+          <!-- Chart -->
+          <div class="chart-wrapper" *ngIf="vatControlAccountChartData">
+            <h4>VAT Overview</h4>
+            <canvas baseChart
+              [data]="vatControlAccountChartData"
+              [type]="'bar'"
+              [options]="chartOptions">
+            </canvas>
+          </div>
+
+          <div class="vat-sections" *ngIf="generatedReport.data">
+            <div class="section" *ngIf="generatedReport.data.vatInputItems">
+              <h3>VAT Input (Purchases/Expenses)</h3>
+              <table mat-table [dataSource]="generatedReport.data.vatInputItems" class="report-table">
+                <ng-container matColumnDef="date">
+                  <th mat-header-cell *matHeaderCellDef>Date</th>
+                  <td mat-cell *matCellDef="let row">{{ formatDate(row.date) }}</td>
+                </ng-container>
+                <ng-container matColumnDef="description">
+                  <th mat-header-cell *matHeaderCellDef>Description</th>
+                  <td mat-cell *matCellDef="let row">{{ row.description || row.vendorName || 'N/A' }}</td>
+                </ng-container>
+                <ng-container matColumnDef="amount">
+                  <th mat-header-cell *matHeaderCellDef class="text-right">Amount</th>
+                  <td mat-cell *matCellDef="let row" class="text-right" [class.positive-amount]="(row.amount || 0) >= 0" [class.negative-amount]="(row.amount || 0) < 0">
+                    {{ formatCurrency(row.amount, true) }}
+                  </td>
+                </ng-container>
+                <ng-container matColumnDef="vatRate">
+                  <th mat-header-cell *matHeaderCellDef class="text-right">VAT Rate</th>
+                  <td mat-cell *matCellDef="let row" class="text-right">{{ row.vatRate || 0 }}%</td>
+                </ng-container>
+                <ng-container matColumnDef="vatAmount">
+                  <th mat-header-cell *matHeaderCellDef class="text-right">VAT Amount</th>
+                  <td mat-cell *matCellDef="let row" class="text-right" [class.positive-amount]="(row.vatAmount || 0) >= 0" [class.negative-amount]="(row.vatAmount || 0) < 0">
+                    {{ formatCurrency(row.vatAmount, true) }}
+                  </td>
+                </ng-container>
+                <ng-container matColumnDef="trn">
+                  <th mat-header-cell *matHeaderCellDef>TRN</th>
+                  <td mat-cell *matCellDef="let row">{{ row.trn || 'N/A' }}</td>
+                </ng-container>
+                <tr mat-header-row *matHeaderRowDef="['date', 'description', 'amount', 'vatRate', 'vatAmount', 'trn']"></tr>
+                <tr mat-row *matRowDef="let row; columns: ['date', 'description', 'amount', 'vatRate', 'vatAmount', 'trn']"></tr>
+              </table>
+              <div class="section-total" *ngIf="generatedReport.data.summary" [class.positive-amount]="(generatedReport.data.summary.netVatInput ?? generatedReport.data.summary.vatInput ?? 0) >= 0" [class.negative-amount]="(generatedReport.data.summary.netVatInput ?? generatedReport.data.summary.vatInput ?? 0) < 0">
+                Total VAT Input: {{ formatCurrency((generatedReport.data.summary.netVatInput ?? generatedReport.data.summary.vatInput ?? 0), true) }}
+              </div>
+            </div>
+
+            <div class="section" *ngIf="generatedReport.data.vatOutputItems">
+              <h3>VAT Output (Sales/Invoices)</h3>
+              <table mat-table [dataSource]="generatedReport.data.vatOutputItems" class="report-table">
+                <ng-container matColumnDef="date">
+                  <th mat-header-cell *matHeaderCellDef>Date</th>
+                  <td mat-cell *matCellDef="let row">{{ formatDate(row.date) }}</td>
+                </ng-container>
+                <ng-container matColumnDef="description">
+                  <th mat-header-cell *matHeaderCellDef>Description</th>
+                  <td mat-cell *matCellDef="let row">{{ row.description || row.invoiceNumber || row.customerName || 'N/A' }}</td>
+                </ng-container>
+                <ng-container matColumnDef="amount">
+                  <th mat-header-cell *matHeaderCellDef class="text-right">Amount</th>
+                  <td mat-cell *matCellDef="let row" class="text-right">{{ formatCurrency(row.amount) }}</td>
+                </ng-container>
+                <ng-container matColumnDef="vatRate">
+                  <th mat-header-cell *matHeaderCellDef class="text-right">VAT Rate</th>
+                  <td mat-cell *matCellDef="let row" class="text-right">{{ row.vatRate || 0 }}%</td>
+                </ng-container>
+                <ng-container matColumnDef="vatAmount">
+                  <th mat-header-cell *matHeaderCellDef class="text-right">VAT Amount</th>
+                  <td mat-cell *matCellDef="let row" class="text-right">{{ formatCurrency(row.vatAmount) }}</td>
+                </ng-container>
+                <ng-container matColumnDef="trn">
+                  <th mat-header-cell *matHeaderCellDef>TRN</th>
+                  <td mat-cell *matCellDef="let row">{{ row.trn || 'N/A' }}</td>
+                </ng-container>
+                <tr mat-header-row *matHeaderRowDef="['date', 'description', 'amount', 'vatRate', 'vatAmount', 'trn']"></tr>
+                <tr mat-row *matRowDef="let row; columns: ['date', 'description', 'amount', 'vatRate', 'vatAmount', 'trn']"></tr>
+              </table>
+              <div class="section-total" *ngIf="generatedReport.data.summary" [class.credit-amount]="(generatedReport.data.summary.netVatOutput || 0) >= 0" [class.negative-amount]="(generatedReport.data.summary.netVatOutput || 0) < 0">
+                Total VAT Output: {{ formatCurrency(generatedReport.data.summary.netVatOutput || 0, true) }}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Stock Balance Report -->
+        <div *ngIf="generatedReport.type === 'stock_balance'">
+          <!-- Period Information -->
+          <div class="report-period" *ngIf="generatedReport.data?.period">
+            <div class="period-info">
+              <span *ngIf="generatedReport.data?.period?.startDate">
+                <strong>From:</strong> {{ generatedReport.data.period.startDate | date: 'mediumDate' }}
+              </span>
+              <span *ngIf="generatedReport.data?.period?.endDate">
+                <strong>To:</strong> {{ generatedReport.data.period.endDate | date: 'mediumDate' }}
+              </span>
+            </div>
+          </div>
+
+          <!-- Summary Cards -->
+          <div class="report-summary" *ngIf="generatedReport.data?.summary">
+            <div class="summary-card">
+              <div class="summary-label">Total Opening Stock</div>
+              <div class="summary-value">{{ formatCurrency(generatedReport.data.summary?.totalOpeningStock || 0) }}</div>
+            </div>
+            <div class="summary-card">
+              <div class="summary-label">Total Stock Inwards</div>
+              <div class="summary-value" [class.positive-amount]="(generatedReport.data.summary?.totalStockInwards || 0) >= 0">
+                {{ formatCurrency(generatedReport.data.summary?.totalStockInwards || 0) }}
+              </div>
+            </div>
+            <div class="summary-card">
+              <div class="summary-label">Total Stock Outwards</div>
+              <div class="summary-value" [class.negative-amount]="(generatedReport.data.summary?.totalStockOutwards || 0) > 0">
+                {{ formatCurrency(generatedReport.data.summary?.totalStockOutwards || 0) }}
+              </div>
+            </div>
+            <div class="summary-card">
+              <div class="summary-label">Total Adjustments</div>
+              <div class="summary-value" [class.positive-amount]="(generatedReport.data.summary?.totalAdjustments || 0) >= 0" [class.negative-amount]="(generatedReport.data.summary?.totalAdjustments || 0) < 0">
+                {{ formatCurrency(generatedReport.data.summary?.totalAdjustments || 0, true) }}
+              </div>
+            </div>
+            <div class="summary-card highlight">
+              <div class="summary-label">Total Closing Stock</div>
+              <div class="summary-value" [class.positive-amount]="(generatedReport.data.summary?.totalClosingStock || 0) >= 0" [class.negative-amount]="(generatedReport.data.summary?.totalClosingStock || 0) < 0">
+                {{ formatCurrency(generatedReport.data.summary?.totalClosingStock || 0) }}
+              </div>
+            </div>
+            <div class="summary-card highlight">
+              <div class="summary-label">Total Stock Value</div>
+              <div class="summary-value" [class.positive-amount]="(generatedReport.data.summary?.totalStockValue || 0) >= 0">
+                {{ formatCurrency(generatedReport.data.summary?.totalStockValue || 0) }}
+              </div>
+              <div class="summary-note">(Matches Balance Sheet Closing Stock)</div>
+            </div>
+          </div>
+
+          <!-- Products Table -->
+          <h3 class="section-title" style="margin-top: 2rem;">
+            <mat-icon>inventory_2</mat-icon>
+            Product Stock Details
+          </h3>
+          <div class="table-container" *ngIf="generatedReport.data?.products && generatedReport.data.products.length > 0">
+            <table mat-table [dataSource]="generatedReport.data?.products || []" class="report-table stock-balance-table">
+              <ng-container matColumnDef="productName">
+                <th mat-header-cell *matHeaderCellDef>Product Name</th>
+                <td mat-cell *matCellDef="let row">
+                  <div class="product-info">
+                    <strong>{{ row.productName }}</strong>
+                    <span *ngIf="row.sku" class="product-sku">SKU: {{ row.sku }}</span>
+                  </div>
+                </td>
+              </ng-container>
+
+              <ng-container matColumnDef="unitOfMeasure">
+                <th mat-header-cell *matHeaderCellDef>Unit</th>
+                <td mat-cell *matCellDef="let row">{{ row.unitOfMeasure || 'unit' }}</td>
+              </ng-container>
+
+              <ng-container matColumnDef="openingStock">
+                <th mat-header-cell *matHeaderCellDef class="text-right">Opening Stock</th>
+                <td mat-cell *matCellDef="let row" class="text-right">
+                  {{ row.openingStock | number:'1.2-2' }}
+                </td>
+              </ng-container>
+
+              <ng-container matColumnDef="stockInwards">
+                <th mat-header-cell *matHeaderCellDef class="text-right">Stock Inwards</th>
+                <td mat-cell *matCellDef="let row" class="text-right" [class.positive-amount]="row.stockInwards > 0">
+                  {{ row.stockInwards | number:'1.2-2' }}
+                </td>
+              </ng-container>
+
+              <ng-container matColumnDef="stockOutwards">
+                <th mat-header-cell *matHeaderCellDef class="text-right">Stock Outwards</th>
+                <td mat-cell *matCellDef="let row" class="text-right" [class.negative-amount]="row.stockOutwards > 0">
+                  {{ row.stockOutwards | number:'1.2-2' }}
+                </td>
+              </ng-container>
+
+              <ng-container matColumnDef="adjustments">
+                <th mat-header-cell *matHeaderCellDef class="text-right">Adjustments</th>
+                <td mat-cell *matCellDef="let row" class="text-right" 
+                    [class.positive-amount]="row.adjustments > 0" 
+                    [class.negative-amount]="row.adjustments < 0">
+                  {{ row.adjustments | number:'1.2-2' }}
+                </td>
+              </ng-container>
+
+              <ng-container matColumnDef="closingStock">
+                <th mat-header-cell *matHeaderCellDef class="text-right">Closing Stock</th>
+                <td mat-cell *matCellDef="let row" class="text-right" [class.positive-amount]="row.closingStock >= 0" [class.negative-amount]="row.closingStock < 0">
+                  <strong>{{ row.closingStock | number:'1.2-2' }}</strong>
+                </td>
+              </ng-container>
+
+              <ng-container matColumnDef="averageCost">
+                <th mat-header-cell *matHeaderCellDef class="text-right">Avg. Cost/Unit</th>
+                <td mat-cell *matCellDef="let row" class="text-right">
+                  {{ formatCurrency(row.averageCost || 0) }}
+                </td>
+              </ng-container>
+
+              <ng-container matColumnDef="stockValue">
+                <th mat-header-cell *matHeaderCellDef class="text-right">Stock Value</th>
+                <td mat-cell *matCellDef="let row" class="text-right" [class.positive-amount]="row.stockValue >= 0">
+                  <strong>{{ formatCurrency(row.stockValue || 0) }}</strong>
+                </td>
+              </ng-container>
+
+              <tr mat-header-row *matHeaderRowDef="['productName', 'unitOfMeasure', 'openingStock', 'stockInwards', 'stockOutwards', 'adjustments', 'closingStock', 'averageCost', 'stockValue']"></tr>
+              <tr mat-row *matRowDef="let row; columns: ['productName', 'unitOfMeasure', 'openingStock', 'stockInwards', 'stockOutwards', 'adjustments', 'closingStock', 'averageCost', 'stockValue']"></tr>
+            </table>
+          </div>
+
+          <div class="empty-state" *ngIf="!generatedReport.data?.products || generatedReport.data.products.length === 0">
+            <mat-icon>inventory_2</mat-icon>
+            <p>No stock movements found for the selected period.</p>
+            <p class="hint">Stock balance report shows products with stock activity. Create stock movements (purchases, sales, adjustments) to see data here.</p>
+          </div>
+
+          <!-- Validation Note -->
+          <div class="validation-note" *ngIf="generatedReport.data?.summary && generatedReport.data.summary.totalStockValue > 0">
+            <mat-icon>info</mat-icon>
+            <div>
+              <strong>Balance Sheet Integration:</strong>
+              <p>The total stock value ({{ formatCurrency(generatedReport.data.summary.totalStockValue) }}) should match the "Closing Stock (Inventory)" amount in the Balance Sheet report for the same date.</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- General Ledger Report -->
+        <div *ngIf="generatedReport.type === 'general_ledger'">
+          <div class="report-info" *ngIf="generatedReport.data?.period">
+            <p>
+              <strong>Period:</strong> {{ generatedReport.data.period.startDate }} to {{ generatedReport.data.period.endDate }}
+            </p>
+            <p>
+              <strong>Total Accounts:</strong> {{ generatedReport.data?.accounts?.length || 0 }}
+            </p>
+          </div>
+
+          <div class="general-ledger-accounts" *ngIf="generatedReport.data?.accounts && generatedReport.data.accounts.length > 0">
+            <mat-expansion-panel *ngFor="let account of generatedReport.data.accounts" class="account-panel">
+              <mat-expansion-panel-header>
+                <mat-panel-title>
+                  <div class="account-header">
+                    <span class="account-name">{{ account.accountName }}</span>
+                    <span class="account-category">{{ account.accountCategory }}</span>
+                  </div>
+                </mat-panel-title>
+                <mat-panel-description>
+                  <div class="account-balances">
+                    <span>Opening: {{ formatCurrency(account.openingBalance || 0, true) }}</span>
+                    <span>Closing: {{ formatCurrency(account.closingBalance || 0, true) }}</span>
+                    <span>Transactions: {{ account.transactions?.length || 0 }}</span>
+                  </div>
+                </mat-panel-description>
+              </mat-expansion-panel-header>
+
+              <div class="account-details">
+                <div class="balance-info">
+                  <div class="balance-item">
+                    <span class="label">Opening Balance:</span>
+                    <span class="value" [class.positive-amount]="(account.openingBalance || 0) >= 0" [class.negative-amount]="(account.openingBalance || 0) < 0">
+                      {{ formatCurrency(account.openingBalance || 0, true) }}
+                    </span>
+                  </div>
+                  <div class="balance-item">
+                    <span class="label">Closing Balance:</span>
+                    <span class="value" [class.positive-amount]="(account.closingBalance || 0) >= 0" [class.negative-amount]="(account.closingBalance || 0) < 0">
+                      {{ formatCurrency(account.closingBalance || 0, true) }}
+                    </span>
+                  </div>
+                </div>
+
+                <div class="transactions-table" *ngIf="account.transactions && account.transactions.length > 0">
+                  <table mat-table [dataSource]="account.transactions" class="ledger-table">
+                    <ng-container matColumnDef="date">
+                      <th mat-header-cell *matHeaderCellDef>Date</th>
+                      <td mat-cell *matCellDef="let transaction">{{ transaction.date }}</td>
+                    </ng-container>
+                    <ng-container matColumnDef="description">
+                      <th mat-header-cell *matHeaderCellDef>Description</th>
+                      <td mat-cell *matCellDef="let transaction">{{ transaction.description || '-' }}</td>
+                    </ng-container>
+                    <ng-container matColumnDef="referenceNumber">
+                      <th mat-header-cell *matHeaderCellDef>Reference</th>
+                      <td mat-cell *matCellDef="let transaction">{{ transaction.referenceNumber || '-' }}</td>
+                    </ng-container>
+                    <ng-container matColumnDef="source">
+                      <th mat-header-cell *matHeaderCellDef>Source</th>
+                      <td mat-cell *matCellDef="let transaction">{{ transaction.source }}</td>
+                    </ng-container>
+                    <ng-container matColumnDef="debitAmount">
+                      <th mat-header-cell *matHeaderCellDef class="text-right">Debit</th>
+                      <td mat-cell *matCellDef="let transaction" class="text-right">
+                        <span *ngIf="transaction.debitAmount > 0">{{ formatCurrency(transaction.debitAmount) }}</span>
+                        <span *ngIf="transaction.debitAmount === 0">-</span>
+                      </td>
+                    </ng-container>
+                    <ng-container matColumnDef="creditAmount">
+                      <th mat-header-cell *matHeaderCellDef class="text-right">Credit</th>
+                      <td mat-cell *matCellDef="let transaction" class="text-right">
+                        <span *ngIf="transaction.creditAmount > 0">{{ formatCurrency(transaction.creditAmount) }}</span>
+                        <span *ngIf="transaction.creditAmount === 0">-</span>
+                      </td>
+                    </ng-container>
+                    <ng-container matColumnDef="runningBalance">
+                      <th mat-header-cell *matHeaderCellDef class="text-right">Balance</th>
+                      <td mat-cell *matCellDef="let transaction" class="text-right" 
+                          [class.positive-amount]="(transaction.runningBalance || 0) >= 0" 
+                          [class.negative-amount]="(transaction.runningBalance || 0) < 0">
+                        {{ formatCurrency(transaction.runningBalance || 0, true) }}
+                      </td>
+                    </ng-container>
+
+                    <tr mat-header-row *matHeaderRowDef="['date', 'description', 'referenceNumber', 'source', 'debitAmount', 'creditAmount', 'runningBalance']"></tr>
+                    <tr mat-row *matRowDef="let row; columns: ['date', 'description', 'referenceNumber', 'source', 'debitAmount', 'creditAmount', 'runningBalance']"></tr>
+                  </table>
+                </div>
+
+                <div class="empty-state" *ngIf="!account.transactions || account.transactions.length === 0">
+                  <mat-icon>receipt</mat-icon>
+                  <p>No transactions found for this account in the selected period.</p>
+                </div>
+              </div>
+            </mat-expansion-panel>
+          </div>
+
+          <div class="empty-state" *ngIf="!generatedReport.data?.accounts || generatedReport.data.accounts.length === 0">
+            <mat-icon>book</mat-icon>
+            <p>No accounts found for the selected period.</p>
+          </div>
+        </div>
+      </mat-card-content>
+    </mat-card>
+  </div>
+</section>
