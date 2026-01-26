@@ -252,6 +252,9 @@ export class ReportsService {
             dto.filters,
           );
           break;
+        case ReportType.GENERAL_LEDGER:
+          data = await this.buildGeneralLedger(organizationId, dto.filters);
+          break;
         default:
           this.logger.warn(`Unknown report type: ${dto.type}`);
           data = {};
@@ -7888,6 +7891,1209 @@ export class ReportsService {
     } catch (error) {
       this.logger.error(
         `Error building stock balance report: organizationId=${organizationId}, error=${error.message}`,
+        error.stack,
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Builds General Ledger report showing all transactions for each account
+   */
+  private async buildGeneralLedger(
+    organizationId: string,
+    filters?: Record<string, any>,
+  ) {
+    this.logger.log(
+      `Building General Ledger: organizationId=${organizationId}, filters=${JSON.stringify(filters)}`,
+    );
+
+    try {
+      let startDate = filters?.['startDate'];
+      let endDate = filters?.['endDate'];
+
+      if (!startDate || !endDate) {
+        const taxSettings =
+          await this.settingsService.getTaxSettings(organizationId);
+        const taxYearEnd = taxSettings.taxYearEnd;
+
+        if (taxYearEnd) {
+          const [month, day] = taxYearEnd.split('-').map(Number);
+          const now = new Date();
+          const currentYear = now.getFullYear();
+          const fiscalYearEnd = new Date(currentYear, month - 1, day);
+
+          if (now > fiscalYearEnd) {
+            const lastYearEnd = new Date(currentYear - 1, month - 1, day);
+            const startDateObj = new Date(lastYearEnd);
+            startDateObj.setDate(startDateObj.getDate() + 1);
+            startDate = startDateObj.toISOString().split('T')[0];
+            endDate = fiscalYearEnd.toISOString().split('T')[0];
+          } else {
+            const yearBeforeLastEnd = new Date(currentYear - 2, month - 1, day);
+            const startDateObj = new Date(yearBeforeLastEnd);
+            startDateObj.setDate(startDateObj.getDate() + 1);
+            startDate = startDateObj.toISOString().split('T')[0];
+            endDate = new Date(currentYear - 1, month - 1, day)
+              .toISOString()
+              .split('T')[0];
+          }
+        } else {
+          startDate = new Date(new Date().getFullYear(), 0, 1)
+            .toISOString()
+            .split('T')[0];
+          endDate = new Date().toISOString().split('T')[0];
+        }
+      }
+
+      this.logger.debug(
+        `General Ledger date range: startDate=${startDate}, endDate=${endDate}, organizationId=${organizationId}`,
+      );
+
+      // Get all custom ledger accounts
+      const customLedgerAccounts = await this.ledgerAccountsRepository.find({
+        where: {
+          organization: { id: organizationId } as any,
+          isDeleted: false,
+        },
+        order: { category: 'ASC', name: 'ASC' },
+      });
+
+      // Build list of all accounts (system + custom)
+      const allAccounts: Array<{
+        code: string;
+        name: string;
+        category: string;
+      }> = [];
+
+      // Add system accounts
+      Object.values(JournalEntryAccount).forEach((code) => {
+        const metadata = ACCOUNT_METADATA[code];
+        if (metadata && !metadata.isReadOnly) {
+          allAccounts.push({
+            code,
+            name: metadata.name,
+            category: metadata.category,
+          });
+        }
+      });
+
+      // Add custom ledger accounts
+      customLedgerAccounts.forEach((account) => {
+        allAccounts.push({
+          code: `ledger:${account.id}`,
+          name: account.name,
+          category: account.category,
+        });
+      });
+
+      // Get all transactions for each account
+      const accountLedgers: Array<{
+        accountCode: string;
+        accountName: string;
+        accountCategory: string;
+        openingBalance: number;
+        closingBalance: number;
+        transactions: Array<{
+          date: string;
+          description: string;
+          referenceNumber?: string;
+          source: string;
+          sourceId: string;
+          debitAmount: number;
+          creditAmount: number;
+          runningBalance: number;
+        }>;
+      }> = [];
+
+      for (const account of allAccounts) {
+        const transactions: Array<{
+          date: string;
+          description: string;
+          referenceNumber?: string;
+          source: string;
+          sourceId: string;
+          debitAmount: number;
+          creditAmount: number;
+        }> = [];
+
+        // 1. Journal Entries affecting this account
+        const journalEntries = await this.journalEntriesRepository
+          .createQueryBuilder('entry')
+          .where('entry.organization_id = :organizationId', { organizationId })
+          .andWhere('entry.is_deleted = false')
+          .andWhere('entry.entry_date >= :startDate', { startDate })
+          .andWhere('entry.entry_date <= :endDate', { endDate })
+          .andWhere(
+            '(entry.debit_account = :accountCode OR entry.credit_account = :accountCode)',
+            { accountCode: account.code },
+          )
+          .orderBy('entry.entry_date', 'ASC')
+          .addOrderBy('entry.created_at', 'ASC')
+          .getMany();
+
+        journalEntries.forEach((entry) => {
+          if (entry.debitAccount === account.code) {
+            transactions.push({
+              date: entry.entryDate,
+              description: entry.description || 'Journal Entry',
+              referenceNumber: entry.referenceNumber || undefined,
+              source: 'journal_entry',
+              sourceId: entry.id,
+              debitAmount: parseFloat(entry.amount),
+              creditAmount: 0,
+            });
+          }
+          if (entry.creditAccount === account.code) {
+            transactions.push({
+              date: entry.entryDate,
+              description: entry.description || 'Journal Entry',
+              referenceNumber: entry.referenceNumber || undefined,
+              source: 'journal_entry',
+              sourceId: entry.id,
+              debitAmount: 0,
+              creditAmount: parseFloat(entry.amount),
+            });
+          }
+        });
+
+        // 2. Cash/Bank: Expense payments (filtered by payment_date, not expense_date)
+        if (
+          account.code === JournalEntryAccount.CASH ||
+          account.code === JournalEntryAccount.BANK
+        ) {
+          const expensePayments = await this.expensePaymentsRepository
+            .createQueryBuilder('payment')
+            .leftJoin('payment.expense', 'expense')
+            .where('payment.organization_id = :organizationId', {
+              organizationId,
+            })
+            .andWhere('payment.is_deleted = false')
+            .andWhere('payment.payment_date >= :startDate', { startDate })
+            .andWhere('payment.payment_date <= :endDate', { endDate })
+            .andWhere(
+              account.code === JournalEntryAccount.CASH
+                ? 'payment.payment_method = :method'
+                : 'payment.payment_method = :method',
+              {
+                method:
+                  account.code === JournalEntryAccount.CASH
+                    ? PaymentMethod.CASH
+                    : PaymentMethod.BANK_TRANSFER,
+              },
+            )
+            .orderBy('payment.payment_date', 'ASC')
+            .addOrderBy('payment.created_at', 'ASC')
+            .getMany();
+
+          expensePayments.forEach((payment) => {
+            transactions.push({
+              date: payment.paymentDate,
+              description: `Payment: ${
+                payment.expense?.description ||
+                payment.expense?.invoiceNumber ||
+                payment.id
+              }`,
+              referenceNumber:
+                payment.expense?.invoiceNumber || payment.id,
+              source: 'expense_payment',
+              sourceId: payment.id,
+              debitAmount: 0,
+              creditAmount: parseFloat(payment.amount),
+            });
+          });
+        }
+
+        // 3. Accounts Payable: Expense accruals and debit note applications
+        if (account.code === JournalEntryAccount.ACCOUNTS_PAYABLE) {
+          // Expenses with accruals in period
+          const expensesWithAccruals = await this.expensesRepository
+            .createQueryBuilder('expense')
+            .leftJoin('expense.accrualDetail', 'accrual')
+            .where('expense.organization_id = :organizationId', {
+              organizationId,
+            })
+            .andWhere('expense.is_deleted = false')
+            .andWhere('expense.expense_date >= :startDate', { startDate })
+            .andWhere('expense.expense_date <= :endDate', { endDate })
+            .andWhere('accrual.status = :status', {
+              status: AccrualStatus.PENDING_SETTLEMENT,
+            })
+            .orderBy('expense.expense_date', 'ASC')
+            .getMany();
+
+          expensesWithAccruals.forEach((expense) => {
+            const totalAmount =
+              parseFloat(expense.amount) +
+              parseFloat(expense.vatAmount || '0');
+            transactions.push({
+              date: expense.expenseDate,
+              description:
+                expense.description ||
+                `Expense: ${expense.invoiceNumber || expense.id}`,
+              referenceNumber: expense.invoiceNumber || undefined,
+              source: 'expense',
+              sourceId: expense.id,
+              debitAmount: 0,
+              creditAmount: totalAmount,
+            });
+          });
+
+          // Debit notes linked to expenses (reduces AP)
+          const debitNotesForExpenses = await this.debitNotesRepository
+            .createQueryBuilder('dn')
+            .where('dn.organization_id = :organizationId', { organizationId })
+            .andWhere('dn.is_deleted = false')
+            .andWhere('dn.debit_note_date >= :startDate', { startDate })
+            .andWhere('dn.debit_note_date <= :endDate', { endDate })
+            .andWhere('dn.expense_id IS NOT NULL')
+            .andWhere(
+              '(dn.status = :issued OR dn.status = :applied OR dn.status = :draft)',
+              {
+                issued: DebitNoteStatus.ISSUED,
+                applied: DebitNoteStatus.APPLIED,
+                draft: DebitNoteStatus.DRAFT,
+              },
+            )
+            .orderBy('dn.debit_note_date', 'ASC')
+            .getMany();
+
+          debitNotesForExpenses.forEach((dn) => {
+            const totalAmount =
+              parseFloat(dn.amount) + parseFloat(dn.vatAmount || '0');
+            transactions.push({
+              date: dn.debitNoteDate,
+              description: `Debit Note: ${dn.vendorName || dn.debitNoteNumber}`,
+              referenceNumber: dn.debitNoteNumber || undefined,
+              source: 'debit_note',
+              sourceId: dn.id,
+              debitAmount: totalAmount,
+              creditAmount: 0,
+            });
+          });
+
+          // Debit note applications to expenses (reduces AP)
+          const debitNoteExpenseApplications =
+            await this.debitNoteExpenseApplicationsRepository
+              .createQueryBuilder('dnea')
+              .leftJoin('dnea.debitNote', 'dn')
+              .leftJoin('dnea.expense', 'expense')
+              .where('dnea.organization_id = :organizationId', {
+                organizationId,
+              })
+              .andWhere('dn.debit_note_date >= :startDate', { startDate })
+              .andWhere('dn.debit_note_date <= :endDate', { endDate })
+              .orderBy('dn.debit_note_date', 'ASC')
+              .getMany();
+
+          debitNoteExpenseApplications.forEach((dnea) => {
+            transactions.push({
+              date: dnea.debitNote?.debitNoteDate || startDate,
+              description: `Debit Note Applied: ${dnea.debitNote?.debitNoteNumber || dnea.id}`,
+              referenceNumber: dnea.debitNote?.debitNoteNumber || undefined,
+              source: 'debit_note_application',
+              sourceId: dnea.id,
+              debitAmount: parseFloat(dnea.appliedAmount),
+              creditAmount: 0,
+            });
+          });
+
+          // Payments that settle accruals (reduces AP)
+          // Get all expense payments in period for expenses with accruals
+          const expensePaymentsForAccruals =
+            await this.expensePaymentsRepository
+              .createQueryBuilder('payment')
+              .leftJoin('payment.expense', 'expense')
+              .leftJoin('expense.accrualDetail', 'accrual')
+              .where('payment.organization_id = :organizationId', {
+                organizationId,
+              })
+              .andWhere('payment.is_deleted = false')
+              .andWhere('payment.payment_date >= :startDate', { startDate })
+              .andWhere('payment.payment_date <= :endDate', { endDate })
+              .andWhere('accrual.id IS NOT NULL')
+              .orderBy('payment.payment_date', 'ASC')
+              .getMany();
+
+          expensePaymentsForAccruals.forEach((payment) => {
+            transactions.push({
+              date: payment.paymentDate,
+              description: `Payment: ${
+                payment.expense?.description ||
+                payment.expense?.invoiceNumber ||
+                payment.id
+              }`,
+              referenceNumber:
+                payment.expense?.invoiceNumber || payment.id,
+              source: 'expense_payment',
+              sourceId: payment.id,
+              debitAmount: parseFloat(payment.amount),
+              creditAmount: 0,
+            });
+          });
+        }
+
+        // 4. Cash/Bank: Invoice payments (filtered by payment_date, not invoice_date)
+        if (
+          account.code === JournalEntryAccount.CASH ||
+          account.code === JournalEntryAccount.BANK
+        ) {
+          const invoicePayments = await this.invoicePaymentsRepository
+            .createQueryBuilder('payment')
+            .leftJoin('payment.invoice', 'invoice')
+            .where('payment.organization_id = :organizationId', {
+              organizationId,
+            })
+            .andWhere('payment.payment_date >= :startDate', { startDate })
+            .andWhere('payment.payment_date <= :endDate', { endDate })
+            .andWhere(
+              account.code === JournalEntryAccount.CASH
+                ? "payment.payment_method = 'cash'"
+                : "payment.payment_method = 'bank_transfer'",
+            )
+            .orderBy('payment.payment_date', 'ASC')
+            .addOrderBy('payment.created_at', 'ASC')
+            .getMany();
+
+          invoicePayments.forEach((payment) => {
+            transactions.push({
+              date: payment.paymentDate,
+              description: `Payment: ${
+                payment.invoice?.customerName ||
+                payment.invoice?.invoiceNumber ||
+                payment.id
+              }`,
+              referenceNumber:
+                payment.invoice?.invoiceNumber || payment.id,
+              source: 'invoice_payment',
+              sourceId: payment.id,
+              debitAmount: parseFloat(payment.amount),
+              creditAmount: 0,
+            });
+          });
+        }
+
+        // 5. Sales Revenue: Invoices in period
+        if (account.code === JournalEntryAccount.SALES_REVENUE) {
+          const invoices = await this.salesInvoicesRepository
+            .createQueryBuilder('invoice')
+            .where('invoice.organization_id = :organizationId', {
+              organizationId,
+            })
+            .andWhere('invoice.is_deleted = false')
+            .andWhere('invoice.invoice_date >= :startDate', { startDate })
+            .andWhere('invoice.invoice_date <= :endDate', { endDate })
+            .orderBy('invoice.invoice_date', 'ASC')
+            .getMany();
+
+          invoices.forEach((invoice) => {
+            transactions.push({
+              date: invoice.invoiceDate,
+              description: `Invoice: ${invoice.customerName || invoice.invoiceNumber}`,
+              referenceNumber: invoice.invoiceNumber || undefined,
+              source: 'sales_invoice',
+              sourceId: invoice.id,
+              debitAmount: 0,
+              creditAmount: parseFloat(invoice.amount),
+            });
+          });
+        }
+
+        // 6. Accounts Receivable: Invoices, credit notes, and applications
+        if (account.code === JournalEntryAccount.ACCOUNTS_RECEIVABLE) {
+          // Invoices in period (unpaid portion)
+          const invoices = await this.salesInvoicesRepository
+            .createQueryBuilder('invoice')
+            .where('invoice.organization_id = :organizationId', {
+              organizationId,
+            })
+            .andWhere('invoice.is_deleted = false')
+            .andWhere('invoice.invoice_date >= :startDate', { startDate })
+            .andWhere('invoice.invoice_date <= :endDate', { endDate })
+            .orderBy('invoice.invoice_date', 'ASC')
+            .getMany();
+
+          for (const invoice of invoices) {
+            const totalAmount =
+              parseFloat(invoice.amount) + parseFloat(invoice.vatAmount || '0');
+            const payments = await this.invoicePaymentsRepository.find({
+              where: { invoice: { id: invoice.id } },
+            });
+            const paidAmount = payments.reduce(
+              (sum, p) => sum + parseFloat(p.amount),
+              0,
+            );
+
+            // Get credit note applications for this invoice
+            const creditNoteApplications =
+              await this.creditNoteApplicationsRepository.find({
+                where: { invoice: { id: invoice.id } },
+              });
+            const creditNoteAppliedAmount = creditNoteApplications.reduce(
+              (sum, cna) => sum + parseFloat(cna.appliedAmount),
+              0,
+            );
+
+            // Unpaid amount = total - payments - credit note applications
+            const unpaidAmount =
+              totalAmount - paidAmount - creditNoteAppliedAmount;
+
+            if (unpaidAmount > 0) {
+              transactions.push({
+                date: invoice.invoiceDate,
+                description: `Invoice: ${invoice.customerName || invoice.invoiceNumber}`,
+                referenceNumber: invoice.invoiceNumber || undefined,
+                source: 'sales_invoice',
+                sourceId: invoice.id,
+                debitAmount: unpaidAmount,
+                creditAmount: 0,
+              });
+            }
+          }
+
+          // Credit notes (reduces AR)
+          const creditNotes = await this.creditNotesRepository
+            .createQueryBuilder('cn')
+            .where('cn.organization_id = :organizationId', { organizationId })
+            .andWhere('cn.is_deleted = false')
+            .andWhere('cn.credit_note_date >= :startDate', { startDate })
+            .andWhere('cn.credit_note_date <= :endDate', { endDate })
+            .andWhere(
+              '(cn.status = :issued OR cn.status = :applied OR cn.status = :draft)',
+              {
+                issued: CreditNoteStatus.ISSUED,
+                applied: CreditNoteStatus.APPLIED,
+                draft: CreditNoteStatus.DRAFT,
+              },
+            )
+            .orderBy('cn.credit_note_date', 'ASC')
+            .getMany();
+
+          creditNotes.forEach((cn) => {
+            const totalAmount =
+              parseFloat(cn.amount) + parseFloat(cn.vatAmount || '0');
+            transactions.push({
+              date: cn.creditNoteDate,
+              description: `Credit Note: ${cn.customerName || cn.creditNoteNumber}`,
+              referenceNumber: cn.creditNoteNumber || undefined,
+              source: 'credit_note',
+              sourceId: cn.id,
+              debitAmount: 0,
+              creditAmount: totalAmount,
+            });
+          });
+
+          // Credit note applications (reduces AR)
+          const creditNoteApplications = await this.creditNoteApplicationsRepository
+            .createQueryBuilder('cna')
+            .leftJoin('cna.creditNote', 'cn')
+            .leftJoin('cna.invoice', 'invoice')
+            .where('cna.organization_id = :organizationId', {
+              organizationId,
+            })
+            .andWhere('cn.credit_note_date >= :startDate', { startDate })
+            .andWhere('cn.credit_note_date <= :endDate', { endDate })
+            .orderBy('cn.credit_note_date', 'ASC')
+            .getMany();
+
+          creditNoteApplications.forEach((cna) => {
+            transactions.push({
+              date: cna.creditNote?.creditNoteDate || startDate,
+              description: `Credit Note Applied: ${
+                cna.creditNote?.creditNoteNumber || cna.id
+              }`,
+              referenceNumber: cna.creditNote?.creditNoteNumber || undefined,
+              source: 'credit_note_application',
+              sourceId: cna.id,
+              debitAmount: 0,
+              creditAmount: parseFloat(cna.appliedAmount),
+            });
+          });
+
+          // Invoice payments (reduces AR)
+          const invoicePayments = await this.invoicePaymentsRepository
+            .createQueryBuilder('payment')
+            .leftJoin('payment.invoice', 'invoice')
+            .where('payment.organization_id = :organizationId', {
+              organizationId,
+            })
+            .andWhere('payment.payment_date >= :startDate', { startDate })
+            .andWhere('payment.payment_date <= :endDate', { endDate })
+            .orderBy('payment.payment_date', 'ASC')
+            .getMany();
+
+          invoicePayments.forEach((payment) => {
+            transactions.push({
+              date: payment.paymentDate,
+              description: `Payment Received: ${payment.invoice?.customerName || payment.invoice?.invoiceNumber || payment.id}`,
+              referenceNumber: payment.invoice?.invoiceNumber || payment.id,
+              source: 'invoice_payment',
+              sourceId: payment.id,
+              debitAmount: 0,
+              creditAmount: parseFloat(payment.amount),
+            });
+          });
+        }
+
+        // 7. Debit Notes affecting accounts_payable (already handled above, but keep for other accounts if needed)
+        // Note: Debit notes for expenses are already handled in Accounts Payable section above
+
+        // 8. VAT Receivable: Expense VAT amounts + Journal Entry VAT + Debit Note VAT reductions
+        if (account.code === JournalEntryAccount.VAT_RECEIVABLE) {
+          // Expense VAT
+          const expenses = await this.expensesRepository
+            .createQueryBuilder('expense')
+            .where('expense.organization_id = :organizationId', {
+              organizationId,
+            })
+            .andWhere('expense.is_deleted = false')
+            .andWhere('expense.expense_date >= :startDate', { startDate })
+            .andWhere('expense.expense_date <= :endDate', { endDate })
+            .andWhere('expense.vat_amount > 0')
+            .orderBy('expense.expense_date', 'ASC')
+            .getMany();
+
+          expenses.forEach((expense) => {
+            transactions.push({
+              date: expense.expenseDate,
+              description: `VAT Input: ${expense.description || expense.invoiceNumber || expense.id}`,
+              referenceNumber: expense.invoiceNumber || undefined,
+              source: 'expense',
+              sourceId: expense.id,
+              debitAmount: parseFloat(expense.vatAmount || '0'),
+              creditAmount: 0,
+            });
+          });
+
+          // Journal Entry VAT (Input VAT from journal entries)
+          const journalEntriesWithVat = await this.journalEntriesRepository
+            .createQueryBuilder('entry')
+            .where('entry.organization_id = :organizationId', { organizationId })
+            .andWhere('entry.is_deleted = false')
+            .andWhere('entry.entry_date >= :startDate', { startDate })
+            .andWhere('entry.entry_date <= :endDate', { endDate })
+            .andWhere('entry.vat_amount > 0')
+            .andWhere(
+              "entry.debit_account NOT IN ('sales_revenue', 'accounts_receivable', 'cash', 'bank', 'accounts_payable', 'vat_payable', 'vat_receivable')",
+            )
+            .orderBy('entry.entry_date', 'ASC')
+            .getMany();
+
+          journalEntriesWithVat.forEach((entry) => {
+            transactions.push({
+              date: entry.entryDate,
+              description: `VAT Input (JE): ${
+                entry.description ||
+                entry.referenceNumber ||
+                'Journal Entry'
+              }`,
+              referenceNumber: entry.referenceNumber || undefined,
+              source: 'journal_entry',
+              sourceId: entry.id,
+              debitAmount: parseFloat(entry.vatAmount || '0'),
+              creditAmount: 0,
+            });
+          });
+
+          // Supplier debit note VAT (reduces VAT Receivable)
+          const supplierDebitNotes = await this.debitNotesRepository
+            .createQueryBuilder('dn')
+            .where('dn.organization_id = :organizationId', { organizationId })
+            .andWhere('dn.is_deleted = false')
+            .andWhere('dn.debit_note_date >= :startDate', { startDate })
+            .andWhere('dn.debit_note_date <= :endDate', { endDate })
+            .andWhere('dn.expense_id IS NOT NULL')
+            .andWhere('dn.vat_amount > 0')
+            .andWhere(
+              '(dn.status = :issued OR dn.status = :applied OR dn.status = :draft)',
+              {
+                issued: DebitNoteStatus.ISSUED,
+                applied: DebitNoteStatus.APPLIED,
+                draft: DebitNoteStatus.DRAFT,
+              },
+            )
+            .orderBy('dn.debit_note_date', 'ASC')
+            .getMany();
+
+          supplierDebitNotes.forEach((dn) => {
+            transactions.push({
+              date: dn.debitNoteDate,
+              description: `Debit Note VAT: ${dn.vendorName || dn.debitNoteNumber}`,
+              referenceNumber: dn.debitNoteNumber || undefined,
+              source: 'debit_note',
+              sourceId: dn.id,
+              debitAmount: 0,
+              creditAmount: parseFloat(dn.vatAmount || '0'),
+            });
+          });
+        }
+
+        // 9. VAT Payable: Invoice VAT amounts + Credit Note VAT reductions
+        if (account.code === JournalEntryAccount.VAT_PAYABLE) {
+          // Invoice VAT
+          const invoices = await this.salesInvoicesRepository
+            .createQueryBuilder('invoice')
+            .where('invoice.organization_id = :organizationId', {
+              organizationId,
+            })
+            .andWhere('invoice.is_deleted = false')
+            .andWhere('invoice.invoice_date >= :startDate', { startDate })
+            .andWhere('invoice.invoice_date <= :endDate', { endDate })
+            .andWhere('invoice.vat_amount > 0')
+            .orderBy('invoice.invoice_date', 'ASC')
+            .getMany();
+
+          invoices.forEach((invoice) => {
+            transactions.push({
+              date: invoice.invoiceDate,
+              description: `VAT Output: ${invoice.customerName || invoice.invoiceNumber}`,
+              referenceNumber: invoice.invoiceNumber || undefined,
+              source: 'sales_invoice',
+              sourceId: invoice.id,
+              debitAmount: 0,
+              creditAmount: parseFloat(invoice.vatAmount || '0'),
+            });
+          });
+
+          // Customer credit note VAT (reduces VAT Payable)
+          const customerCreditNotes = await this.creditNotesRepository
+            .createQueryBuilder('cn')
+            .where('cn.organization_id = :organizationId', { organizationId })
+            .andWhere('cn.is_deleted = false')
+            .andWhere('cn.credit_note_date >= :startDate', { startDate })
+            .andWhere('cn.credit_note_date <= :endDate', { endDate })
+            .andWhere('cn.invoice_id IS NOT NULL')
+            .andWhere('cn.vat_amount > 0')
+            .andWhere(
+              '(cn.status = :issued OR cn.status = :applied OR cn.status = :draft)',
+              {
+                issued: CreditNoteStatus.ISSUED,
+                applied: CreditNoteStatus.APPLIED,
+                draft: CreditNoteStatus.DRAFT,
+              },
+            )
+            .orderBy('cn.credit_note_date', 'ASC')
+            .getMany();
+
+          customerCreditNotes.forEach((cn) => {
+            transactions.push({
+              date: cn.creditNoteDate,
+              description: `Credit Note VAT: ${cn.customerName || cn.creditNoteNumber}`,
+              referenceNumber: cn.creditNoteNumber || undefined,
+              source: 'credit_note',
+              sourceId: cn.id,
+              debitAmount: parseFloat(cn.vatAmount || '0'),
+              creditAmount: 0,
+            });
+          });
+        }
+
+        // 10. General Expense: Expenses by category (if no custom ledger account)
+        if (account.code === JournalEntryAccount.GENERAL_EXPENSE) {
+          const expenses = await this.expensesRepository
+            .createQueryBuilder('expense')
+            .leftJoin('expense.category', 'category')
+            .where('expense.organization_id = :organizationId', {
+              organizationId,
+            })
+            .andWhere('expense.is_deleted = false')
+            .andWhere('expense.expense_date >= :startDate', { startDate })
+            .andWhere('expense.expense_date <= :endDate', { endDate })
+            .andWhere("(expense.type IS NULL OR expense.type != 'credit')")
+            .orderBy('expense.expense_date', 'ASC')
+            .getMany();
+
+          expenses.forEach((expense) => {
+            transactions.push({
+              date: expense.expenseDate,
+              description: `Expense: ${expense.category?.name || 'Uncategorized'} - ${expense.description || expense.invoiceNumber || expense.id}`,
+              referenceNumber: expense.invoiceNumber || undefined,
+              source: 'expense',
+              sourceId: expense.id,
+              debitAmount: parseFloat(expense.amount),
+              creditAmount: 0,
+            });
+          });
+        }
+
+        // Calculate opening balance (all transactions before start date)
+        // This must match Trial Balance logic exactly
+        let openingBalance = 0;
+        const isDebitNormal = ['asset', 'expense'].includes(account.category);
+
+        // Opening journal entries
+        const openingJournalEntries = await this.journalEntriesRepository
+          .createQueryBuilder('entry')
+          .select([
+            'SUM(CASE WHEN entry.debit_account = :accountCode THEN entry.amount ELSE 0 END) AS debit',
+            'SUM(CASE WHEN entry.credit_account = :accountCode THEN entry.amount ELSE 0 END) AS credit',
+          ])
+          .where('entry.organization_id = :organizationId', { organizationId })
+          .andWhere('entry.is_deleted = false')
+          .andWhere('entry.entry_date < :startDate', { startDate })
+          .andWhere(
+            '(entry.debit_account = :accountCode OR entry.credit_account = :accountCode)',
+            { accountCode: account.code },
+          )
+          .setParameter('accountCode', account.code)
+          .getRawOne();
+
+        let openingDebit = parseFloat(openingJournalEntries?.debit || '0');
+        let openingCredit = parseFloat(openingJournalEntries?.credit || '0');
+
+        // Cash: Opening balance = receipts - payments + journal received - journal paid
+        if (account.code === JournalEntryAccount.CASH) {
+          const openingExpensePayments = await this.expensePaymentsRepository
+            .createQueryBuilder('payment')
+            .select([
+              `SUM(CASE WHEN payment.payment_method = '${PaymentMethod.CASH}' THEN COALESCE(payment.amount, 0) ELSE 0 END) AS cashPayments`,
+            ])
+            .where('payment.organization_id = :organizationId', {
+              organizationId,
+            })
+            .andWhere('payment.is_deleted = false')
+            .andWhere('payment.payment_date < :startDate', { startDate })
+            .getRawOne();
+
+          const openingInvoicePayments = await this.invoicePaymentsRepository
+            .createQueryBuilder('payment')
+            .select([
+              "SUM(CASE WHEN payment.payment_method = 'cash' THEN COALESCE(payment.amount, 0) ELSE 0 END) AS cashReceipts",
+            ])
+            .where('payment.organization_id = :organizationId', {
+              organizationId,
+            })
+            .andWhere('payment.payment_date < :startDate', { startDate })
+            .getRawOne();
+
+          const openingCashReceipts = Number(
+            openingInvoicePayments?.cashreceipts ||
+              openingInvoicePayments?.cashReceipts ||
+              0,
+          );
+          const openingCashPayments = Number(
+            openingExpensePayments?.cashpayments ||
+              openingExpensePayments?.cashPayments ||
+              0,
+          );
+          const openingCashJournalReceived = Number(
+            openingJournalEntries?.debit || 0,
+          );
+          const openingCashJournalPaid = Number(
+            openingJournalEntries?.credit || 0,
+          );
+
+          openingBalance =
+            openingCashReceipts -
+            openingCashPayments +
+            openingCashJournalReceived -
+            openingCashJournalPaid;
+        }
+        // Bank: Same logic as Cash
+        else if (account.code === JournalEntryAccount.BANK) {
+          const openingExpensePayments = await this.expensePaymentsRepository
+            .createQueryBuilder('payment')
+            .select([
+              `SUM(CASE WHEN payment.payment_method = '${PaymentMethod.BANK_TRANSFER}' THEN COALESCE(payment.amount, 0) ELSE 0 END) AS bankPayments`,
+            ])
+            .where('payment.organization_id = :organizationId', {
+              organizationId,
+            })
+            .andWhere('payment.is_deleted = false')
+            .andWhere('payment.payment_date < :startDate', { startDate })
+            .getRawOne();
+
+          const openingInvoicePayments = await this.invoicePaymentsRepository
+            .createQueryBuilder('payment')
+            .select([
+              "SUM(CASE WHEN payment.payment_method = 'bank_transfer' THEN COALESCE(payment.amount, 0) ELSE 0 END) AS bankReceipts",
+            ])
+            .where('payment.organization_id = :organizationId', {
+              organizationId,
+            })
+            .andWhere('payment.payment_date < :startDate', { startDate })
+            .getRawOne();
+
+          const openingBankReceipts = Number(
+            openingInvoicePayments?.bankreceipts ||
+              openingInvoicePayments?.bankReceipts ||
+              0,
+          );
+          const openingBankPayments = Number(
+            openingExpensePayments?.bankpayments ||
+              openingExpensePayments?.bankPayments ||
+              0,
+          );
+          const openingBankJournalReceived = Number(
+            openingJournalEntries?.debit || 0,
+          );
+          const openingBankJournalPaid = Number(
+            openingJournalEntries?.credit || 0,
+          );
+
+          openingBalance =
+            openingBankReceipts -
+            openingBankPayments +
+            openingBankJournalReceived -
+            openingBankJournalPaid;
+        }
+        // Accounts Payable: Opening accruals (unpaid expenses with accruals)
+        else if (account.code === JournalEntryAccount.ACCOUNTS_PAYABLE) {
+          // Calculate opening AP using same logic as Trial Balance
+          const expensePaymentsSubqueryStart = this.expensePaymentsRepository
+            .createQueryBuilder('payment')
+            .select('COALESCE(SUM(payment.amount), 0)')
+            .where('payment.expense_id = expense.id')
+            .andWhere('payment.payment_date < :startDate')
+            .andWhere('payment.organization_id = :organizationId')
+            .andWhere('payment.is_deleted = false')
+            .getQuery();
+
+          const debitNotesLinkedToExpenseSubqueryStart = `(
+            SELECT COALESCE(SUM(COALESCE(dn.total_amount, dn.base_amount + dn.vat_amount, dn.amount + dn.vat_amount)), 0)
+            FROM debit_notes dn
+            WHERE dn.expense_id = expense.id
+            AND dn.organization_id = expense.organization_id
+            AND dn.debit_note_date < :startDate
+            AND dn.is_deleted = false
+            AND (
+              dn.status IN ('${DebitNoteStatus.ISSUED}', '${DebitNoteStatus.APPLIED}')
+              OR (dn.status = '${DebitNoteStatus.DRAFT}' AND dn.expense_id IS NOT NULL)
+            )
+          )`;
+
+          const accrualsAtStartQuery = this.accrualsRepository
+            .createQueryBuilder('accrual')
+            .leftJoin('accrual.expense', 'expense')
+            .select([
+              `SUM(GREATEST(0, COALESCE(expense.total_amount, 0) - (${expensePaymentsSubqueryStart}) - (${debitNotesLinkedToExpenseSubqueryStart}))) AS credit`,
+            ])
+            .where('accrual.organization_id = :organizationId', { organizationId })
+            .andWhere('accrual.is_deleted = false')
+            .andWhere('expense.is_deleted = false')
+            .andWhere('accrual.status = :status', {
+              status: AccrualStatus.PENDING_SETTLEMENT,
+            })
+            .andWhere('expense.expense_date < :startDate', { startDate })
+            .andWhere(
+              `COALESCE(expense.total_amount, 0) > (${expensePaymentsSubqueryStart}) + (${debitNotesLinkedToExpenseSubqueryStart})`,
+            )
+            .setParameter('organizationId', organizationId)
+            .setParameter('startDate', startDate);
+
+          const journalApAtStartQuery = this.journalEntriesRepository
+            .createQueryBuilder('entry')
+            .select([
+              "SUM(CASE WHEN entry.credit_account = 'accounts_payable' THEN (entry.amount + COALESCE(entry.vat_amount, 0)) ELSE 0 END) AS credit",
+              "SUM(CASE WHEN entry.debit_account = 'accounts_payable' THEN (entry.amount + COALESCE(entry.vat_amount, 0)) ELSE 0 END) AS debit",
+            ])
+            .where('entry.organization_id = :organizationId', { organizationId })
+            .andWhere('entry.entry_date < :startDate', { startDate });
+
+          const [accrualsAtStartRow, journalApAtStartRow] = await Promise.all([
+            accrualsAtStartQuery.getRawOne(),
+            journalApAtStartQuery.getRawOne(),
+          ]);
+
+          const accrualsAtStart = Number(accrualsAtStartRow?.credit || 0);
+          const journalApCredit = Number(journalApAtStartRow?.credit || 0);
+          const journalApDebit = Number(journalApAtStartRow?.debit || 0);
+
+          openingBalance = accrualsAtStart + journalApCredit - journalApDebit;
+        }
+        // Accounts Receivable: Opening invoices (unpaid portion)
+        else if (account.code === JournalEntryAccount.ACCOUNTS_RECEIVABLE) {
+          // Use same logic as Trial Balance
+          const creditNoteApplicationsSubqueryStart =
+            this.creditNoteApplicationsRepository
+              .createQueryBuilder('cna')
+              .select('COALESCE(SUM(cna.applied_amount), 0)')
+              .where('cna.invoice_id = invoice.id')
+              .andWhere('cna.organization_id = :organizationId', {
+                organizationId,
+              })
+              .getQuery();
+
+          const unappliedCreditNotesSubqueryStart =
+            this.creditNotesRepository
+              .createQueryBuilder('cn')
+              .select(
+                'COALESCE(SUM(COALESCE(cn.total_amount, cn.amount + cn.vat_amount)), 0)',
+              )
+              .where('cn.invoice_id = invoice.id')
+              .andWhere('cn.organization_id = :organizationId', {
+                organizationId,
+              })
+              .andWhere('cn.is_deleted = false')
+              .andWhere('cn.credit_note_date < :startDate')
+              .andWhere(
+                '(cn.status = :issued OR cn.status = :applied OR cn.status = :draft)',
+              )
+              .andWhere(
+                `cn.id NOT IN (SELECT DISTINCT cna2.credit_note_id FROM credit_note_applications cna2 WHERE cna2.organization_id = :organizationId)`,
+              )
+              .getQuery();
+
+          const receivablesAtStartQuery = this.salesInvoicesRepository
+            .createQueryBuilder('invoice')
+            .select([
+              `SUM(COALESCE(invoice.total_amount, 0) - COALESCE(invoice.paid_amount, 0) - (${creditNoteApplicationsSubqueryStart}) - (${unappliedCreditNotesSubqueryStart})) AS invoiceAmount`,
+            ])
+            .where('invoice.organization_id = :organizationId', {
+              organizationId,
+            })
+            .andWhere('invoice.invoice_date < :startDate', { startDate })
+            .andWhere('invoice.payment_status IN (:...statuses)', {
+              statuses: [PaymentStatus.UNPAID, PaymentStatus.PARTIAL],
+            })
+            .setParameter('organizationId', organizationId)
+            .setParameter('startDate', startDate);
+
+          const debitNotesAtStartQuery = this.debitNotesRepository
+            .createQueryBuilder('debitNote')
+            .select(['SUM(COALESCE(debitNote.total_amount, 0)) AS debit'])
+            .where('debitNote.organization_id = :organizationId', {
+              organizationId,
+            })
+            .andWhere('debitNote.debit_note_date < :startDate', { startDate })
+            .andWhere('debitNote.invoice_id IS NOT NULL')
+            .andWhere('debitNote.status IN (:...statuses)', {
+              statuses: [DebitNoteStatus.ISSUED, DebitNoteStatus.APPLIED],
+            })
+            .setParameter('organizationId', organizationId)
+            .setParameter('startDate', startDate);
+
+          const journalArAtStartQuery = this.journalEntriesRepository
+            .createQueryBuilder('entry')
+            .select([
+              "SUM(CASE WHEN entry.debit_account = 'accounts_receivable' THEN entry.amount ELSE 0 END) AS debit",
+              "SUM(CASE WHEN entry.credit_account = 'accounts_receivable' THEN entry.amount ELSE 0 END) AS credit",
+            ])
+            .where('entry.organization_id = :organizationId', {
+              organizationId,
+            })
+            .andWhere('entry.entry_date < :startDate', { startDate });
+
+          const [
+            receivablesAtStartRow,
+            debitNotesAtStartRow,
+            journalArAtStartRow,
+          ] = await Promise.all([
+            receivablesAtStartQuery.getRawOne(),
+            debitNotesAtStartQuery.getRawOne(),
+            journalArAtStartQuery.getRawOne(),
+          ]);
+
+          const receivablesAtStartRaw = Number(
+            receivablesAtStartRow?.invoiceamount ||
+              receivablesAtStartRow?.invoiceAmount ||
+              0,
+          );
+          const receivablesAtStart =
+            receivablesAtStartRaw > 0 ? receivablesAtStartRaw : 0;
+          const debitNotesAtStart = Number(debitNotesAtStartRow?.debit || 0);
+          const journalArDebit = Number(journalArAtStartRow?.debit || 0);
+          const journalArCredit = Number(journalArAtStartRow?.credit || 0);
+
+          openingBalance =
+            receivablesAtStart +
+            debitNotesAtStart +
+            journalArDebit -
+            journalArCredit;
+        }
+        // VAT Receivable: Opening expense VAT + journal entry VAT - debit note VAT
+        else if (account.code === JournalEntryAccount.VAT_RECEIVABLE) {
+          const openingExpenseVat = await this.expensesRepository
+            .createQueryBuilder('expense')
+            .select(['SUM(COALESCE(expense.vat_amount, 0)) AS vat'])
+            .where('expense.organization_id = :organizationId', {
+              organizationId,
+            })
+            .andWhere('expense.is_deleted = false')
+            .andWhere('expense.expense_date < :startDate', { startDate })
+            .andWhere('expense.vat_amount > 0')
+            .andWhere("(expense.type IS NULL OR expense.type != 'credit')")
+            .getRawOne();
+
+          const openingJournalVat = await this.journalEntriesRepository
+            .createQueryBuilder('entry')
+            .select(['SUM(COALESCE(entry.vat_amount, 0)) AS vat'])
+            .where('entry.organization_id = :organizationId', {
+              organizationId,
+            })
+            .andWhere('entry.is_deleted = false')
+            .andWhere('entry.entry_date < :startDate', { startDate })
+            .andWhere('entry.vat_amount > 0')
+            .andWhere(
+              "entry.debit_account NOT IN ('sales_revenue', 'accounts_receivable', 'cash', 'bank', 'accounts_payable', 'vat_payable', 'vat_receivable')",
+            )
+            .getRawOne();
+
+          const openingDebitNoteVat = await this.debitNotesRepository
+            .createQueryBuilder('dn')
+            .select(['SUM(COALESCE(dn.vat_amount, 0)) AS vat'])
+            .where('dn.organization_id = :organizationId', {
+              organizationId,
+            })
+            .andWhere('dn.is_deleted = false')
+            .andWhere('dn.debit_note_date < :startDate', { startDate })
+            .andWhere('dn.expense_id IS NOT NULL')
+            .andWhere('dn.vat_amount > 0')
+            .andWhere(
+              '(dn.status = :issued OR dn.status = :applied OR dn.status = :draft)',
+              {
+                issued: DebitNoteStatus.ISSUED,
+                applied: DebitNoteStatus.APPLIED,
+                draft: DebitNoteStatus.DRAFT,
+              },
+            )
+            .getRawOne();
+
+          openingDebit =
+            parseFloat(openingExpenseVat?.vat || '0') +
+            parseFloat(openingJournalVat?.vat || '0');
+          openingCredit = parseFloat(openingDebitNoteVat?.vat || '0');
+          openingBalance = openingDebit - openingCredit;
+        }
+        // VAT Payable: Opening invoice VAT - credit note VAT
+        else if (account.code === JournalEntryAccount.VAT_PAYABLE) {
+          const openingInvoiceVat = await this.salesInvoicesRepository
+            .createQueryBuilder('invoice')
+            .select(['SUM(COALESCE(invoice.vat_amount, 0)) AS vat'])
+            .where('invoice.organization_id = :organizationId', {
+              organizationId,
+            })
+            .andWhere('invoice.is_deleted = false')
+            .andWhere('invoice.invoice_date < :startDate', { startDate })
+            .andWhere('invoice.vat_amount > 0')
+            .getRawOne();
+
+          const openingCreditNoteVat = await this.creditNotesRepository
+            .createQueryBuilder('cn')
+            .select(['SUM(COALESCE(cn.vat_amount, 0)) AS vat'])
+            .where('cn.organization_id = :organizationId', {
+              organizationId,
+            })
+            .andWhere('cn.is_deleted = false')
+            .andWhere('cn.credit_note_date < :startDate', { startDate })
+            .andWhere('cn.invoice_id IS NOT NULL')
+            .andWhere('cn.vat_amount > 0')
+            .andWhere(
+              '(cn.status = :issued OR cn.status = :applied OR cn.status = :draft)',
+              {
+                issued: CreditNoteStatus.ISSUED,
+                applied: CreditNoteStatus.APPLIED,
+                draft: CreditNoteStatus.DRAFT,
+              },
+            )
+            .getRawOne();
+
+          openingCredit = parseFloat(openingInvoiceVat?.vat || '0');
+          openingDebit = parseFloat(openingCreditNoteVat?.vat || '0');
+          openingBalance = openingCredit - openingDebit;
+        }
+        // Sales Revenue: Opening invoices
+        else if (account.code === JournalEntryAccount.SALES_REVENUE) {
+          const openingInvoices = await this.salesInvoicesRepository
+            .createQueryBuilder('invoice')
+            .select(['SUM(COALESCE(invoice.amount, 0)) AS revenue'])
+            .where('invoice.organization_id = :organizationId', {
+              organizationId,
+            })
+            .andWhere('invoice.is_deleted = false')
+            .andWhere('invoice.invoice_date < :startDate', { startDate })
+            .getRawOne();
+
+          openingCredit = parseFloat(openingInvoices?.revenue || '0');
+          openingBalance = openingCredit - openingDebit;
+        }
+        // General Expense: Opening expenses
+        else if (account.code === JournalEntryAccount.GENERAL_EXPENSE) {
+          const openingExpenses = await this.expensesRepository
+            .createQueryBuilder('expense')
+            .select(['SUM(COALESCE(expense.amount, 0)) AS expense'])
+            .where('expense.organization_id = :organizationId', {
+              organizationId,
+            })
+            .andWhere('expense.is_deleted = false')
+            .andWhere('expense.expense_date < :startDate', { startDate })
+            .andWhere("(expense.type IS NULL OR expense.type != 'credit')")
+            .getRawOne();
+
+          openingDebit = parseFloat(openingExpenses?.expense || '0');
+          openingBalance = openingDebit - openingCredit;
+        }
+        // For other accounts (custom ledger, equity, etc.), use journal entries only
+        else {
+          if (isDebitNormal) {
+            openingBalance = openingDebit - openingCredit;
+          } else {
+            openingBalance = openingCredit - openingDebit;
+          }
+        }
+
+        // Sort transactions by date
+        transactions.sort((a, b) => {
+          const dateCompare = a.date.localeCompare(b.date);
+          if (dateCompare !== 0) return dateCompare;
+          return a.sourceId.localeCompare(b.sourceId);
+        });
+
+        // Calculate running balance
+        let runningBalance = openingBalance;
+        const transactionsWithBalance = transactions.map((t) => {
+          if (isDebitNormal) {
+            runningBalance = runningBalance + t.debitAmount - t.creditAmount;
+          } else {
+            runningBalance = runningBalance + t.creditAmount - t.debitAmount;
+          }
+          return {
+            ...t,
+            runningBalance: Math.round(runningBalance * 100) / 100,
+          };
+        });
+
+        const closingBalance = runningBalance;
+
+        accountLedgers.push({
+          accountCode: account.code,
+          accountName: account.name,
+          accountCategory: account.category,
+          openingBalance: Math.round(openingBalance * 100) / 100,
+          closingBalance: Math.round(closingBalance * 100) / 100,
+          transactions: transactionsWithBalance,
+        });
+      }
+
+      // Sort accounts by category and name
+      accountLedgers.sort((a, b) => {
+        const categoryOrder = {
+          asset: 1,
+          liability: 2,
+          equity: 3,
+          revenue: 4,
+          expense: 5,
+        };
+        const catCompare =
+          (categoryOrder[a.accountCategory as keyof typeof categoryOrder] ||
+            99) -
+          (categoryOrder[b.accountCategory as keyof typeof categoryOrder] ||
+            99);
+        if (catCompare !== 0) return catCompare;
+        return a.accountName.localeCompare(b.accountName);
+      });
+
+      this.logger.debug(
+        `General Ledger built: accounts=${accountLedgers.length}, organizationId=${organizationId}`,
+      );
+
+      return {
+        accounts: accountLedgers,
+        period: { startDate, endDate },
+      };
+    } catch (error) {
+      this.logger.error(
+        `Error building general ledger: organizationId=${organizationId}, error=${error.message}`,
         error.stack,
       );
       throw error;

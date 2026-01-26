@@ -6,4 +6,5 @@ export enum ReportType {
   RECEIVABLES = 'receivables',
   VAT_CONTROL_ACCOUNT = 'vat_control_account',
   STOCK_BALANCE = 'stock_balance',
+  GENERAL_LEDGER = 'general_ledger',
 }

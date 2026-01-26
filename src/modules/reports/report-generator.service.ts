@@ -392,6 +392,7 @@ export class ReportGeneratorService {
       'bank_reconciliation',
       'trial_balance',
       'stock_balance',
+      'general_ledger',
     ];
     return landscapeReports.includes(reportType);
   }
@@ -405,6 +406,7 @@ export class ReportGeneratorService {
       bank_reconciliation: 'Bank Reconciliation Summary',
       attachments_report: 'Attachments Report',
       trial_balance: 'Trial Balance Report',
+      general_ledger: 'General Ledger Report',
       balance_sheet: 'Balance Sheet Report',
       profit_and_loss: 'Profit and Loss Statement',
       payables: 'Payables (Accruals) Report',
@@ -898,6 +900,12 @@ export class ReportGeneratorService {
     ) {
       // Trial Balance with summary and accounts
       this.addXLSXTrialBalance(workbook, reportData, currency);
+    } else if (
+      reportData.type === 'general_ledger' &&
+      typeof reportData.data === 'object'
+    ) {
+      // General Ledger with account-by-account transactions
+      this.addXLSXGeneralLedger(workbook, reportData, currency);
     } else if (
       reportData.type === 'balance_sheet' &&
       typeof reportData.data === 'object'
@@ -2098,6 +2106,10 @@ export class ReportGeneratorService {
     // Handle Balance Sheet
     else if (reportData.type === 'balance_sheet') {
       this.addPDFBalanceSheet(doc, data, currency);
+    }
+    // Handle General Ledger
+    else if (reportData.type === 'general_ledger') {
+      this.addPDFGeneralLedger(doc, data, currency);
     }
     // Handle Trial Balance
     else if (reportData.type === 'trial_balance') {
@@ -4429,6 +4441,218 @@ export class ReportGeneratorService {
   }
 
   /**
+   * Add General Ledger report to PDF
+   */
+  private addPDFGeneralLedger(
+    doc: PDFKit.PDFDocument,
+    data: any,
+    currency: string,
+  ): void {
+    const margin = 40;
+    const pageWidth = doc.page.width;
+    const contentWidth = pageWidth - 2 * margin;
+
+    doc.y = 175;
+    doc.fontSize(10).font('Helvetica-Bold').fillColor('#1a1a1a');
+
+    if (data.period) {
+      doc.text(
+        `Period: ${data.period.startDate} to ${data.period.endDate}`,
+        margin,
+        doc.y,
+      );
+      doc.y += 15;
+    }
+
+    if (data.accounts && Array.isArray(data.accounts)) {
+      data.accounts.forEach((account: any, accountIndex: number) => {
+        // Check if we need a new page
+        if (doc.y > doc.page.height - 150) {
+          doc.addPage();
+          doc.y = 50;
+        }
+
+        // Account header
+        doc.fontSize(12).font('Helvetica-Bold').fillColor('#1a1a1a');
+        doc.text(account.accountName || account.accountCode, margin, doc.y);
+        doc.y += 12;
+
+        doc.fontSize(9).font('Helvetica').fillColor('#666666');
+        doc.text(
+          `Category: ${account.accountCategory || 'N/A'}`,
+          margin,
+          doc.y,
+        );
+        doc.y += 10;
+
+        doc.fontSize(9).font('Helvetica-Bold');
+        doc.text(
+          `Opening Balance: ${this.formatCurrency(account.openingBalance || 0, currency)}`,
+          margin,
+          doc.y,
+        );
+        doc.y += 10;
+        doc.text(
+          `Closing Balance: ${this.formatCurrency(account.closingBalance || 0, currency)}`,
+          margin,
+          doc.y,
+        );
+        doc.y += 15;
+
+        // Transactions table
+        if (account.transactions && account.transactions.length > 0) {
+          // Table header
+          const headerY = doc.y;
+          doc
+            .rect(margin, headerY, contentWidth, 20)
+            .fillColor('#0f172a')
+            .fill()
+            .strokeColor('#0f172a')
+            .lineWidth(0.5)
+            .stroke();
+
+          doc.fontSize(7).font('Helvetica-Bold').fillColor('#ffffff');
+          const colWidths = [
+            contentWidth * 0.12, // Date
+            contentWidth * 0.30, // Description
+            contentWidth * 0.15, // Reference
+            contentWidth * 0.13, // Source
+            contentWidth * 0.10, // Debit
+            contentWidth * 0.10, // Credit
+            contentWidth * 0.10, // Balance
+          ];
+
+          let x = margin + 3;
+          const headers = ['Date', 'Description', 'Reference', 'Source', 'Debit', 'Credit', 'Balance'];
+          headers.forEach((header, index) => {
+            doc.text(header, x, headerY + 6, {
+              width: colWidths[index] - 6,
+              align: index >= 4 ? 'right' : 'left',
+            });
+            x += colWidths[index];
+          });
+
+          doc.y = headerY + 20;
+
+          // Transaction rows
+          account.transactions.forEach((transaction: any, txIndex: number) => {
+            // Check if we need a new page
+            if (doc.y > doc.page.height - 40) {
+              doc.addPage();
+              doc.y = 50;
+              // Redraw header on new page
+              const newHeaderY = doc.y;
+              doc
+                .rect(margin, newHeaderY, contentWidth, 20)
+                .fillColor('#0f172a')
+                .fill()
+                .strokeColor('#0f172a')
+                .lineWidth(0.5)
+                .stroke();
+
+              doc.fontSize(7).font('Helvetica-Bold').fillColor('#ffffff');
+              x = margin + 3;
+              headers.forEach((header, index) => {
+                doc.text(header, x, newHeaderY + 6, {
+                  width: colWidths[index] - 6,
+                  align: index >= 4 ? 'right' : 'left',
+                });
+                x += colWidths[index];
+              });
+              doc.y = newHeaderY + 20;
+            }
+
+            const rowY = doc.y;
+            doc.fontSize(7).font('Helvetica').fillColor('#1a1a1a');
+
+            // Date
+            x = margin + 3;
+            doc.text(transaction.date || '', x, rowY, {
+              width: colWidths[0] - 6,
+              align: 'left',
+            });
+            x += colWidths[0];
+
+            // Description
+            doc.text(transaction.description || '', x, rowY, {
+              width: colWidths[1] - 6,
+              align: 'left',
+            });
+            x += colWidths[1];
+
+            // Reference
+            doc.text(transaction.referenceNumber || '', x, rowY, {
+              width: colWidths[2] - 6,
+              align: 'left',
+            });
+            x += colWidths[2];
+
+            // Source
+            doc.text(transaction.source || '', x, rowY, {
+              width: colWidths[3] - 6,
+              align: 'left',
+            });
+            x += colWidths[3];
+
+            // Debit
+            doc.text(
+              this.formatCurrency(transaction.debitAmount || 0, currency),
+              x,
+              rowY,
+              {
+                width: colWidths[4] - 6,
+                align: 'right',
+              },
+            );
+            x += colWidths[4];
+
+            // Credit
+            doc.text(
+              this.formatCurrency(transaction.creditAmount || 0, currency),
+              x,
+              rowY,
+              {
+                width: colWidths[5] - 6,
+                align: 'right',
+              },
+            );
+            x += colWidths[5];
+
+            // Balance
+            doc.font('Helvetica-Bold');
+            doc.text(
+              this.formatCurrency(transaction.runningBalance || 0, currency),
+              x,
+              rowY,
+              {
+                width: colWidths[6] - 6,
+                align: 'right',
+              },
+            );
+            doc.font('Helvetica');
+
+            // Row border
+            doc
+              .moveTo(margin, rowY + 14)
+              .lineTo(margin + contentWidth, rowY + 14)
+              .strokeColor('#e5e7eb')
+              .lineWidth(0.3)
+              .stroke();
+
+            doc.y += 14;
+          });
+        } else {
+          doc.fontSize(8).font('Helvetica').fillColor('#666666');
+          doc.text('No transactions in this period', margin, doc.y);
+          doc.y += 10;
+        }
+
+        doc.y += 20; // Space between accounts
+      });
+    }
+  }
+
+  /**
    * Custom table rendering for Trial Balance with smaller fonts to prevent collisions
    */
   private addTrialBalanceTable(
@@ -5219,6 +5443,121 @@ export class ReportGeneratorService {
       closingBalanceSumCell.value = { formula: `SUM(K2:K${totalRowNum - 1})` };
       closingBalanceSumCell.numFmt = `"${currency}" #,##0.00`;
       closingBalanceSumCell.alignment = { horizontal: 'right' };
+    }
+  }
+
+  private addXLSXGeneralLedger(
+    workbook: ExcelJS.Workbook,
+    reportData: ReportData,
+    currency: string,
+  ): void {
+    const data = reportData.data;
+
+    // Summary sheet
+    const existingSheet = workbook.getWorksheet('Summary');
+    if (existingSheet) {
+      workbook.removeWorksheet(existingSheet.id);
+    }
+    const summarySheet = workbook.addWorksheet('Summary');
+    this.addXLSXHeader(summarySheet, reportData);
+
+    summarySheet.addRow(['General Ledger Report']);
+    summarySheet.addRow([]);
+    if (data.period) {
+      summarySheet.addRow([
+        'Period',
+        `${data.period.startDate} to ${data.period.endDate}`,
+      ]);
+      summarySheet.addRow([]);
+    }
+    summarySheet.addRow(['Total Accounts', data.accounts?.length || 0]);
+
+    // Create a sheet for each account
+    if (data.accounts && Array.isArray(data.accounts)) {
+      data.accounts.forEach((account: any) => {
+        // Sanitize sheet name (Excel has limitations)
+        let sheetName = account.accountName || account.accountCode || 'Account';
+        sheetName = sheetName.substring(0, 31).replace(/[\\\/\?\*\[\]]/g, '_');
+
+        // Check if sheet already exists (duplicate names)
+        let accountSheet = workbook.getWorksheet(sheetName);
+        if (!accountSheet) {
+          accountSheet = workbook.addWorksheet(sheetName);
+        }
+
+        // Header
+        accountSheet.addRow([account.accountName || account.accountCode]);
+        accountSheet.addRow([`Category: ${account.accountCategory || 'N/A'}`]);
+        accountSheet.addRow([
+          `Opening Balance: ${this.formatCurrency(account.openingBalance || 0, currency)}`,
+        ]);
+        accountSheet.addRow([
+          `Closing Balance: ${this.formatCurrency(account.closingBalance || 0, currency)}`,
+        ]);
+        accountSheet.addRow([]);
+
+        // Transaction headers
+        const headerRow = accountSheet.addRow([
+          'Date',
+          'Description',
+          'Reference',
+          'Source',
+          'Debit',
+          'Credit',
+          'Balance',
+        ]);
+        headerRow.font = {
+          bold: true,
+          size: 11,
+          color: { argb: 'FFFFFFFF' },
+        };
+        headerRow.fill = {
+          type: 'pattern',
+          pattern: 'solid',
+          fgColor: { argb: 'FF0077C8' },
+        };
+        headerRow.border = {
+          top: { style: 'medium', color: { argb: 'FF005A9A' } },
+          bottom: { style: 'medium', color: { argb: 'FF005A9A' } },
+          left: { style: 'thin', color: { argb: 'FF005A9A' } },
+          right: { style: 'thin', color: { argb: 'FF005A9A' } },
+        };
+        headerRow.height = 22;
+        headerRow.alignment = { horizontal: 'center', vertical: 'middle' };
+
+        // Add transactions
+        if (account.transactions && Array.isArray(account.transactions)) {
+          account.transactions.forEach((transaction: any) => {
+            accountSheet.addRow([
+              transaction.date,
+              transaction.description || '',
+              transaction.referenceNumber || '',
+              transaction.source || '',
+              transaction.debitAmount || 0,
+              transaction.creditAmount || 0,
+              transaction.runningBalance || 0,
+            ]);
+          });
+        }
+
+        // Format columns
+        accountSheet.getColumn('A').width = 12; // Date
+        accountSheet.getColumn('B').width = 30; // Description
+        accountSheet.getColumn('C').width = 15; // Reference
+        accountSheet.getColumn('D').width = 15; // Source
+        accountSheet.getColumn('E').width = 15; // Debit
+        accountSheet.getColumn('F').width = 15; // Credit
+        accountSheet.getColumn('G').width = 15; // Balance
+
+        // Format currency columns
+        ['E', 'F', 'G'].forEach((col) => {
+          accountSheet.getColumn(col).numFmt = `"${currency}" #,##0.00`;
+          accountSheet.getColumn(col).alignment = { horizontal: 'right' };
+        });
+
+        // Format date column
+        accountSheet.getColumn('A').alignment = { horizontal: 'left' };
+      });
     }
   }
 

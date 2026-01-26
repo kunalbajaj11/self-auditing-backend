@@ -26,8 +26,8 @@ import { QueueService } from './queue.service';
         return {
           connection: {
             ...connection,
-            // Connection retry configuration
-            maxRetriesPerRequest: 3,
+            // BullMQ requires maxRetriesPerRequest to be null
+            maxRetriesPerRequest: null,
             retryStrategy: (times: number) => {
               // Exponential backoff: 50ms, 100ms, 200ms, 400ms, etc.
               const delay = Math.min(times * 50, 2000);

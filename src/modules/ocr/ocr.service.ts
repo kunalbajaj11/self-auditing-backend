@@ -1,4 +1,6 @@
 import { Injectable, Inject, forwardRef } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
 import { ImageAnnotatorClient } from '@google-cloud/vision';
 import * as path from 'path';
@@ -6,6 +8,7 @@ import * as fs from 'fs';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { CategoryDetectionService } from './category-detection.service';
+import { Organization } from '../../entities/organization.entity';
 
 const execAsync = promisify(exec);
 
@@ -28,6 +31,8 @@ export class OcrService {
     private readonly configService: ConfigService,
     @Inject(forwardRef(() => CategoryDetectionService))
     private readonly categoryDetectionService: CategoryDetectionService,
+    @InjectRepository(Organization)
+    private readonly organizationsRepository: Repository<Organization>,
   ) {}
 
   async process(
@@ -200,7 +205,7 @@ export class OcrService {
             );
             // Parse the extracted text
             console.log('[OCR] [MOCK] Parsing extracted text...');
-            const parsed = this.parseOcrText(pdfText);
+            const parsed = await this.parseOcrText(pdfText, organizationId);
             console.log(
               `[OCR] [MOCK] Parsed vendor: ${parsed.vendorName || 'N/A'}`,
             );
@@ -482,7 +487,7 @@ export class OcrService {
       const confidence = detections[0]?.confidence || 0.8;
 
       // Parse extracted text to find vendor, amount, date, etc.
-      const parsed = this.parseOcrText(fullText);
+      const parsed = await this.parseOcrText(fullText, organizationId);
 
       // Create description from full text, excluding already extracted fields
       const description = this.buildDescription(fullText, parsed);
@@ -611,7 +616,7 @@ export class OcrService {
             '[OCR] Successfully extracted meaningful text from PDF using pdf-parse',
           );
           // Parse the extracted text
-          const parsed = this.parseOcrText(pdfText);
+          const parsed = await this.parseOcrText(pdfText, organizationId);
 
           // Detect category if organizationId is provided
           let suggestedCategoryId: string | undefined;
@@ -941,7 +946,7 @@ export class OcrService {
     console.log(
       `[OCR] First 200 chars of OCR text: ${primaryText.substring(0, 200)}`,
     );
-    const parsed = this.parseOcrText(primaryText);
+    const parsed = await this.parseOcrText(primaryText, organizationId);
     console.log(`[OCR] Parsed results:`, {
       vendorName: parsed.vendorName,
       vendorTrn: parsed.vendorTrn,
@@ -2061,14 +2066,41 @@ export class OcrService {
     return text || '';
   }
 
-  private parseOcrText(text: string): {
+  /**
+   * Normalize company name for comparison (remove common suffixes, lowercase, trim)
+   */
+  private normalizeCompanyName(name: string): string {
+    return name
+      .toLowerCase()
+      .trim()
+      .replace(/\s+/g, ' ') // Normalize whitespace
+      .replace(
+        /\s+(llc|ltd|inc|corp|co|company|limited|incorporated|corporation)\.?$/i,
+        '',
+      ) // Remove common suffixes
+      .trim();
+  }
+
+  /**
+   * Check if two company names match (after normalization)
+   */
+  private companyNamesMatch(name1: string, name2: string): boolean {
+    const normalized1 = this.normalizeCompanyName(name1);
+    const normalized2 = this.normalizeCompanyName(name2);
+    return normalized1 === normalized2;
+  }
+
+  private async parseOcrText(
+    text: string,
+    organizationId?: string,
+  ): Promise<{
     vendorName?: string;
     vendorTrn?: string;
     invoiceNumber?: string;
     amount?: number;
     vatAmount?: number;
     expenseDate?: string;
-  } {
+  }> {
     const result: {
       vendorName?: string;
       vendorTrn?: string;
@@ -2112,10 +2144,16 @@ export class OcrService {
         /(LLC|L\.L\.C\.|LTD|L\.T\.D\.|INC|INC\.|CORP|CORP\.|CO\.|COMPANY)/i,
       ];
 
-      // Try to find full company name first (lines with LLC, LTD, etc.)
-      let fullCompanyName: string | null = null; // eslint-disable-line prefer-const
+      // Collect ALL potential company names (not just the first one)
+      const potentialCompanyNames: Array<{
+        name: string;
+        original: string;
+        hasCompanyIndicator: boolean;
+        lineIndex: number;
+      }> = [];
 
-      for (const line of searchLines) {
+      for (let i = 0; i < searchLines.length; i++) {
+        const line = searchLines[i];
         const trimmed = line.trim();
         // Skip if matches skip patterns
         if (skipPatterns.some((p) => p.test(trimmed))) {
@@ -2133,7 +2171,7 @@ export class OcrService {
         // Additional check: if it's a short name (1-4 words) and appears early, it might be the vendor
         const wordCount = trimmed.split(/\s+/).length;
         const isShortName = wordCount >= 1 && wordCount <= 4;
-        const isEarlyLine = searchLines.indexOf(line) < 5; // First 5 lines
+        const isEarlyLine = i < 5; // First 5 lines
         const isAllCapsOrTitleCase =
           /^[A-Z][A-Z\s]+$/.test(trimmed) ||
           /^[A-Z][a-z]+(\s+[A-Z][a-z]+)*$/.test(trimmed);
@@ -2147,27 +2185,25 @@ export class OcrService {
             hasMultipleWords ||
             (isShortName && isEarlyLine && isAllCapsOrTitleCase))
         ) {
-          // Clean up the vendor name
-          let vendorName = trimmed
+          // Clean up the company name
+          const companyName = trimmed
             .replace(/\s+/g, ' ') // Normalize whitespace
             .substring(0, 100);
 
-          // Remove common suffixes that might be OCR errors (but keep if it's part of the name)
-          vendorName = vendorName.replace(/\s+(LLC|LTD|INC|CORP|CO)\.?$/i, '');
-
-          result.vendorName = vendorName;
-          break;
+          // Store original for final selection, but normalize for comparison
+          potentialCompanyNames.push({
+            name: companyName,
+            original: trimmed,
+            hasCompanyIndicator,
+            lineIndex: i,
+          });
         }
       }
 
-      // Use full company name if found, otherwise use the short name we found
-      if (fullCompanyName && !result.vendorName) {
-        result.vendorName = fullCompanyName;
-      }
-
-      // Priority 2: If no company name found, take first substantial line
-      if (!result.vendorName) {
-        for (const line of searchLines) {
+      // Priority 2: If no company names found with patterns, look for substantial lines
+      if (potentialCompanyNames.length === 0) {
+        for (let i = 0; i < searchLines.length; i++) {
+          const line = searchLines[i];
           const trimmed = line.trim();
           if (skipPatterns.some((p) => p.test(trimmed))) {
             continue;
@@ -2193,9 +2229,134 @@ export class OcrService {
             reasonableLength &&
             (hasSubstance || isLikelyVendorName)
           ) {
-            result.vendorName = trimmed.substring(0, 100);
-            break;
+            potentialCompanyNames.push({
+              name: trimmed.substring(0, 100),
+              original: trimmed,
+              hasCompanyIndicator: false,
+              lineIndex: i,
+            });
           }
+        }
+      }
+
+      // Now select the appropriate vendor name
+      if (potentialCompanyNames.length > 0) {
+        // If organizationId is provided, try to filter out organization's own name
+        if (organizationId) {
+          try {
+            const organization = await this.organizationsRepository.findOne({
+              where: { id: organizationId },
+              select: ['name'],
+            });
+
+            if (organization?.name) {
+              const organizationName = organization.name;
+
+              // If multiple companies found and one matches organization, pick the OTHER one
+              if (potentialCompanyNames.length >= 2) {
+                // Filter out ALL companies that match the organization (not just the first one)
+                const otherCompanies = potentialCompanyNames.filter(
+                  (cn) => !this.companyNamesMatch(cn.name, organizationName),
+                );
+
+                if (otherCompanies.length > 0) {
+                  // Found companies that don't match organization, pick one
+                  // Prefer company with indicator, or first one
+                  const selected =
+                    otherCompanies.find(
+                      (cn) => cn.hasCompanyIndicator,
+                    ) || otherCompanies[0];
+                  if (selected) {
+                    // Clean up the vendor name
+                    let vendorName = selected.name
+                      .replace(/\s+/g, ' ')
+                      .substring(0, 100);
+                    vendorName = vendorName.replace(
+                      /\s+(LLC|LTD|INC|CORP|CO)\.?$/i,
+                      '',
+                    );
+                    result.vendorName = vendorName;
+                    console.log(
+                      `[OCR] Multiple companies found. Organization "${organizationName}" detected. Filtered out ${potentialCompanyNames.length - otherCompanies.length} matching company(ies). Selected vendor: "${result.vendorName}"`,
+                    );
+                  }
+                } else {
+                  // All companies match organization (unlikely but possible), use first one as fallback
+                  console.warn(
+                    `[OCR] All ${potentialCompanyNames.length} companies found match organization "${organizationName}". Using first as fallback.`,
+                  );
+                  const selected = potentialCompanyNames[0];
+                  let vendorName = selected.name
+                    .replace(/\s+/g, ' ')
+                    .substring(0, 100);
+                  vendorName = vendorName.replace(
+                    /\s+(LLC|LTD|INC|CORP|CO)\.?$/i,
+                    '',
+                  );
+                  result.vendorName = vendorName;
+                }
+              } else {
+                // Only one company found, check if it matches organization
+                const singleCompany = potentialCompanyNames[0];
+                if (
+                  !this.companyNamesMatch(singleCompany.name, organizationName)
+                ) {
+                  // Doesn't match organization, use it
+                  let vendorName = singleCompany.name
+                    .replace(/\s+/g, ' ')
+                    .substring(0, 100);
+                  vendorName = vendorName.replace(
+                    /\s+(LLC|LTD|INC|CORP|CO)\.?$/i,
+                    '',
+                  );
+                  result.vendorName = vendorName;
+                } else {
+                  // Matches organization, this shouldn't be the vendor
+                  // Try to find another name or leave empty
+                  console.log(
+                    `[OCR] Only company found matches organization "${organizationName}". Skipping vendor name.`,
+                  );
+                }
+              }
+            } else {
+              // Organization not found in DB, use first company (fallback)
+              const selected = potentialCompanyNames[0];
+              let vendorName = selected.name
+                .replace(/\s+/g, ' ')
+                .substring(0, 100);
+              vendorName = vendorName.replace(
+                /\s+(LLC|LTD|INC|CORP|CO)\.?$/i,
+                '',
+              );
+              result.vendorName = vendorName;
+            }
+          } catch (error) {
+            // Error fetching organization, use first company (fallback)
+            console.warn(
+              `[OCR] Error fetching organization ${organizationId}:`,
+              error,
+            );
+            const selected = potentialCompanyNames[0];
+            let vendorName = selected.name
+              .replace(/\s+/g, ' ')
+              .substring(0, 100);
+            vendorName = vendorName.replace(
+              /\s+(LLC|LTD|INC|CORP|CO)\.?$/i,
+              '',
+            );
+            result.vendorName = vendorName;
+          }
+        } else {
+          // No organizationId provided, use first company (original behavior)
+          const selected = potentialCompanyNames[0];
+          let vendorName = selected.name
+            .replace(/\s+/g, ' ')
+            .substring(0, 100);
+          vendorName = vendorName.replace(
+            /\s+(LLC|LTD|INC|CORP|CO)\.?$/i,
+            '',
+          );
+          result.vendorName = vendorName;
         }
       }
     }
