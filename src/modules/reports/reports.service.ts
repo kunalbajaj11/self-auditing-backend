@@ -1199,7 +1199,8 @@ export class ReportsService {
    * Connection Pool Optimization Notes:
    * - This method uses multiple parallel queries (Promise.all) for performance
    * - Each Promise.all batch needs database connections from the pool
-   * - Ensure DB_POOL_MAX is set appropriately (20+ for local, 5 for production with PgBouncer)
+   * - Connection pool settings: DB_POOL_MAX=30 (default), DB_POOL_CONNECTION_TIMEOUT=30000ms
+   * - If connection timeouts occur, queries are batched sequentially in smaller groups
    * - TypeORM connection pool automatically manages connection reuse
    * - All repository queries share the same DataSource connection pool
    */
@@ -1708,8 +1709,113 @@ export class ReportsService {
         Number(journalApAtStartRow?.credit || 0) -
         Number(journalApAtStartRow?.debit || 0);
 
-      const openingAp = accrualsAtStart + journalApStart;
-      const closingAp = accrualsAtEnd + journalApEnd;
+      // Calculate unpaid expenses WITHOUT accruals (expenses that should be in AP but don't have accrual records)
+      // These are expenses that are unpaid but weren't created as accruals
+      const unpaidExpensesWithoutAccrualsEndSubquery = this.expensePaymentsRepository
+        .createQueryBuilder('payment')
+        .select('COALESCE(SUM(payment.amount), 0)')
+        .where('payment.expense_id = expense.id')
+        .andWhere('payment.payment_date <= :endDate')
+        .andWhere('payment.organization_id = :organizationId')
+        .andWhere('payment.is_deleted = false')
+        .getQuery();
+
+      const unpaidExpensesWithoutAccrualsStartSubquery = this.expensePaymentsRepository
+        .createQueryBuilder('payment')
+        .select('COALESCE(SUM(payment.amount), 0)')
+        .where('payment.expense_id = expense.id')
+        .andWhere('payment.payment_date < :startDate')
+        .andWhere('payment.organization_id = :organizationId')
+        .andWhere('payment.is_deleted = false')
+        .getQuery();
+
+      // Subquery for debit notes linked to expense (for unpaid expenses without accruals)
+      // Use the same logic as accruals: include ISSUED, APPLIED, and DRAFT with applications
+      const debitNotesForUnpaidExpensesEndSubquery = `(
+        SELECT COALESCE(SUM(COALESCE(dn.total_amount, dn.base_amount + dn.vat_amount, dn.amount + dn.vat_amount)), 0)
+        FROM debit_notes dn
+        WHERE dn.expense_id = expense.id
+        AND dn.organization_id = expense.organization_id
+        AND dn.debit_note_date <= :endDate
+        AND dn.is_deleted = false
+        AND (
+          dn.status IN ('${DebitNoteStatus.ISSUED}', '${DebitNoteStatus.APPLIED}')
+          OR dn.id IN (SELECT DISTINCT dnea.debit_note_id FROM debit_note_expense_applications dnea WHERE dnea.organization_id = expense.organization_id)
+          OR (dn.status = '${DebitNoteStatus.DRAFT}' AND dn.expense_id IS NOT NULL)
+        )
+      )`;
+
+      const debitNotesForUnpaidExpensesStartSubquery = `(
+        SELECT COALESCE(SUM(COALESCE(dn.total_amount, dn.base_amount + dn.vat_amount, dn.amount + dn.vat_amount)), 0)
+        FROM debit_notes dn
+        WHERE dn.expense_id = expense.id
+        AND dn.organization_id = expense.organization_id
+        AND dn.debit_note_date < :startDate
+        AND dn.is_deleted = false
+        AND (
+          dn.status IN ('${DebitNoteStatus.ISSUED}', '${DebitNoteStatus.APPLIED}')
+          OR dn.id IN (SELECT DISTINCT dnea.debit_note_id FROM debit_note_expense_applications dnea WHERE dnea.organization_id = expense.organization_id)
+          OR (dn.status = '${DebitNoteStatus.DRAFT}' AND dn.expense_id IS NOT NULL)
+        )
+      )`;
+
+      // Unpaid expenses without accruals at end date
+      const unpaidExpensesWithoutAccrualsEndQuery = this.expensesRepository
+        .createQueryBuilder('expense')
+        .leftJoin('expense.accrualDetail', 'accrual')
+        .select([
+          `SUM(GREATEST(0, COALESCE(expense.total_amount, expense.amount + COALESCE(expense.vat_amount, 0)) - (${unpaidExpensesWithoutAccrualsEndSubquery}) - (${debitNotesForUnpaidExpensesEndSubquery}))) AS credit`,
+        ])
+        .where('expense.organization_id = :organizationId', { organizationId })
+        .andWhere('expense.is_deleted = false')
+        .andWhere('expense.expense_date <= :endDate', { endDate })
+        .andWhere("(expense.type IS NULL OR expense.type != 'credit')")
+        .andWhere('accrual.id IS NULL') // Only expenses WITHOUT accruals
+        .andWhere(
+          `COALESCE(expense.total_amount, expense.amount + COALESCE(expense.vat_amount, 0)) > (${unpaidExpensesWithoutAccrualsEndSubquery}) + (${debitNotesForUnpaidExpensesEndSubquery})`,
+        )
+        .setParameter('organizationId', organizationId)
+        .setParameter('endDate', endDate)
+        .setParameter('startDate', startDate);
+
+      // Unpaid expenses without accruals at start date
+      const unpaidExpensesWithoutAccrualsStartQuery = this.expensesRepository
+        .createQueryBuilder('expense')
+        .leftJoin('expense.accrualDetail', 'accrual')
+        .select([
+          `SUM(GREATEST(0, COALESCE(expense.total_amount, expense.amount + COALESCE(expense.vat_amount, 0)) - (${unpaidExpensesWithoutAccrualsStartSubquery}) - (${debitNotesForUnpaidExpensesStartSubquery}))) AS credit`,
+        ])
+        .where('expense.organization_id = :organizationId', { organizationId })
+        .andWhere('expense.is_deleted = false')
+        .andWhere('expense.expense_date < :startDate', { startDate })
+        .andWhere("(expense.type IS NULL OR expense.type != 'credit')")
+        .andWhere('accrual.id IS NULL') // Only expenses WITHOUT accruals
+        .andWhere(
+          `COALESCE(expense.total_amount, expense.amount + COALESCE(expense.vat_amount, 0)) > (${unpaidExpensesWithoutAccrualsStartSubquery}) + (${debitNotesForUnpaidExpensesStartSubquery})`,
+        )
+        .setParameter('organizationId', organizationId)
+        .setParameter('endDate', endDate)
+        .setParameter('startDate', startDate);
+
+      const [unpaidExpensesWithoutAccrualsEndRow, unpaidExpensesWithoutAccrualsStartRow] =
+        await Promise.all([
+          unpaidExpensesWithoutAccrualsEndQuery.getRawOne(),
+          unpaidExpensesWithoutAccrualsStartQuery.getRawOne(),
+        ]);
+
+      const unpaidExpensesWithoutAccrualsEnd = Number(
+        unpaidExpensesWithoutAccrualsEndRow?.credit || 0,
+      );
+      const unpaidExpensesWithoutAccrualsStart = Number(
+        unpaidExpensesWithoutAccrualsStartRow?.credit || 0,
+      );
+
+      this.logger.debug(
+        `Trial Balance - Unpaid expenses without accruals: start=${unpaidExpensesWithoutAccrualsStart}, end=${unpaidExpensesWithoutAccrualsEnd}`,
+      );
+
+      const openingAp = accrualsAtStart + journalApStart + unpaidExpensesWithoutAccrualsStart;
+      const closingAp = accrualsAtEnd + journalApEnd + unpaidExpensesWithoutAccrualsEnd;
 
       const expensePurchasesPeriod = Number(expensesTotalPeriodRow?.total || 0);
       const journalApCreditsPeriod = Number(
@@ -2063,7 +2169,8 @@ export class ReportsService {
       const vatCreditNotesRow = await vatCreditNotesQuery.getRawOne();
       const vatCreditNotesDebit = Number(vatCreditNotesRow?.debit || 0);
 
-      const vatDebitNotesQuery = this.debitNotesRepository
+      // Customer debit notes (linked to invoices) increase VAT Payable (credit)
+      const vatCustomerDebitNotesQuery = this.debitNotesRepository
         .createQueryBuilder('debitNote')
         .select(['SUM(COALESCE(debitNote.vat_amount, 0)) AS credit'])
         .where('debitNote.organization_id = :organizationId', {
@@ -2074,13 +2181,19 @@ export class ReportsService {
         .andWhere('debitNote.status IN (:...statuses)', {
           statuses: [DebitNoteStatus.ISSUED, DebitNoteStatus.APPLIED],
         })
+        .andWhere('debitNote.invoice_id IS NOT NULL') // Only customer debit notes
         .andWhere('debitNote.vat_amount > 0');
 
-      const vatDebitNotesRow = await vatDebitNotesQuery.getRawOne();
-      const vatDebitNotesCredit = Number(vatDebitNotesRow?.credit || 0);
+      const vatCustomerDebitNotesRow = await vatCustomerDebitNotesQuery.getRawOne();
+      const customerDebitNotesCredit = Number(vatCustomerDebitNotesRow?.credit || 0);
+
+      // Note: Supplier debit notes (linked to expenses) should NOT reduce VAT Payable
+      // They only reduce VAT Receivable (Input VAT), which is handled separately above
+      // Supplier debit notes reduce the expense and the Input VAT you can claim back
+      // They do NOT affect Output VAT (VAT Payable) which is only for sales/invoices
 
       const netVatPayableDebit = vatCreditNotesDebit;
-      const netVatPayableCredit = vatPayableCredit + vatDebitNotesCredit;
+      const netVatPayableCredit = vatPayableCredit + customerDebitNotesCredit;
 
       accounts.push({
         accountName: 'VAT Payable (Output VAT)',
@@ -3212,6 +3325,11 @@ export class ReportsService {
         openingVatDebitNotesRow?.credit || 0,
       );
 
+      // Note: Opening supplier debit notes should NOT reduce opening VAT Payable
+      // They only reduce opening VAT Receivable (Input VAT), which is handled separately
+      // Supplier debit notes reduce the expense and the Input VAT you can claim back
+      // They do NOT affect Output VAT (VAT Payable) which is only for sales/invoices
+
       const netOpeningVatPayableDebit = openingVatCreditNotesDebit;
       const netOpeningVatPayableCredit =
         openingVatPayableCredit + openingVatDebitNotesCredit;
@@ -3663,6 +3781,9 @@ export class ReportsService {
         })
         .setParameter('organizationId', organizationId);
 
+      // Customer debit notes (for accounts receivable in Balance Sheet)
+      // Only include debit notes linked to invoices, not expenses
+      // This matches the Trial Balance calculation exactly
       const receivablesDebitNotesQuery = this.debitNotesRepository
         .createQueryBuilder('debitNote')
         .select(['SUM(COALESCE(debitNote.total_amount, 0)) AS debit'])
@@ -3670,6 +3791,7 @@ export class ReportsService {
           organizationId,
         })
         .andWhere('debitNote.debit_note_date <= :asOfDate', { asOfDate })
+        .andWhere('debitNote.invoice_id IS NOT NULL') // Only customer debit notes
         .andWhere('debitNote.status IN (:...statuses)', {
           statuses: [DebitNoteStatus.ISSUED, DebitNoteStatus.APPLIED],
         });
@@ -4087,6 +4209,11 @@ export class ReportsService {
         )
         .andWhere('creditNote.vat_amount > 0');
 
+      // Customer debit notes (linked to invoices) increase VAT Payable (credit)
+      // Only include debit notes linked to invoices, not expenses
+      // This matches the Trial Balance calculation exactly
+      // Note: Supplier debit notes (linked to expenses) should NOT affect VAT Payable
+      // They only reduce VAT Receivable (Input VAT), which is handled separately
       const vatDebitNotesQuery = this.debitNotesRepository
         .createQueryBuilder('debitNote')
         .select(['SUM(COALESCE(debitNote.vat_amount, 0)) AS vat'])
@@ -4094,6 +4221,7 @@ export class ReportsService {
           organizationId,
         })
         .andWhere('debitNote.debit_note_date <= :asOfDate', { asOfDate })
+        .andWhere('debitNote.invoice_id IS NOT NULL') // Only customer debit notes
         .andWhere('debitNote.status IN (:...statuses)', {
           statuses: [DebitNoteStatus.ISSUED, DebitNoteStatus.APPLIED],
         })
@@ -9246,6 +9374,8 @@ export class ReportsService {
         status?: string;
         entityId?: string;
         entityType?: string;
+        vatAmount?: number; // Optional VAT amount for display
+        baseAmount?: number; // Optional base amount for display
       }> = [];
 
       // Handle Expense accounts (category-based)
@@ -9373,16 +9503,69 @@ export class ReportsService {
           });
 
         // Also check for journal entries that might affect this expense category
-        // (if it's a custom ledger account with the same name)
-        const ledgerAccount = await this.ledgerAccountsRepository.findOne({
-          where: {
-            name: accountName,
-            organization: { id: organizationId } as any,
-          },
-        });
+        // Handle "General Expense (Journal Entry)" which maps to 'general_expense' account code
+        // P&L appends " (Journal Entry)" to ledger account names, so we need to strip that suffix
+        let journalAccountCode: string | null = null;
+        
+        // Normalize account name by removing " (Journal Entry)" suffix if present
+        const normalizedAccountName = accountName.replace(/\s*\(Journal Entry\)\s*$/i, '');
+        
+        if (accountName === 'General Expense (Journal Entry)' || normalizedAccountName === 'General Expense') {
+          journalAccountCode = 'general_expense';
+          this.logger.debug(
+            `Mapping accountName "${accountName}" to journal account code: ${journalAccountCode}`,
+          );
+        } else {
+          // Check if it's a custom ledger account
+          // P&L shows names like "Salary expense (Journal Entry)" but ledger account is "Salary expense"
+          // So we search using the normalized name (without the suffix)
+          let ledgerAccount = await this.ledgerAccountsRepository.findOne({
+            where: {
+              name: normalizedAccountName,
+              organization: { id: organizationId } as any,
+            },
+          });
 
-        if (ledgerAccount) {
-          const accountCode = `ledger:${ledgerAccount.id}`;
+          // If not found with normalized name, try exact match (in case it's not from P&L)
+          if (!ledgerAccount) {
+            ledgerAccount = await this.ledgerAccountsRepository.findOne({
+              where: {
+                name: accountName,
+                organization: { id: organizationId } as any,
+              },
+            });
+          }
+
+          // If still not found, try case-insensitive search
+          if (!ledgerAccount) {
+            const allLedgerAccounts = await this.ledgerAccountsRepository.find({
+              where: {
+                organization: { id: organizationId } as any,
+              },
+            });
+            ledgerAccount = allLedgerAccounts.find(
+              (acc) => acc.name.toLowerCase() === normalizedAccountName.toLowerCase() ||
+                       acc.name.toLowerCase() === accountName.toLowerCase(),
+            );
+          }
+
+          if (ledgerAccount) {
+            journalAccountCode = `ledger:${ledgerAccount.id}`;
+            this.logger.debug(
+              `Found ledger account for "${accountName}" (normalized: "${normalizedAccountName}"): id=${ledgerAccount.id}, code=${journalAccountCode}`,
+            );
+          } else {
+            this.logger.debug(
+              `No ledger account found for "${accountName}" (normalized: "${normalizedAccountName}")`,
+            );
+          }
+        }
+
+        if (journalAccountCode) {
+          this.logger.debug(
+            `Querying journal entries for accountName="${accountName}", accountCode="${journalAccountCode}", startDate=${startDate}, endDate=${endDate}`,
+          );
+          
           const journalEntries = await this.journalEntriesRepository
             .createQueryBuilder('entry')
             .where('entry.organization_id = :organizationId', {
@@ -9392,17 +9575,21 @@ export class ReportsService {
             .andWhere('entry.entry_date <= :endDate', { endDate })
             .andWhere(
               `(entry.debit_account = :accountCode OR entry.credit_account = :accountCode)`,
-              { accountCode },
+              { accountCode: journalAccountCode },
             )
             .orderBy('entry.entry_date', 'ASC')
             .addOrderBy('entry.created_at', 'ASC')
             .getMany();
 
+          this.logger.debug(
+            `Found ${journalEntries.length} journal entries for account ${accountName} (code: ${journalAccountCode})`,
+          );
+
           journalEntries.forEach((entry) => {
-            const amount = Number(entry.amount);
+            const amount = Number(entry.amount) + Number(entry.vatAmount || 0);
             const isDebitNormal = true; // Expenses are debit normal
 
-            if (entry.debitAccount === accountCode) {
+            if (entry.debitAccount === journalAccountCode) {
               entries.push({
                 id: entry.id,
                 type: 'Journal Entry',
@@ -9414,8 +9601,10 @@ export class ReportsService {
                 amount: amount,
                 entityId: entry.id,
                 entityType: 'journal_entry',
+                vatAmount: entry.vatAmount ? Number(entry.vatAmount) : undefined,
+                baseAmount: Number(entry.amount),
               });
-            } else if (entry.creditAccount === accountCode) {
+            } else if (entry.creditAccount === journalAccountCode) {
               entries.push({
                 id: entry.id,
                 type: 'Journal Entry',
@@ -9427,12 +9616,14 @@ export class ReportsService {
                 amount: amount,
                 entityId: entry.id,
                 entityType: 'journal_entry',
+                vatAmount: entry.vatAmount ? Number(entry.vatAmount) : undefined,
+                baseAmount: Number(entry.amount),
               });
             }
           });
-
+        } else {
           this.logger.debug(
-            `Found ${journalEntries.length} journal entries for ledger account ${accountName}`,
+            `No journal account code found for "${accountName}". This might be a regular expense category without journal entries.`,
           );
         }
 
@@ -9595,6 +9786,188 @@ export class ReportsService {
           });
         });
 
+        // Get unpaid expenses WITHOUT accruals (expenses that should be in AP but don't have accrual records)
+        // This matches the Trial Balance calculation logic
+        const unpaidExpensesWithoutAccruals = await this.expensesRepository
+          .createQueryBuilder('expense')
+          .leftJoin('expense.accrualDetail', 'accrual')
+          .where('expense.organization_id = :organizationId', { organizationId })
+          .andWhere('expense.is_deleted = false')
+          .andWhere('expense.expense_date <= :endDate', { endDate })
+          .andWhere("(expense.type IS NULL OR expense.type != 'credit')")
+          .andWhere('accrual.id IS NULL') // Only expenses WITHOUT accruals
+          .orderBy('expense.expense_date', 'ASC')
+          .addOrderBy('expense.created_at', 'ASC')
+          .getMany();
+
+        if (unpaidExpensesWithoutAccruals.length > 0) {
+          const unpaidExpenseIds = unpaidExpensesWithoutAccruals.map((exp) => exp.id);
+
+          // Get payments for these expenses
+          const expensePayments = await this.expensePaymentsRepository
+            .createQueryBuilder('payment')
+            .leftJoinAndSelect('payment.expense', 'expense')
+            .where('payment.organization_id = :organizationId', { organizationId })
+            .andWhere('payment.is_deleted = false')
+            .andWhere('payment.payment_date >= :startDate', { startDate })
+            .andWhere('payment.payment_date <= :endDate', { endDate })
+            .andWhere('payment.expense_id IN (:...expenseIds)', {
+              expenseIds: unpaidExpenseIds,
+            })
+            .orderBy('payment.payment_date', 'ASC')
+            .addOrderBy('payment.created_at', 'ASC')
+            .getMany();
+
+          // Get debit notes for these expenses
+          const supplierDebitNotesWithApplicationsSubquery =
+            this.debitNoteExpenseApplicationsRepository
+              .createQueryBuilder('dnea')
+              .select('DISTINCT dnea.debit_note_id')
+              .where('dnea.organization_id = :organizationId', { organizationId })
+              .getQuery();
+
+          const supplierDebitNotes = await this.debitNotesRepository
+            .createQueryBuilder('debitNote')
+            .leftJoinAndSelect('debitNote.expense', 'expense')
+            .where('debitNote.organization_id = :organizationId', {
+              organizationId,
+            })
+            .andWhere('debitNote.debit_note_date >= :startDate', { startDate })
+            .andWhere('debitNote.debit_note_date <= :endDate', { endDate })
+            .andWhere('debitNote.expense_id IN (:...expenseIds)', {
+              expenseIds: unpaidExpenseIds,
+            })
+            .andWhere(
+              '(debitNote.status IN (:...statuses) OR debitNote.id IN (' +
+                supplierDebitNotesWithApplicationsSubquery +
+                ') OR (debitNote.status = :draftStatus AND debitNote.expense_id IS NOT NULL))',
+              {
+                statuses: [DebitNoteStatus.ISSUED, DebitNoteStatus.APPLIED],
+                draftStatus: DebitNoteStatus.DRAFT,
+              },
+            )
+            .orderBy('debitNote.debit_note_date', 'ASC')
+            .addOrderBy('debitNote.created_at', 'ASC')
+            .getMany();
+
+          // Create maps of expense ID to payments and debit notes
+          const paymentsByExpenseId = new Map<string, typeof expensePayments>();
+          const debitNotesByExpenseId = new Map<string, typeof supplierDebitNotes>();
+
+          expensePayments.forEach((payment) => {
+            const expenseId = payment.expense?.id;
+            if (expenseId) {
+              const existing = paymentsByExpenseId.get(expenseId) || [];
+              existing.push(payment);
+              paymentsByExpenseId.set(expenseId, existing);
+            }
+          });
+
+          supplierDebitNotes.forEach((debitNote) => {
+            const expenseId = debitNote.expense?.id;
+            if (expenseId) {
+              const existing = debitNotesByExpenseId.get(expenseId) || [];
+              existing.push(debitNote);
+              debitNotesByExpenseId.set(expenseId, existing);
+            }
+          });
+
+          // Add expense entries, payments, and debit notes
+          unpaidExpensesWithoutAccruals.forEach((expense) => {
+            const totalAmount = Number(
+              expense.totalAmount ||
+                expense.amount + (expense.vatAmount || 0) ||
+                expense.amount,
+            );
+
+            // Get payments and debit notes for this expense
+            const payments = paymentsByExpenseId.get(expense.id) || [];
+            const debitNotes = debitNotesByExpenseId.get(expense.id) || [];
+
+            const paidAmount = payments.reduce(
+              (sum, p) => sum + Number(p.amount || 0),
+              0,
+            );
+            const debitNoteAmount = debitNotes.reduce(
+              (sum, dn) =>
+                sum +
+                Number(
+                  dn.totalAmount ||
+                    dn.baseAmount + (dn.vatAmount || 0) ||
+                    dn.amount,
+                ),
+              0,
+            );
+            const outstandingAmount = totalAmount - paidAmount - debitNoteAmount;
+
+            // Only add if there's an outstanding amount
+            if (outstandingAmount > 0) {
+              // Add the expense entry (credit to AP)
+              entries.push({
+                id: expense.id,
+                type: 'Expense',
+                date: expense.expenseDate,
+                referenceNumber: expense.invoiceNumber || undefined,
+                description:
+                  expense.description || `Expense from ${expense.vendorName || 'Vendor'}`,
+                debitAmount: 0,
+                creditAmount: totalAmount,
+                amount: totalAmount,
+                currency: expense.currency,
+                entityId: expense.id,
+                entityType: 'expense',
+              });
+
+              // Add payments (debit to AP)
+              payments.forEach((payment) => {
+                entries.push({
+                  id: payment.id,
+                  type: 'Payment',
+                  date: payment.paymentDate,
+                  referenceNumber: payment.referenceNumber || undefined,
+                  description: `Payment for ${payment.expense?.invoiceNumber || 'expense'}`,
+                  debitAmount: Number(payment.amount),
+                  creditAmount: 0,
+                  amount: Number(payment.amount),
+                  currency: payment.expense?.currency,
+                  entityId: payment.id,
+                  entityType: 'expense_payment',
+                });
+              });
+
+              // Add debit notes (debit to AP)
+              debitNotes.forEach((debitNote) => {
+                entries.push({
+                  id: debitNote.id,
+                  type: 'Debit Note Applied',
+                  date: debitNote.debitNoteDate,
+                  referenceNumber: debitNote.debitNoteNumber || undefined,
+                  description: debitNote.description || undefined,
+                  debitAmount: Number(
+                    debitNote.totalAmount ||
+                      debitNote.baseAmount + (debitNote.vatAmount || 0) ||
+                      debitNote.amount,
+                  ),
+                  creditAmount: 0,
+                  amount: Number(
+                    debitNote.totalAmount ||
+                      debitNote.baseAmount + (debitNote.vatAmount || 0) ||
+                      debitNote.amount,
+                  ),
+                  currency: debitNote.currency,
+                  status: debitNote.status,
+                  entityId: debitNote.id,
+                  entityType: 'debit_note',
+                });
+              });
+            }
+          });
+        }
+
+        this.logger.debug(
+          `Found ${unpaidExpensesWithoutAccruals.length} unpaid expenses without accruals for Accounts Payable`,
+        );
+
         // Get journal entries for Accounts Payable
         const journalEntries = await this.journalEntriesRepository
           .createQueryBuilder('entry')
@@ -9645,7 +10018,9 @@ export class ReportsService {
         accountName === 'Accounts Receivable' &&
         accountType === 'Asset'
       ) {
-        // Get unpaid/partial invoices
+        // Get unpaid/partial invoices up to end date
+        // Note: Accounts Receivable closing balance includes ALL unpaid invoices up to endDate
+        // This matches the trial balance calculation which shows closing balance
         const invoices = await this.salesInvoicesRepository
           .createQueryBuilder('invoice')
           .where('invoice.organization_id = :organizationId', {
@@ -9660,23 +10035,33 @@ export class ReportsService {
           .getMany();
 
         invoices.forEach((invoice) => {
+          // Use totalAmount (includes VAT) to match trial balance calculation
+          // Trial balance shows Accounts Receivable with VAT included
+          const totalAmount = Number(invoice.totalAmount || invoice.baseAmount + (invoice.vatAmount || 0) || invoice.amount);
+          const baseAmount = Number(invoice.baseAmount || invoice.amount);
+          const vatAmount = Number(invoice.vatAmount || 0);
+          
           entries.push({
             id: invoice.id,
             type: 'Invoice',
             date: invoice.invoiceDate,
             referenceNumber: invoice.invoiceNumber || undefined,
             description: invoice.description || undefined,
-            debitAmount: Number(invoice.baseAmount || invoice.amount),
+            debitAmount: totalAmount, // Include VAT to match trial balance
             creditAmount: 0,
-            amount: Number(invoice.baseAmount || invoice.amount),
+            amount: totalAmount, // Include VAT to match trial balance
             currency: invoice.currency,
             status: invoice.paymentStatus,
             entityId: invoice.id,
             entityType: 'invoice',
+            // Include VAT breakdown for display
+            vatAmount: vatAmount > 0 ? vatAmount : undefined,
+            baseAmount: baseAmount,
           });
         });
 
-        // Get customer debit notes
+        // Get customer debit notes up to end date
+        // Note: These increase Accounts Receivable, matching trial balance calculation
         const customerDebitNotes = await this.debitNotesRepository
           .createQueryBuilder('debitNote')
           .where('debitNote.organization_id = :organizationId', {
@@ -9692,19 +10077,28 @@ export class ReportsService {
           .getMany();
 
         customerDebitNotes.forEach((debitNote) => {
+          // Use totalAmount (includes VAT) to match trial balance calculation
+          // Trial balance shows Accounts Receivable with VAT included
+          const totalAmount = Number(debitNote.totalAmount || debitNote.baseAmount + (debitNote.vatAmount || 0) || debitNote.amount);
+          const baseAmount = Number(debitNote.baseAmount || debitNote.amount);
+          const vatAmount = Number(debitNote.vatAmount || 0);
+          
           entries.push({
             id: debitNote.id,
             type: 'Customer Debit Note',
             date: debitNote.debitNoteDate,
             referenceNumber: debitNote.debitNoteNumber || undefined,
             description: debitNote.description || undefined,
-            debitAmount: Number(debitNote.baseAmount || debitNote.amount),
+            debitAmount: totalAmount, // Include VAT to match trial balance
             creditAmount: 0,
-            amount: Number(debitNote.baseAmount || debitNote.amount),
+            amount: totalAmount, // Include VAT to match trial balance
             currency: debitNote.currency,
             status: debitNote.status,
             entityId: debitNote.id,
             entityType: 'debit_note',
+            // Include VAT breakdown for display
+            vatAmount: vatAmount > 0 ? vatAmount : undefined,
+            baseAmount: baseAmount,
           });
         });
 
@@ -10113,6 +10507,7 @@ export class ReportsService {
             accountCode = `ledger:${ledgerAccount.id}`;
           } else {
             // Check if it matches a standard account code (try both original and normalized name)
+            // Also handle common name variations (e.g., "Shareholder Account" vs "Owner/Shareholder Account")
             let accountEntries = Object.entries(ACCOUNT_METADATA).find(
               ([, metadata]) => metadata.name === accountName,
             );
@@ -10120,6 +10515,15 @@ export class ReportsService {
               accountEntries = Object.entries(ACCOUNT_METADATA).find(
                 ([, metadata]) => metadata.name === normalizedAccountName,
               );
+            }
+            // Handle Balance Sheet name variations
+            if (!accountEntries) {
+              // Map "Shareholder Account" to "Owner/Shareholder Account"
+              if (accountName === 'Shareholder Account' || normalizedAccountName === 'Shareholder Account') {
+                accountEntries = Object.entries(ACCOUNT_METADATA).find(
+                  ([, metadata]) => metadata.name === 'Owner/Shareholder Account',
+                );
+              }
             }
             if (accountEntries) {
               accountCode = accountEntries[0];

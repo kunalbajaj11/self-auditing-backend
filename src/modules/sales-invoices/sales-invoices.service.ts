@@ -1070,31 +1070,33 @@ export class SalesInvoicesService {
         generatedAt: new Date(),
         generatedByName: invoice.user?.name,
         organizationId: invoice.organization?.id,
-        // Invoice template settings - use logo buffer for PDF generation
-        logoBuffer: logoBuffer,
-        logoUrl: null, // Logo is provided as buffer, not URL
-        headerText:
-          templateSettings.invoiceHeaderText || invoice.organization?.name,
-        colorScheme: templateSettings.invoiceColorScheme || 'blue',
-        customColor: templateSettings.invoiceCustomColor,
-        invoiceTitle: templateSettings.invoiceTitle || 'TAX INVOICE',
-        showCompanyDetails: templateSettings.invoiceShowCompanyDetails ?? true,
-        showVatDetails: templateSettings.invoiceShowVatDetails ?? true,
-        showPaymentTerms: templateSettings.invoiceShowPaymentTerms ?? true,
-        showPaymentMethods: templateSettings.invoiceShowPaymentMethods ?? true,
-        showBankDetails: templateSettings.invoiceShowBankDetails ?? false,
-        showTermsAndConditions:
-          templateSettings.invoiceShowTermsConditions ?? true,
-        paymentTerms: paymentTerms || 'Net 30',
-        defaultNotes: templateSettings.invoiceDefaultNotes,
-        termsAndConditions: templateSettings.invoiceTermsConditions,
-        footerText: templateSettings.invoiceFooterText,
-        showFooter: templateSettings.invoiceShowFooter ?? true,
-        showItemDescription:
-          templateSettings.invoiceShowItemDescription ?? true,
-        showItemQuantity: templateSettings.invoiceShowItemQuantity ?? true,
-        showItemUnitPrice: templateSettings.invoiceShowItemUnitPrice ?? true,
-        showItemTotal: templateSettings.invoiceShowItemTotal ?? true,
+        // Invoice template settings - nested under invoiceTemplate as expected by PDF generator
+        invoiceTemplate: {
+          logoBuffer: logoBuffer,
+          logoUrl: null, // Logo is provided as buffer, not URL
+          headerText:
+            templateSettings.invoiceHeaderText || invoice.organization?.name,
+          colorScheme: templateSettings.invoiceColorScheme || 'blue',
+          customColor: templateSettings.invoiceCustomColor,
+          invoiceTitle: templateSettings.invoiceTitle || 'TAX INVOICE',
+          showCompanyDetails: templateSettings.invoiceShowCompanyDetails ?? true,
+          showVatDetails: templateSettings.invoiceShowVatDetails ?? true,
+          showPaymentTerms: templateSettings.invoiceShowPaymentTerms ?? true,
+          showPaymentMethods: templateSettings.invoiceShowPaymentMethods ?? true,
+          showBankDetails: templateSettings.invoiceShowBankDetails ?? false,
+          showTermsAndConditions:
+            templateSettings.invoiceShowTermsConditions ?? true,
+          paymentTerms: paymentTerms || 'Net 30',
+          defaultNotes: templateSettings.invoiceDefaultNotes,
+          termsAndConditions: templateSettings.invoiceTermsConditions,
+          footerText: templateSettings.invoiceFooterText,
+          showFooter: templateSettings.invoiceShowFooter ?? true,
+          showItemDescription:
+            templateSettings.invoiceShowItemDescription ?? true,
+          showItemQuantity: templateSettings.invoiceShowItemQuantity ?? true,
+          showItemUnitPrice: templateSettings.invoiceShowItemUnitPrice ?? true,
+          showItemTotal: templateSettings.invoiceShowItemTotal ?? true,
+        },
       },
     };
 

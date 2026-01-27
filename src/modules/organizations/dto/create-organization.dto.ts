@@ -54,4 +54,28 @@ export class CreateOrganizationDto {
   @IsOptional()
   @IsBoolean()
   enableInventory?: boolean;
+
+  @IsOptional()
+  @IsString()
+  bankAccountHolder?: string;
+
+  @IsOptional()
+  @IsString()
+  bankName?: string;
+
+  @IsOptional()
+  @IsString()
+  bankAccountNumber?: string;
+
+  @IsOptional()
+  @IsString()
+  bankIban?: string;
+
+  @IsOptional()
+  @IsString()
+  bankBranch?: string;
+
+  @IsOptional()
+  @IsString()
+  bankSwiftCode?: string;
 }

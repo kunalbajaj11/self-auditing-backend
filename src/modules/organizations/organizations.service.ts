@@ -156,6 +156,24 @@ export class OrganizationsService {
     if (dto.enableInventory !== undefined) {
       organization.enableInventory = dto.enableInventory;
     }
+    if (dto.bankAccountHolder !== undefined) {
+      organization.bankAccountHolder = dto.bankAccountHolder;
+    }
+    if (dto.bankName !== undefined) {
+      organization.bankName = dto.bankName;
+    }
+    if (dto.bankAccountNumber !== undefined) {
+      organization.bankAccountNumber = dto.bankAccountNumber;
+    }
+    if (dto.bankIban !== undefined) {
+      organization.bankIban = dto.bankIban;
+    }
+    if (dto.bankBranch !== undefined) {
+      organization.bankBranch = dto.bankBranch;
+    }
+    if (dto.bankSwiftCode !== undefined) {
+      organization.bankSwiftCode = dto.bankSwiftCode;
+    }
 
     const saved = await this.organizationsRepository.save(organization);
 

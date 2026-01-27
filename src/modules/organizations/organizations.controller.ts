@@ -80,6 +80,14 @@ export class OrganizationsController {
       contactEmail: organization.contactEmail,
       enablePayroll: organization.enablePayroll,
       enableInventory: organization.enableInventory,
+      vatNumber: organization.vatNumber,
+      address: organization.address,
+      bankAccountHolder: organization.bankAccountHolder,
+      bankName: organization.bankName,
+      bankAccountNumber: organization.bankAccountNumber,
+      bankIban: organization.bankIban,
+      bankBranch: organization.bankBranch,
+      bankSwiftCode: organization.bankSwiftCode,
     };
   }
 
@@ -103,6 +111,16 @@ export class OrganizationsController {
       contactEmail: updated.contactEmail,
       storageQuotaMb: updated.storageQuotaMb,
       planType: updated.planType,
+      enablePayroll: updated.enablePayroll,
+      enableInventory: updated.enableInventory,
+      vatNumber: updated.vatNumber,
+      address: updated.address,
+      bankAccountHolder: updated.bankAccountHolder,
+      bankName: updated.bankName,
+      bankAccountNumber: updated.bankAccountNumber,
+      bankIban: updated.bankIban,
+      bankBranch: updated.bankBranch,
+      bankSwiftCode: updated.bankSwiftCode,
     };
   }
 
