@@ -8003,6 +8003,8 @@ export class ReportsService {
           debitAmount: number;
           creditAmount: number;
           runningBalance: number;
+          accountName: string;
+          accountCode: string;
         }>;
       }> = [];
 
@@ -8015,6 +8017,8 @@ export class ReportsService {
           sourceId: string;
           debitAmount: number;
           creditAmount: number;
+          accountName: string;
+          accountCode: string;
         }> = [];
 
         // 1. Journal Entries affecting this account
@@ -8050,6 +8054,8 @@ export class ReportsService {
               sourceId: entry.id,
               debitAmount: amount,
               creditAmount: 0,
+              accountName: account.name,
+              accountCode: account.code,
             });
           }
           if (entry.creditAccount === account.code) {
@@ -8061,6 +8067,8 @@ export class ReportsService {
               sourceId: entry.id,
               debitAmount: 0,
               creditAmount: amount,
+              accountName: account.name,
+              accountCode: account.code,
             });
           }
         });
@@ -8108,6 +8116,8 @@ export class ReportsService {
               sourceId: payment.id,
               debitAmount: 0,
               creditAmount: parseFloat(payment.amount || '0') || 0,
+              accountName: account.name,
+              accountCode: account.code,
             });
           });
         }
@@ -8144,6 +8154,8 @@ export class ReportsService {
               sourceId: expense.id,
               debitAmount: 0,
               creditAmount: totalAmount,
+              accountName: account.name,
+              accountCode: account.code,
             });
           });
 
@@ -8177,6 +8189,8 @@ export class ReportsService {
               sourceId: dn.id,
               debitAmount: totalAmount,
               creditAmount: 0,
+              accountName: account.name,
+              accountCode: account.code,
             });
           });
 
@@ -8203,6 +8217,8 @@ export class ReportsService {
               sourceId: dnea.id,
               debitAmount: parseFloat(dnea.appliedAmount || '0') || 0,
               creditAmount: 0,
+              accountName: account.name,
+              accountCode: account.code,
             });
           });
 
@@ -8237,6 +8253,8 @@ export class ReportsService {
               sourceId: payment.id,
               debitAmount: parseFloat(payment.amount || '0') || 0,
               creditAmount: 0,
+              accountName: account.name,
+              accountCode: account.code,
             });
           });
         }
@@ -8277,6 +8295,8 @@ export class ReportsService {
               sourceId: payment.id,
               debitAmount: parseFloat(payment.amount || '0') || 0,
               creditAmount: 0,
+              accountName: account.name,
+              accountCode: account.code,
             });
           });
         }
@@ -8303,6 +8323,8 @@ export class ReportsService {
               sourceId: invoice.id,
               debitAmount: 0,
               creditAmount: parseFloat(invoice.amount || '0') || 0,
+              accountName: account.name,
+              accountCode: account.code,
             });
           });
         }
@@ -8346,15 +8368,19 @@ export class ReportsService {
             const unpaidAmount =
               totalAmount - paidAmount - creditNoteAppliedAmount;
 
-            if (unpaidAmount > 0) {
+            // Show ALL invoices in the period, even if fully paid
+            // This ensures complete transaction history in General Ledger
+            if (totalAmount > 0) {
               transactions.push({
                 date: invoice.invoiceDate,
                 description: `Invoice: ${invoice.customerName || invoice.invoiceNumber}`,
                 referenceNumber: invoice.invoiceNumber || undefined,
                 source: 'sales_invoice',
                 sourceId: invoice.id,
-                debitAmount: unpaidAmount,
+                debitAmount: totalAmount, // Show full invoice amount
                 creditAmount: 0,
+                accountName: account.name,
+                accountCode: account.code,
               });
             }
           }
@@ -8388,6 +8414,8 @@ export class ReportsService {
               sourceId: cn.id,
               debitAmount: 0,
               creditAmount: totalAmount,
+              accountName: account.name,
+              accountCode: account.code,
             });
           });
 
@@ -8415,6 +8443,8 @@ export class ReportsService {
               sourceId: cna.id,
               debitAmount: 0,
               creditAmount: parseFloat(cna.appliedAmount || '0') || 0,
+              accountName: account.name,
+              accountCode: account.code,
             });
           });
 
@@ -8439,6 +8469,8 @@ export class ReportsService {
               sourceId: payment.id,
               debitAmount: 0,
               creditAmount: parseFloat(payment.amount || '0') || 0,
+              accountName: account.name,
+              accountCode: account.code,
             });
           });
         }
@@ -8470,6 +8502,8 @@ export class ReportsService {
               sourceId: expense.id,
               debitAmount: parseFloat(expense.vatAmount || '0') || 0,
               creditAmount: 0,
+              accountName: account.name,
+              accountCode: account.code,
             });
           });
 
@@ -8500,6 +8534,8 @@ export class ReportsService {
               sourceId: entry.id,
               debitAmount: parseFloat(entry.vatAmount || '0') || 0,
               creditAmount: 0,
+              accountName: account.name,
+              accountCode: account.code,
             });
           });
 
@@ -8532,6 +8568,8 @@ export class ReportsService {
               sourceId: dn.id,
               debitAmount: 0,
               creditAmount: parseFloat(dn.vatAmount || '0') || 0,
+              accountName: account.name,
+              accountCode: account.code,
             });
           });
         }
@@ -8560,6 +8598,8 @@ export class ReportsService {
               sourceId: invoice.id,
               debitAmount: 0,
               creditAmount: parseFloat(invoice.vatAmount || '0') || 0,
+              accountName: account.name,
+              accountCode: account.code,
             });
           });
 
@@ -8592,6 +8632,8 @@ export class ReportsService {
               sourceId: cn.id,
               debitAmount: parseFloat(cn.vatAmount || '0') || 0,
               creditAmount: 0,
+              accountName: account.name,
+              accountCode: account.code,
             });
           });
         }
@@ -8620,6 +8662,8 @@ export class ReportsService {
               sourceId: expense.id,
               debitAmount: parseFloat(expense.amount || '0') || 0,
               creditAmount: 0,
+              accountName: account.name,
+              accountCode: account.code,
             });
           });
         }
@@ -9055,6 +9099,8 @@ export class ReportsService {
           return {
             ...t,
             runningBalance: Math.round(runningBalance * 100) / 100,
+            accountName: t.accountName,
+            accountCode: t.accountCode,
           };
         });
 
