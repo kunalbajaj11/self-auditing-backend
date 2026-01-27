@@ -97,7 +97,17 @@ export class CreditNotesService {
       invoice: dto.invoiceId ? { id: dto.invoiceId } : undefined,
     });
 
-    return this.creditNotesRepository.save(creditNote);
+    const saved = await this.creditNotesRepository.save(creditNote);
+
+    // If credit note is linked to an invoice, update the invoice's payment status
+    if (saved.invoice?.id) {
+      await this.salesInvoicesService.updatePaymentStatus(
+        saved.invoice.id,
+        organizationId,
+      );
+    }
+
+    return saved;
   }
 
   /**
@@ -133,19 +143,95 @@ export class CreditNotesService {
         organizationId,
       );
 
-    if (appliedAmount > outstandingBalance) {
+    // Check if credit note has enough remaining amount
+    // Pass organizationId to ensure we only count applications for this organization
+    const totalApplied = await this.getTotalAppliedAmount(
+      creditNoteId,
+      organizationId,
+    );
+    const creditNoteTotal = parseFloat(creditNote.totalAmount || '0');
+    // Round to 2 decimal places to avoid floating-point precision issues
+    const remainingAmount = Math.round((creditNoteTotal - totalApplied) * 100) / 100;
+
+    // Validate applied amount first
+    const numericAppliedAmount = Number(appliedAmount);
+    if (!Number.isFinite(numericAppliedAmount) || numericAppliedAmount <= 0) {
       throw new BadRequestException(
-        `Applied amount (${appliedAmount}) exceeds outstanding balance (${outstandingBalance})`,
+        'Applied amount must be a number greater than 0',
       );
     }
 
-    // Check if credit note has enough remaining amount
-    const totalApplied = await this.getTotalAppliedAmount(creditNoteId);
-    const remainingAmount = parseFloat(creditNote.totalAmount) - totalApplied;
+    // Use a small tolerance (0.01) for floating-point comparison
+    const tolerance = 0.01;
 
-    if (appliedAmount > remainingAmount) {
+    // Check if there's already an application for this specific invoice
+    // If so, we should update it rather than create a duplicate
+    const existingApplication =
+      await this.creditNoteApplicationsRepository.findOne({
+        where: {
+          creditNote: { id: creditNoteId },
+          invoice: { id: invoiceId },
+          organization: { id: organizationId },
+          isDeleted: false,
+        },
+      });
+
+    if (existingApplication) {
+      // Calculate remaining amount including the existing application
+      const existingApplied = parseFloat(existingApplication.appliedAmount || '0');
+      const remainingIncludingExisting = remainingAmount + existingApplied;
+
+      if (numericAppliedAmount > remainingIncludingExisting + tolerance) {
+        throw new BadRequestException(
+          `Applied amount (${numericAppliedAmount.toFixed(2)}) exceeds remaining credit note amount (${remainingIncludingExisting.toFixed(2)}). There is already an application of ${existingApplied.toFixed(2)} to this invoice.`,
+        );
+      }
+
+      // Update existing application instead of creating a new one
+      existingApplication.appliedAmount = numericAppliedAmount.toString();
+      existingApplication.appliedDate = new Date().toISOString().split('T')[0];
+      await this.creditNoteApplicationsRepository.save(existingApplication);
+
+      // Recalculate total applied (excluding the old amount, including the new)
+      const newTotalApplied = totalApplied - existingApplied + numericAppliedAmount;
+      const fullyApplied = newTotalApplied >= creditNoteTotal;
+
+      await this.creditNotesRepository.update(creditNote.id, {
+        status: fullyApplied ? CreditNoteStatus.APPLIED : creditNote.status,
+        appliedToInvoice: true,
+        appliedAmount: fullyApplied
+          ? creditNote.totalAmount
+          : newTotalApplied.toString(),
+      });
+
+      await this.salesInvoicesService.updatePaymentStatus(
+        invoiceId,
+        organizationId,
+      );
+
+      return existingApplication;
+    }
+
+    // If remaining amount is 0 or negative and no existing application, throw error
+    if (remainingAmount <= 0) {
       throw new BadRequestException(
-        `Applied amount exceeds remaining credit note amount`,
+        `Credit note has no remaining amount. Total: ${creditNoteTotal.toFixed(2)}, Already Applied: ${totalApplied.toFixed(2)}.`,
+      );
+    }
+
+    // Effective available headroom on the invoice:
+    // outstandingBalance already subtracts ALL unapplied credit notes (including this one).
+    // We add this credit note's remaining amount back so we don't block applying it.
+    const effectiveOutstanding = outstandingBalance + remainingAmount;
+    if (numericAppliedAmount > remainingAmount + tolerance) {
+      throw new BadRequestException(
+        `Applied amount (${numericAppliedAmount.toFixed(2)}) exceeds remaining credit note amount (${remainingAmount.toFixed(2)})`,
+      );
+    }
+
+    if (numericAppliedAmount > effectiveOutstanding + tolerance) {
+      throw new BadRequestException(
+        `Applied amount (${numericAppliedAmount.toFixed(2)}) exceeds outstanding balance (${effectiveOutstanding.toFixed(2)})`,
       );
     }
 
@@ -154,23 +240,25 @@ export class CreditNotesService {
       creditNote,
       invoice,
       organization: { id: organizationId },
-      appliedAmount: appliedAmount.toString(),
+      appliedAmount: numericAppliedAmount.toString(),
       appliedDate: new Date().toISOString().split('T')[0],
     });
 
     await this.creditNoteApplicationsRepository.save(application);
 
-    // Update credit note status if fully applied
-    const newTotalApplied = totalApplied + appliedAmount;
-    if (newTotalApplied >= parseFloat(creditNote.totalAmount)) {
-      creditNote.status = CreditNoteStatus.APPLIED;
-      creditNote.appliedToInvoice = true;
-      creditNote.appliedAmount = creditNote.totalAmount;
-    } else {
-      creditNote.appliedToInvoice = true;
-      creditNote.appliedAmount = newTotalApplied.toString();
-    }
-    await this.creditNotesRepository.save(creditNote);
+    // Update credit note status if fully applied.
+    // Use a direct update to avoid accidentally touching relations (like existing
+    // credit_note_applications) which can cause FK issues.
+    const newTotalApplied = totalApplied + numericAppliedAmount;
+    const fullyApplied = newTotalApplied >= parseFloat(creditNote.totalAmount);
+
+    await this.creditNotesRepository.update(creditNote.id, {
+      status: fullyApplied ? CreditNoteStatus.APPLIED : creditNote.status,
+      appliedToInvoice: true,
+      appliedAmount: fullyApplied
+        ? creditNote.totalAmount
+        : newTotalApplied.toString(),
+    });
 
     // Recalculate invoice payment status (this uses calculateOutstandingBalance)
     await this.salesInvoicesService.updatePaymentStatus(
@@ -181,14 +269,27 @@ export class CreditNotesService {
     return application;
   }
 
-  private async getTotalAppliedAmount(creditNoteId: string): Promise<number> {
+  private async getTotalAppliedAmount(
+    creditNoteId: string,
+    organizationId?: string,
+  ): Promise<number> {
+    const whereClause: any = {
+      creditNote: { id: creditNoteId },
+      isDeleted: false,
+    };
+    if (organizationId) {
+      whereClause.organization = { id: organizationId };
+    }
+
     const applications = await this.creditNoteApplicationsRepository.find({
-      where: { creditNote: { id: creditNoteId } },
+      where: whereClause,
     });
-    return applications.reduce(
-      (sum, app) => sum + parseFloat(app.appliedAmount),
+    const total = applications.reduce(
+      (sum, app) => sum + parseFloat(app.appliedAmount || '0'),
       0,
     );
+    // Round to 2 decimal places to avoid floating-point precision issues
+    return Math.round(total * 100) / 100;
   }
 
   /**
@@ -253,6 +354,14 @@ export class CreditNotesService {
 
     const updated = await this.creditNotesRepository.save(creditNote);
 
+    // If credit note is linked to an invoice, update the invoice's payment status
+    if (updated.invoice?.id) {
+      await this.salesInvoicesService.updatePaymentStatus(
+        updated.invoice.id,
+        organizationId,
+      );
+    }
+
     // Audit log
     await this.auditLogsService.record({
       organizationId,
@@ -305,6 +414,14 @@ export class CreditNotesService {
     creditNote.status = status;
     const updated = await this.creditNotesRepository.save(creditNote);
 
+    // If credit note is linked to an invoice, update the invoice's payment status
+    if (updated.invoice?.id) {
+      await this.salesInvoicesService.updatePaymentStatus(
+        updated.invoice.id,
+        organizationId,
+      );
+    }
+
     // Audit log
     await this.auditLogsService.record({
       organizationId,
@@ -332,9 +449,20 @@ export class CreditNotesService {
       throw new BadRequestException('Cannot delete applied credit note');
     }
 
+    // Store invoice ID before soft delete
+    const invoiceId = creditNote.invoice?.id;
+
     // Soft delete
     creditNote.isDeleted = true;
     await this.creditNotesRepository.save(creditNote);
+
+    // If credit note was linked to an invoice, update the invoice's payment status
+    if (invoiceId) {
+      await this.salesInvoicesService.updatePaymentStatus(
+        invoiceId,
+        organizationId,
+      );
+    }
 
     // Audit log
     await this.auditLogsService.record({

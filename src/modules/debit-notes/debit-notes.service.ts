@@ -133,7 +133,17 @@ export class DebitNotesService {
       expense: dto.expenseId ? { id: dto.expenseId } : undefined,
     });
 
-    return this.debitNotesRepository.save(debitNote);
+    const saved = await this.debitNotesRepository.save(debitNote);
+
+    // If debit note is linked to an invoice, update the invoice's payment status
+    if (saved.invoice?.id) {
+      await this.salesInvoicesService.updatePaymentStatus(
+        saved.invoice.id,
+        organizationId,
+      );
+    }
+
+    return saved;
   }
 
   /**
@@ -434,6 +444,14 @@ export class DebitNotesService {
 
     const updated = await this.debitNotesRepository.save(debitNote);
 
+    // If debit note is linked to an invoice, update the invoice's payment status
+    if (updated.invoice?.id) {
+      await this.salesInvoicesService.updatePaymentStatus(
+        updated.invoice.id,
+        organizationId,
+      );
+    }
+
     // Audit log
     await this.auditLogsService.record({
       organizationId,
@@ -490,6 +508,14 @@ export class DebitNotesService {
     debitNote.status = status;
     const updated = await this.debitNotesRepository.save(debitNote);
 
+    // If debit note is linked to an invoice, update the invoice's payment status
+    if (updated.invoice?.id) {
+      await this.salesInvoicesService.updatePaymentStatus(
+        updated.invoice.id,
+        organizationId,
+      );
+    }
+
     // Audit log
     await this.auditLogsService.record({
       organizationId,
@@ -517,9 +543,20 @@ export class DebitNotesService {
       throw new BadRequestException('Cannot delete applied debit note');
     }
 
+    // Store invoice ID before soft delete
+    const invoiceId = debitNote.invoice?.id;
+
     // Soft delete
     debitNote.isDeleted = true;
     await this.debitNotesRepository.save(debitNote);
+
+    // If debit note was linked to an invoice, update the invoice's payment status
+    if (invoiceId) {
+      await this.salesInvoicesService.updatePaymentStatus(
+        invoiceId,
+        organizationId,
+      );
+    }
 
     // Audit log
     await this.auditLogsService.record({
