@@ -29,6 +29,7 @@ import {
 import { ReportHistoryFilterDto } from './dto/report-history-filter.dto';
 import { GenerateReportDto } from './dto/generate-report.dto';
 import { ScheduleReportDto } from './dto/schedule-report.dto';
+import { AccountEntriesDto } from './dto/account-entries.dto';
 
 @Controller('reports')
 @UseGuards(JwtAuthGuard, RolesGuard, TenantGuard)
@@ -60,6 +61,21 @@ export class ReportsController {
   @Roles(UserRole.ADMIN, UserRole.ACCOUNTANT)
   async getFilterOptions(@CurrentUser() user: AuthenticatedUser) {
     return this.reportsService.getFilterOptions(user?.organizationId as string);
+  }
+
+  @Get('account-entries')
+  @Roles(UserRole.ADMIN, UserRole.ACCOUNTANT)
+  async getAccountEntries(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() dto: AccountEntriesDto,
+  ) {
+    return this.reportsService.getAccountEntries(
+      user?.organizationId as string,
+      dto.accountName,
+      dto.accountType,
+      dto.startDate,
+      dto.endDate,
+    );
   }
 
   @Get('dashboard-summary')
