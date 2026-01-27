@@ -8033,6 +8033,14 @@ export class ReportsService {
           .getMany();
 
         journalEntries.forEach((entry) => {
+          const baseAmount = parseFloat(entry.amount || '0') || 0;
+          const vatAmount = parseFloat(entry.vatAmount || '0') || 0;
+          // For Accounts Payable, include VAT in the amount (matching opening balance logic)
+          // For other accounts, use base amount only (VAT is tracked separately in VAT accounts)
+          const amount = account.code === JournalEntryAccount.ACCOUNTS_PAYABLE
+            ? baseAmount + vatAmount
+            : baseAmount;
+          
           if (entry.debitAccount === account.code) {
             transactions.push({
               date: entry.entryDate,
@@ -8040,7 +8048,7 @@ export class ReportsService {
               referenceNumber: entry.referenceNumber || undefined,
               source: 'journal_entry',
               sourceId: entry.id,
-              debitAmount: parseFloat(entry.amount),
+              debitAmount: amount,
               creditAmount: 0,
             });
           }
@@ -8052,7 +8060,7 @@ export class ReportsService {
               source: 'journal_entry',
               sourceId: entry.id,
               debitAmount: 0,
-              creditAmount: parseFloat(entry.amount),
+              creditAmount: amount,
             });
           }
         });
@@ -8099,7 +8107,7 @@ export class ReportsService {
               source: 'expense_payment',
               sourceId: payment.id,
               debitAmount: 0,
-              creditAmount: parseFloat(payment.amount),
+              creditAmount: parseFloat(payment.amount || '0') || 0,
             });
           });
         }
@@ -8124,8 +8132,8 @@ export class ReportsService {
 
           expensesWithAccruals.forEach((expense) => {
             const totalAmount =
-              parseFloat(expense.amount) +
-              parseFloat(expense.vatAmount || '0');
+              (parseFloat(expense.amount || '0') || 0) +
+              (parseFloat(expense.vatAmount || '0') || 0);
             transactions.push({
               date: expense.expenseDate,
               description:
@@ -8160,7 +8168,7 @@ export class ReportsService {
 
           debitNotesForExpenses.forEach((dn) => {
             const totalAmount =
-              parseFloat(dn.amount) + parseFloat(dn.vatAmount || '0');
+              (parseFloat(dn.amount || '0') || 0) + (parseFloat(dn.vatAmount || '0') || 0);
             transactions.push({
               date: dn.debitNoteDate,
               description: `Debit Note: ${dn.vendorName || dn.debitNoteNumber}`,
@@ -8193,7 +8201,7 @@ export class ReportsService {
               referenceNumber: dnea.debitNote?.debitNoteNumber || undefined,
               source: 'debit_note_application',
               sourceId: dnea.id,
-              debitAmount: parseFloat(dnea.appliedAmount),
+              debitAmount: parseFloat(dnea.appliedAmount || '0') || 0,
               creditAmount: 0,
             });
           });
@@ -8227,7 +8235,7 @@ export class ReportsService {
                 payment.expense?.invoiceNumber || payment.id,
               source: 'expense_payment',
               sourceId: payment.id,
-              debitAmount: parseFloat(payment.amount),
+              debitAmount: parseFloat(payment.amount || '0') || 0,
               creditAmount: 0,
             });
           });
@@ -8267,7 +8275,7 @@ export class ReportsService {
                 payment.invoice?.invoiceNumber || payment.id,
               source: 'invoice_payment',
               sourceId: payment.id,
-              debitAmount: parseFloat(payment.amount),
+              debitAmount: parseFloat(payment.amount || '0') || 0,
               creditAmount: 0,
             });
           });
@@ -8294,7 +8302,7 @@ export class ReportsService {
               source: 'sales_invoice',
               sourceId: invoice.id,
               debitAmount: 0,
-              creditAmount: parseFloat(invoice.amount),
+              creditAmount: parseFloat(invoice.amount || '0') || 0,
             });
           });
         }
@@ -8315,12 +8323,12 @@ export class ReportsService {
 
           for (const invoice of invoices) {
             const totalAmount =
-              parseFloat(invoice.amount) + parseFloat(invoice.vatAmount || '0');
+              (parseFloat(invoice.amount || '0') || 0) + (parseFloat(invoice.vatAmount || '0') || 0);
             const payments = await this.invoicePaymentsRepository.find({
               where: { invoice: { id: invoice.id } },
             });
             const paidAmount = payments.reduce(
-              (sum, p) => sum + parseFloat(p.amount),
+              (sum, p) => sum + (parseFloat(p.amount || '0') || 0),
               0,
             );
 
@@ -8330,7 +8338,7 @@ export class ReportsService {
                 where: { invoice: { id: invoice.id } },
               });
             const creditNoteAppliedAmount = creditNoteApplications.reduce(
-              (sum, cna) => sum + parseFloat(cna.appliedAmount),
+              (sum, cna) => sum + (parseFloat(cna.appliedAmount || '0') || 0),
               0,
             );
 
@@ -8371,7 +8379,7 @@ export class ReportsService {
 
           creditNotes.forEach((cn) => {
             const totalAmount =
-              parseFloat(cn.amount) + parseFloat(cn.vatAmount || '0');
+              (parseFloat(cn.amount || '0') || 0) + (parseFloat(cn.vatAmount || '0') || 0);
             transactions.push({
               date: cn.creditNoteDate,
               description: `Credit Note: ${cn.customerName || cn.creditNoteNumber}`,
@@ -8406,7 +8414,7 @@ export class ReportsService {
               source: 'credit_note_application',
               sourceId: cna.id,
               debitAmount: 0,
-              creditAmount: parseFloat(cna.appliedAmount),
+              creditAmount: parseFloat(cna.appliedAmount || '0') || 0,
             });
           });
 
@@ -8430,7 +8438,7 @@ export class ReportsService {
               source: 'invoice_payment',
               sourceId: payment.id,
               debitAmount: 0,
-              creditAmount: parseFloat(payment.amount),
+              creditAmount: parseFloat(payment.amount || '0') || 0,
             });
           });
         }
@@ -8460,7 +8468,7 @@ export class ReportsService {
               referenceNumber: expense.invoiceNumber || undefined,
               source: 'expense',
               sourceId: expense.id,
-              debitAmount: parseFloat(expense.vatAmount || '0'),
+              debitAmount: parseFloat(expense.vatAmount || '0') || 0,
               creditAmount: 0,
             });
           });
@@ -8490,7 +8498,7 @@ export class ReportsService {
               referenceNumber: entry.referenceNumber || undefined,
               source: 'journal_entry',
               sourceId: entry.id,
-              debitAmount: parseFloat(entry.vatAmount || '0'),
+              debitAmount: parseFloat(entry.vatAmount || '0') || 0,
               creditAmount: 0,
             });
           });
@@ -8523,7 +8531,7 @@ export class ReportsService {
               source: 'debit_note',
               sourceId: dn.id,
               debitAmount: 0,
-              creditAmount: parseFloat(dn.vatAmount || '0'),
+              creditAmount: parseFloat(dn.vatAmount || '0') || 0,
             });
           });
         }
@@ -8551,7 +8559,7 @@ export class ReportsService {
               source: 'sales_invoice',
               sourceId: invoice.id,
               debitAmount: 0,
-              creditAmount: parseFloat(invoice.vatAmount || '0'),
+              creditAmount: parseFloat(invoice.vatAmount || '0') || 0,
             });
           });
 
@@ -8582,7 +8590,7 @@ export class ReportsService {
               referenceNumber: cn.creditNoteNumber || undefined,
               source: 'credit_note',
               sourceId: cn.id,
-              debitAmount: parseFloat(cn.vatAmount || '0'),
+              debitAmount: parseFloat(cn.vatAmount || '0') || 0,
               creditAmount: 0,
             });
           });
@@ -8610,7 +8618,7 @@ export class ReportsService {
               referenceNumber: expense.invoiceNumber || undefined,
               source: 'expense',
               sourceId: expense.id,
-              debitAmount: parseFloat(expense.amount),
+              debitAmount: parseFloat(expense.amount || '0') || 0,
               creditAmount: 0,
             });
           });
@@ -8622,6 +8630,7 @@ export class ReportsService {
         const isDebitNormal = ['asset', 'expense'].includes(account.category);
 
         // Opening journal entries
+        // Note: Accounts Payable has its own calculation that includes VAT (see line 8788-8806)
         const openingJournalEntries = await this.journalEntriesRepository
           .createQueryBuilder('entry')
           .select([
@@ -8740,21 +8749,24 @@ export class ReportsService {
         // Accounts Payable: Opening accruals (unpaid expenses with accruals)
         else if (account.code === JournalEntryAccount.ACCOUNTS_PAYABLE) {
           // Calculate opening AP using same logic as Trial Balance
-          const expensePaymentsSubqueryStart = this.expensePaymentsRepository
-            .createQueryBuilder('payment')
-            .select('COALESCE(SUM(payment.amount), 0)')
-            .where('payment.expense_id = expense.id')
-            .andWhere('payment.payment_date < :startDate')
-            .andWhere('payment.organization_id = :organizationId')
-            .andWhere('payment.is_deleted = false')
-            .getQuery();
+          // Use raw SQL directly to avoid column name issues
+          const escapedStartDate = startDate.replace(/'/g, "''");
+          const escapedOrgId = organizationId.replace(/'/g, "''");
+          const expensePaymentsSubqueryStart = `(
+            SELECT COALESCE(SUM(payment.amount), 0)
+            FROM expense_payments payment
+            WHERE payment.expense_id = expense.id
+            AND payment.payment_date < '${escapedStartDate}'
+            AND payment.organization_id = '${escapedOrgId}'
+            AND payment.is_deleted = false
+          )`;
 
           const debitNotesLinkedToExpenseSubqueryStart = `(
             SELECT COALESCE(SUM(COALESCE(dn.total_amount, dn.base_amount + dn.vat_amount, dn.amount + dn.vat_amount)), 0)
             FROM debit_notes dn
             WHERE dn.expense_id = expense.id
             AND dn.organization_id = expense.organization_id
-            AND dn.debit_note_date < :startDate
+            AND dn.debit_note_date < '${escapedStartDate}'
             AND dn.is_deleted = false
             AND (
               dn.status IN ('${DebitNoteStatus.ISSUED}', '${DebitNoteStatus.APPLIED}')
@@ -8804,35 +8816,28 @@ export class ReportsService {
         // Accounts Receivable: Opening invoices (unpaid portion)
         else if (account.code === JournalEntryAccount.ACCOUNTS_RECEIVABLE) {
           // Use same logic as Trial Balance
-          const creditNoteApplicationsSubqueryStart =
-            this.creditNoteApplicationsRepository
-              .createQueryBuilder('cna')
-              .select('COALESCE(SUM(cna.applied_amount), 0)')
-              .where('cna.invoice_id = invoice.id')
-              .andWhere('cna.organization_id = :organizationId', {
-                organizationId,
-              })
-              .getQuery();
+          // Build subqueries with proper parameter replacement
+          // Use raw SQL directly to avoid column name issues
+          const escapedOrgId = organizationId.replace(/'/g, "''");
+          const creditNoteApplicationsSubqueryStart = `(
+            SELECT COALESCE(SUM(cna."appliedAmount"), 0)
+            FROM credit_note_applications cna
+            WHERE cna.invoice_id = invoice.id
+            AND cna.organization_id = '${escapedOrgId}'
+          )`;
 
-          const unappliedCreditNotesSubqueryStart =
-            this.creditNotesRepository
-              .createQueryBuilder('cn')
-              .select(
-                'COALESCE(SUM(COALESCE(cn.total_amount, cn.amount + cn.vat_amount)), 0)',
-              )
-              .where('cn.invoice_id = invoice.id')
-              .andWhere('cn.organization_id = :organizationId', {
-                organizationId,
-              })
-              .andWhere('cn.is_deleted = false')
-              .andWhere('cn.credit_note_date < :startDate')
-              .andWhere(
-                '(cn.status = :issued OR cn.status = :applied OR cn.status = :draft)',
-              )
-              .andWhere(
-                `cn.id NOT IN (SELECT DISTINCT cna2.credit_note_id FROM credit_note_applications cna2 WHERE cna2.organization_id = :organizationId)`,
-              )
-              .getQuery();
+          // Use raw SQL directly to avoid column name issues - match pattern from line 659
+          const escapedStartDate = startDate.replace(/'/g, "''");
+          const unappliedCreditNotesSubqueryStart = `(
+            SELECT COALESCE(SUM(COALESCE(cn.total_amount, cn.amount + cn.vat_amount)), 0)
+            FROM credit_notes cn
+            WHERE cn.invoice_id = invoice.id
+            AND cn.organization_id = '${escapedOrgId}'
+            AND cn.is_deleted = false
+            AND cn.credit_note_date < '${escapedStartDate}'
+            AND (cn.status = '${CreditNoteStatus.ISSUED}' OR cn.status = '${CreditNoteStatus.APPLIED}' OR cn.status = '${CreditNoteStatus.DRAFT}')
+            AND cn.id NOT IN (SELECT DISTINCT cna2.credit_note_id FROM credit_note_applications cna2 WHERE cna2.organization_id = '${escapedOrgId}')
+          )`;
 
           const receivablesAtStartQuery = this.salesInvoicesRepository
             .createQueryBuilder('invoice')
