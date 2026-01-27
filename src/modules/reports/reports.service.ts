@@ -8159,7 +8159,49 @@ export class ReportsService {
             });
           });
 
-          // Debit notes linked to expenses (reduces AP)
+          // Debit note applications to expenses (reduces AP)
+          // Get applications within the date range for adding to transactions
+          const debitNoteExpenseApplications =
+            await this.debitNoteExpenseApplicationsRepository
+              .createQueryBuilder('dnea')
+              .leftJoin('dnea.debitNote', 'dn')
+              .leftJoin('dnea.expense', 'expense')
+              .where('dnea.organization_id = :organizationId', {
+                organizationId,
+              })
+              .andWhere('dnea.is_deleted = false')
+              .andWhere('dn.debit_note_date >= :startDate', { startDate })
+              .andWhere('dn.debit_note_date <= :endDate', { endDate })
+              .orderBy('dn.debit_note_date', 'ASC')
+              .getMany();
+
+          // Add debit note applications to transactions
+          debitNoteExpenseApplications.forEach((dnea) => {
+            transactions.push({
+              date: dnea.debitNote?.debitNoteDate || startDate,
+              description: `Debit Note Applied: ${dnea.debitNote?.debitNoteNumber || dnea.id}`,
+              referenceNumber: dnea.debitNote?.debitNoteNumber || undefined,
+              source: 'debit_note_application',
+              sourceId: dnea.id,
+              debitAmount: parseFloat(dnea.appliedAmount || '0') || 0,
+              creditAmount: 0,
+              accountName: account.name,
+              accountCode: account.code,
+            });
+          });
+
+          // Debit notes linked to expenses WITHOUT applications (reduces AP)
+          // Only include debit notes that don't have applications to avoid double counting
+          // Use a subquery to check for applications
+          const debitNotesWithApplicationsSubquery =
+            this.debitNoteExpenseApplicationsRepository
+              .createQueryBuilder('dnea')
+              .select('dnea.debit_note_id')
+              .where('dnea.debit_note_id = dn.id')
+              .andWhere('dnea.organization_id = :organizationId', { organizationId })
+              .andWhere('dnea.is_deleted = false')
+              .getQuery();
+
           const debitNotesForExpenses = await this.debitNotesRepository
             .createQueryBuilder('dn')
             .where('dn.organization_id = :organizationId', { organizationId })
@@ -8175,6 +8217,8 @@ export class ReportsService {
                 draft: DebitNoteStatus.DRAFT,
               },
             )
+            .andWhere(`NOT EXISTS (${debitNotesWithApplicationsSubquery})`)
+            .setParameter('organizationId', organizationId)
             .orderBy('dn.debit_note_date', 'ASC')
             .getMany();
 
@@ -8188,34 +8232,6 @@ export class ReportsService {
               source: 'debit_note',
               sourceId: dn.id,
               debitAmount: totalAmount,
-              creditAmount: 0,
-              accountName: account.name,
-              accountCode: account.code,
-            });
-          });
-
-          // Debit note applications to expenses (reduces AP)
-          const debitNoteExpenseApplications =
-            await this.debitNoteExpenseApplicationsRepository
-              .createQueryBuilder('dnea')
-              .leftJoin('dnea.debitNote', 'dn')
-              .leftJoin('dnea.expense', 'expense')
-              .where('dnea.organization_id = :organizationId', {
-                organizationId,
-              })
-              .andWhere('dn.debit_note_date >= :startDate', { startDate })
-              .andWhere('dn.debit_note_date <= :endDate', { endDate })
-              .orderBy('dn.debit_note_date', 'ASC')
-              .getMany();
-
-          debitNoteExpenseApplications.forEach((dnea) => {
-            transactions.push({
-              date: dnea.debitNote?.debitNoteDate || startDate,
-              description: `Debit Note Applied: ${dnea.debitNote?.debitNoteNumber || dnea.id}`,
-              referenceNumber: dnea.debitNote?.debitNoteNumber || undefined,
-              source: 'debit_note_application',
-              sourceId: dnea.id,
-              debitAmount: parseFloat(dnea.appliedAmount || '0') || 0,
               creditAmount: 0,
               accountName: account.name,
               accountCode: account.code,
@@ -8385,7 +8401,50 @@ export class ReportsService {
             }
           }
 
-          // Credit notes (reduces AR)
+          // Credit note applications (reduces AR)
+          // Get applications within the date range for adding to transactions
+          const creditNoteApplications = await this.creditNoteApplicationsRepository
+            .createQueryBuilder('cna')
+            .leftJoin('cna.creditNote', 'cn')
+            .leftJoin('cna.invoice', 'invoice')
+            .where('cna.organization_id = :organizationId', {
+              organizationId,
+            })
+            .andWhere('cna.is_deleted = false')
+            .andWhere('cn.credit_note_date >= :startDate', { startDate })
+            .andWhere('cn.credit_note_date <= :endDate', { endDate })
+            .orderBy('cn.credit_note_date', 'ASC')
+            .getMany();
+
+          // Add credit note applications to transactions
+          creditNoteApplications.forEach((cna) => {
+            transactions.push({
+              date: cna.creditNote?.creditNoteDate || startDate,
+              description: `Credit Note Applied: ${
+                cna.creditNote?.creditNoteNumber || cna.id
+              }`,
+              referenceNumber: cna.creditNote?.creditNoteNumber || undefined,
+              source: 'credit_note_application',
+              sourceId: cna.id,
+              debitAmount: 0,
+              creditAmount: parseFloat(cna.appliedAmount || '0') || 0,
+              accountName: account.name,
+              accountCode: account.code,
+            });
+          });
+
+          // Credit notes WITHOUT applications (reduces AR)
+          // Only include credit notes that don't have applications to avoid double counting
+          // Use a subquery to check for applications
+          const creditNotesWithApplicationsSubquery =
+            this.creditNoteApplicationsRepository
+              .createQueryBuilder('cna')
+              .select('cna.credit_note_id')
+              .where('cna.credit_note_id = cn.id')
+              .andWhere('cna.organization_id = :organizationId', { organizationId })
+              .andWhere('cna.is_deleted = false')
+              .getQuery();
+
           const creditNotes = await this.creditNotesRepository
             .createQueryBuilder('cn')
             .where('cn.organization_id = :organizationId', { organizationId })
@@ -8400,6 +8459,8 @@ export class ReportsService {
                 draft: CreditNoteStatus.DRAFT,
               },
             )
+            .andWhere(`NOT EXISTS (${creditNotesWithApplicationsSubquery})`)
+            .setParameter('organizationId', organizationId)
             .orderBy('cn.credit_note_date', 'ASC')
             .getMany();
 
@@ -8414,35 +8475,6 @@ export class ReportsService {
               sourceId: cn.id,
               debitAmount: 0,
               creditAmount: totalAmount,
-              accountName: account.name,
-              accountCode: account.code,
-            });
-          });
-
-          // Credit note applications (reduces AR)
-          const creditNoteApplications = await this.creditNoteApplicationsRepository
-            .createQueryBuilder('cna')
-            .leftJoin('cna.creditNote', 'cn')
-            .leftJoin('cna.invoice', 'invoice')
-            .where('cna.organization_id = :organizationId', {
-              organizationId,
-            })
-            .andWhere('cn.credit_note_date >= :startDate', { startDate })
-            .andWhere('cn.credit_note_date <= :endDate', { endDate })
-            .orderBy('cn.credit_note_date', 'ASC')
-            .getMany();
-
-          creditNoteApplications.forEach((cna) => {
-            transactions.push({
-              date: cna.creditNote?.creditNoteDate || startDate,
-              description: `Credit Note Applied: ${
-                cna.creditNote?.creditNoteNumber || cna.id
-              }`,
-              referenceNumber: cna.creditNote?.creditNoteNumber || undefined,
-              source: 'credit_note_application',
-              sourceId: cna.id,
-              debitAmount: 0,
-              creditAmount: parseFloat(cna.appliedAmount || '0') || 0,
               accountName: account.name,
               accountCode: account.code,
             });

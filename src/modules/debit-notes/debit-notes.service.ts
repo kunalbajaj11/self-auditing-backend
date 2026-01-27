@@ -180,7 +180,10 @@ export class DebitNotesService {
     }
 
     // Check if debit note has enough remaining amount
-    const totalApplied = await this.getTotalAppliedAmount(debitNoteId);
+    const totalApplied = await this.getTotalAppliedAmount(
+      debitNoteId,
+      organizationId,
+    );
     const remainingAmount = parseFloat(debitNote.totalAmount) - totalApplied;
 
     if (appliedAmount > remainingAmount) {
@@ -254,16 +257,92 @@ export class DebitNotesService {
       );
     }
 
-    // Check if debit note has enough remaining amount
-    const totalApplied = await this.getTotalAppliedAmount(debitNoteId);
-    const totalExpenseApplied =
-      await this.getTotalExpenseAppliedAmount(debitNoteId);
-    const remainingAmount =
-      parseFloat(debitNote.totalAmount) - totalApplied - totalExpenseApplied;
-
-    if (appliedAmount > remainingAmount) {
+    // Validate applied amount first
+    const numericAppliedAmount = Number(appliedAmount);
+    if (!Number.isFinite(numericAppliedAmount) || numericAppliedAmount <= 0) {
       throw new BadRequestException(
-        `Applied amount exceeds remaining debit note amount`,
+        'Applied amount must be a number greater than 0',
+      );
+    }
+
+    // Use a small tolerance (0.01) for floating-point comparison
+    const tolerance = 0.01;
+
+    // Check if debit note has enough remaining amount
+    // Pass organizationId to ensure we only count applications for this organization
+    const totalApplied = await this.getTotalAppliedAmount(
+      debitNoteId,
+      organizationId,
+    );
+    const totalExpenseApplied = await this.getTotalExpenseAppliedAmount(
+      debitNoteId,
+      organizationId,
+    );
+    const debitNoteTotal = parseFloat(debitNote.totalAmount || '0');
+    // Round to 2 decimal places to avoid floating-point precision issues
+    const remainingAmount = Math.round(
+      (debitNoteTotal - totalApplied - totalExpenseApplied) * 100,
+    ) / 100;
+
+    // Check if there's already an application for this specific expense
+    // If so, we should update it rather than create a duplicate
+    const existingApplication =
+      await this.debitNoteExpenseApplicationsRepository.findOne({
+        where: {
+          debitNote: { id: debitNoteId },
+          expense: { id: expenseId },
+          organization: { id: organizationId },
+          isDeleted: false,
+        },
+      });
+
+    if (existingApplication) {
+      // Calculate remaining amount including the existing application
+      const existingApplied = parseFloat(
+        existingApplication.appliedAmount || '0',
+      );
+      const remainingIncludingExisting = remainingAmount + existingApplied;
+
+      if (numericAppliedAmount > remainingIncludingExisting + tolerance) {
+        throw new BadRequestException(
+          `Applied amount (${numericAppliedAmount.toFixed(2)}) exceeds remaining debit note amount (${remainingIncludingExisting.toFixed(2)}). There is already an application of ${existingApplied.toFixed(2)} to this expense.`,
+        );
+      }
+
+      // Update existing application instead of creating a new one
+      existingApplication.appliedAmount = numericAppliedAmount.toString();
+      existingApplication.appliedDate = new Date().toISOString().split('T')[0];
+      await this.debitNoteExpenseApplicationsRepository.save(
+        existingApplication,
+      );
+
+      // Recalculate total applied (excluding the old amount, including the new)
+      const newTotalExpenseApplied =
+        totalExpenseApplied - existingApplied + numericAppliedAmount;
+      const newTotalApplied = totalApplied + newTotalExpenseApplied;
+      const fullyApplied = newTotalApplied >= debitNoteTotal;
+
+      await this.debitNotesRepository.update(debitNote.id, {
+        status: fullyApplied ? DebitNoteStatus.APPLIED : debitNote.status,
+        appliedToExpense: true,
+        appliedAmount: fullyApplied
+          ? debitNote.totalAmount
+          : newTotalApplied.toString(),
+      });
+
+      return existingApplication;
+    }
+
+    // If remaining amount is 0 or negative and no existing application, throw error
+    if (remainingAmount <= 0) {
+      throw new BadRequestException(
+        `Debit note has no remaining amount. Total: ${debitNoteTotal.toFixed(2)}, Already Applied: ${(totalApplied + totalExpenseApplied).toFixed(2)}.`,
+      );
+    }
+
+    if (numericAppliedAmount > remainingAmount + tolerance) {
+      throw new BadRequestException(
+        `Applied amount (${numericAppliedAmount.toFixed(2)}) exceeds remaining debit note amount (${remainingAmount.toFixed(2)})`,
       );
     }
 
@@ -277,22 +356,26 @@ export class DebitNotesService {
       0,
     );
 
-    // Get existing debit note applications for this expense
+    // Get existing debit note applications for this expense (excluding the one we're about to create/update)
     const existingApplications =
       await this.debitNoteExpenseApplicationsRepository.find({
-        where: { expense: { id: expenseId } },
+        where: {
+          expense: { id: expenseId },
+          organization: { id: organizationId },
+          isDeleted: false,
+        },
       });
     const totalDebitNoteApplied = existingApplications.reduce(
-      (sum, app) => sum + parseFloat(app.appliedAmount),
+      (sum, app) => sum + parseFloat(app.appliedAmount || '0'),
       0,
     );
 
     const outstandingBalance =
       parseFloat(expense.totalAmount) - totalPaid - totalDebitNoteApplied;
 
-    if (appliedAmount > outstandingBalance + 0.01) {
+    if (numericAppliedAmount > outstandingBalance + tolerance) {
       throw new BadRequestException(
-        `Applied amount (${appliedAmount}) exceeds outstanding balance (${outstandingBalance})`,
+        `Applied amount (${numericAppliedAmount.toFixed(2)}) exceeds outstanding balance (${outstandingBalance.toFixed(2)})`,
       );
     }
 
@@ -301,51 +384,76 @@ export class DebitNotesService {
       debitNote,
       expense,
       organization: { id: organizationId },
-      appliedAmount: appliedAmount.toString(),
+      appliedAmount: numericAppliedAmount.toString(),
       appliedDate: new Date().toISOString().split('T')[0],
     });
 
     await this.debitNoteExpenseApplicationsRepository.save(application);
 
-    // Update debit note status if fully applied
-    const newTotalExpenseApplied = totalExpenseApplied + appliedAmount;
+    // Update debit note status if fully applied.
+    // Use a direct update to avoid accidentally touching relations (like existing
+    // debit_note_expense_applications) which can cause FK issues.
+    const newTotalExpenseApplied = totalExpenseApplied + numericAppliedAmount;
     const newTotalApplied = totalApplied + newTotalExpenseApplied;
-    if (newTotalApplied >= parseFloat(debitNote.totalAmount)) {
-      debitNote.status = DebitNoteStatus.APPLIED;
-      debitNote.appliedToExpense = true;
-      debitNote.appliedAmount = debitNote.totalAmount;
-    } else {
-      debitNote.appliedToExpense = true;
-      const currentApplied = parseFloat(debitNote.appliedAmount || '0');
-      debitNote.appliedAmount = (currentApplied + appliedAmount).toString();
-    }
-    await this.debitNotesRepository.save(debitNote);
+    const fullyApplied = newTotalApplied >= debitNoteTotal;
+
+    await this.debitNotesRepository.update(debitNote.id, {
+      status: fullyApplied ? DebitNoteStatus.APPLIED : debitNote.status,
+      appliedToExpense: true,
+      appliedAmount: fullyApplied
+        ? debitNote.totalAmount
+        : newTotalApplied.toString(),
+    });
 
     return application;
   }
 
-  private async getTotalAppliedAmount(debitNoteId: string): Promise<number> {
+  private async getTotalAppliedAmount(
+    debitNoteId: string,
+    organizationId?: string,
+  ): Promise<number> {
+    const whereClause: any = {
+      debitNote: { id: debitNoteId },
+      isDeleted: false,
+    };
+    if (organizationId) {
+      whereClause.organization = { id: organizationId };
+    }
+
     const applications = await this.debitNoteApplicationsRepository.find({
-      where: { debitNote: { id: debitNoteId } },
+      where: whereClause,
     });
-    return applications.reduce(
-      (sum, app) => sum + parseFloat(app.appliedAmount),
+    const total = applications.reduce(
+      (sum, app) => sum + parseFloat(app.appliedAmount || '0'),
       0,
     );
+    // Round to 2 decimal places to avoid floating-point precision issues
+    return Math.round(total * 100) / 100;
   }
 
   private async getTotalExpenseAppliedAmount(
     debitNoteId: string,
+    organizationId?: string,
   ): Promise<number> {
+    const whereClause: any = {
+      debitNote: { id: debitNoteId },
+      isDeleted: false,
+    };
+    if (organizationId) {
+      whereClause.organization = { id: organizationId };
+    }
+
     const applications = await this.debitNoteExpenseApplicationsRepository.find(
       {
-        where: { debitNote: { id: debitNoteId } },
+        where: whereClause,
       },
     );
-    return applications.reduce(
-      (sum, app) => sum + parseFloat(app.appliedAmount),
+    const total = applications.reduce(
+      (sum, app) => sum + parseFloat(app.appliedAmount || '0'),
       0,
     );
+    // Round to 2 decimal places to avoid floating-point precision issues
+    return Math.round(total * 100) / 100;
   }
 
   /**
