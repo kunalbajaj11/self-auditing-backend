@@ -39,6 +39,7 @@ import { PurchaseLineItemDto } from './dto/purchase-line-item.dto';
 import { TaxRulesService } from '../tax-rules/tax-rules.service';
 import { ExpensePayment } from '../../entities/expense-payment.entity';
 import { PaymentMethod } from '../../common/enums/payment-method.enum';
+import { PurchaseOrder } from '../../entities/purchase-order.entity';
 
 const DEFAULT_ACCRUAL_TOLERANCE = Number(
   process.env.ACCRUAL_AMOUNT_TOLERANCE ?? 5,
@@ -556,6 +557,17 @@ export class ExpensesService {
       }
     }
 
+    // Resolve purchase order if provided
+    let purchaseOrder = null;
+    if (dto.purchaseOrderId) {
+      purchaseOrder = await this.expensesRepository.manager.findOne(PurchaseOrder, {
+        where: { id: dto.purchaseOrderId, organization: { id: organizationId } },
+      });
+      if (!purchaseOrder) {
+        throw new NotFoundException('Purchase order not found');
+      }
+    }
+
     const expense = this.expensesRepository.create({
       organization,
       user,
@@ -580,6 +592,8 @@ export class ExpensesService {
       ocrConfidence:
         dto.ocrConfidence !== undefined ? dto.ocrConfidence.toFixed(2) : null,
       linkedAccrual: linkedAccrualExpense ?? null,
+      purchaseOrder: purchaseOrder,
+      purchaseOrderId: dto.purchaseOrderId ?? null,
       product: dto.productId ? { id: dto.productId } : null,
       productId: dto.productId ?? null,
       quantity: dto.quantity ? dto.quantity.toString() : null,

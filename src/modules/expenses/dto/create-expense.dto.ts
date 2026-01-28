@@ -95,6 +95,10 @@ export class CreateExpenseDto {
   linkedAccrualExpenseId?: string;
 
   @IsOptional()
+  @IsUUID()
+  purchaseOrderId?: string; // Link to purchase order
+
+  @IsOptional()
   @IsString()
   productId?: string; // For inventory purchases
 

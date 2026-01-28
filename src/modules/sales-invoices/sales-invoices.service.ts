@@ -151,7 +151,7 @@ export class SalesInvoicesService {
       .andWhere('item.is_deleted = false');
 
     if (searchTerm && searchTerm.trim().length > 0) {
-      salesQuery.andWhere('item.item_name ILIKE :searchTerm', {
+      salesQuery.andWhere('item.itemName ILIKE :searchTerm', {
         searchTerm: `%${searchTerm.trim()}%`,
       });
     }
@@ -170,7 +170,7 @@ export class SalesInvoicesService {
       .andWhere('item.is_deleted = false');
 
     if (searchTerm && searchTerm.trim().length > 0) {
-      purchaseQuery.andWhere('item.item_name ILIKE :searchTerm', {
+      purchaseQuery.andWhere('item.itemName ILIKE :searchTerm', {
         searchTerm: `%${searchTerm.trim()}%`,
       });
     }
@@ -807,6 +807,11 @@ export class SalesInvoicesService {
       ? '/api/settings/invoice-template/logo'
       : null;
 
+    // For proforma invoices, always use "PROFORMA INVOICE" as title
+    const invoiceTitle = invoice.status === 'proforma_invoice' 
+      ? 'PROFORMA INVOICE' 
+      : (templateSettings.invoiceTitle || 'TAX INVOICE');
+    
     return {
       invoice,
       outstandingBalance: outstanding,
@@ -816,7 +821,7 @@ export class SalesInvoicesService {
         headerText: templateSettings.invoiceHeaderText,
         colorScheme: templateSettings.invoiceColorScheme,
         customColor: templateSettings.invoiceCustomColor,
-        title: templateSettings.invoiceTitle,
+        title: invoiceTitle,
         showCompanyDetails: templateSettings.invoiceShowCompanyDetails,
         showVatDetails: templateSettings.invoiceShowVatDetails,
         showPaymentTerms: templateSettings.invoiceShowPaymentTerms,
@@ -1078,7 +1083,9 @@ export class SalesInvoicesService {
             templateSettings.invoiceHeaderText || invoice.organization?.name,
           colorScheme: templateSettings.invoiceColorScheme || 'blue',
           customColor: templateSettings.invoiceCustomColor,
-          invoiceTitle: templateSettings.invoiceTitle || 'TAX INVOICE',
+          invoiceTitle: invoice.status === 'proforma_invoice' 
+            ? 'PROFORMA INVOICE' 
+            : (templateSettings.invoiceTitle || 'TAX INVOICE'),
           showCompanyDetails: templateSettings.invoiceShowCompanyDetails ?? true,
           showVatDetails: templateSettings.invoiceShowVatDetails ?? true,
           showPaymentTerms: templateSettings.invoiceShowPaymentTerms ?? true,
@@ -1807,6 +1814,44 @@ export class SalesInvoicesService {
       entityId: invoiceId,
       action: AuditAction.UPDATE,
       changes: { status: { from: invoice.status, to: status } },
+    });
+
+    return this.findById(organizationId, updated.id);
+  }
+
+  /**
+   * Convert Proforma Invoice to Tax Invoice
+   */
+  async convertProformaToInvoice(
+    organizationId: string,
+    invoiceId: string,
+    userId: string,
+  ): Promise<SalesInvoice> {
+    const invoice = await this.findById(organizationId, invoiceId);
+
+    if (invoice.status !== InvoiceStatus.PROFORMA_INVOICE) {
+      throw new BadRequestException(
+        'Only proforma invoices can be converted to tax invoices',
+      );
+    }
+
+    // Update status to TAX_INVOICE_RECEIVABLE
+    invoice.status = InvoiceStatus.TAX_INVOICE_RECEIVABLE;
+    const updated = await this.invoicesRepository.save(invoice);
+
+    // Audit log
+    await this.auditLogsService.record({
+      organizationId,
+      userId,
+      entityType: 'SalesInvoice',
+      entityId: invoiceId,
+      action: AuditAction.UPDATE,
+      changes: {
+        status: {
+          from: InvoiceStatus.PROFORMA_INVOICE,
+          to: InvoiceStatus.TAX_INVOICE_RECEIVABLE,
+        },
+      },
     });
 
     return this.findById(organizationId, updated.id);

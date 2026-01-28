@@ -10,6 +10,7 @@ import {
 import { AbstractEntity } from '../../entities/abstract.entity';
 import { Organization } from '../../entities/organization.entity';
 import { Expense } from '../../entities/expense.entity';
+import { PurchaseOrder } from '../../entities/purchase-order.entity';
 
 @Entity({ name: 'vendors' })
 @Unique(['organization', 'name'])
@@ -68,6 +69,9 @@ export class Vendor extends AbstractEntity {
 
   @OneToMany(() => Expense, (expense) => expense.vendor)
   expenses: Expense[];
+
+  @OneToMany(() => PurchaseOrder, (po) => po.vendor)
+  purchaseOrders: PurchaseOrder[];
 
   @Column({ name: 'first_used_at', type: 'timestamp', nullable: true })
   firstUsedAt?: Date | null;

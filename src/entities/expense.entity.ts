@@ -20,6 +20,7 @@ import { Vendor } from '../modules/vendors/vendor.entity';
 import { VatTaxType } from '../common/enums/vat-tax-type.enum';
 import { Product } from '../modules/products/product.entity';
 import { PurchaseLineItem } from './purchase-line-item.entity';
+import { PurchaseOrder } from './purchase-order.entity';
 
 @Entity({ name: 'expenses' })
 export class Expense extends AbstractEntity {
@@ -201,4 +202,13 @@ export class Expense extends AbstractEntity {
     cascade: true,
   })
   lineItems: PurchaseLineItem[];
+
+  @ManyToOne(() => PurchaseOrder, (po) => po.linkedExpenses, {
+    nullable: true,
+  })
+  @JoinColumn({ name: 'purchase_order_id' })
+  purchaseOrder?: PurchaseOrder | null;
+
+  @Column({ name: 'purchase_order_id', type: 'uuid', nullable: true })
+  purchaseOrderId?: string | null;
 }

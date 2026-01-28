@@ -338,6 +338,12 @@ export class ReportGeneratorService {
           return;
         }
 
+        // Special handling for purchase order
+        if (reportData.type === 'purchase_order') {
+          this.generatePurchaseOrderPDF(reportData).then(resolve).catch(reject);
+          return;
+        }
+
         // Use landscape for wide tables, portrait for summary reports
         const useLandscape = this.shouldUseLandscape(reportData.type);
         // A4 dimensions in points: 595.28 x 841.89 (210mm x 297mm)
@@ -7571,13 +7577,18 @@ export class ReportGeneratorService {
         const contentWidth = pageWidth - 2 * margin;
 
         // Get template settings from metadata
+        // For proforma invoices, always use "PROFORMA INVOICE" as title
+        const defaultInvoiceTitle = invoice.status?.toLowerCase() === 'proforma_invoice' 
+          ? 'PROFORMA INVOICE' 
+          : (invoiceTemplate.invoiceTitle || 'TAX INVOICE');
+        
         const templateSettings = {
           logoUrl: logoUrl,
           logoBuffer: logoBuffer, // Pre-fetched logo buffer for remote URLs
           headerText: invoiceTemplate.headerText,
           colorScheme: invoiceTemplate.colorScheme || 'blue',
           customColor: invoiceTemplate.customColor,
-          invoiceTitle: invoiceTemplate.invoiceTitle || 'TAX INVOICE',
+          invoiceTitle: defaultInvoiceTitle,
           showCompanyDetails: invoiceTemplate.showCompanyDetails ?? true,
           showVatDetails: invoiceTemplate.showVatDetails ?? true,
           showPaymentTerms: invoiceTemplate.showPaymentTerms ?? true,
@@ -7711,17 +7722,24 @@ export class ReportGeneratorService {
 
         // Invoice Title - Right aligned (matching premium preview)
         // Position title to align with top of logo or at currentY if no logo
-        let invoiceTitle = templateSettings.invoiceTitle || 'TAX INVOICE';
         const invoiceStatus = invoice.status;
-        if (invoiceStatus) {
-          const statusMap: Record<string, string> = {
-            'tax_invoice_receivable': 'RECEIVABLE',
-            'tax_invoice_bank_received': 'BANK RECEIVED',
-            'tax_invoice_cash_received': 'CASH RECEIVED',
-          };
-          const statusDisplay = statusMap[invoiceStatus.toLowerCase()];
-          if (statusDisplay) {
-            invoiceTitle = `${invoiceTitle} - ${statusDisplay}`;
+        let invoiceTitle: string;
+        
+        // For proforma invoices, always show "PROFORMA INVOICE"
+        if (invoiceStatus?.toLowerCase() === 'proforma_invoice') {
+          invoiceTitle = 'PROFORMA INVOICE';
+        } else {
+          invoiceTitle = templateSettings.invoiceTitle || 'TAX INVOICE';
+          if (invoiceStatus) {
+            const statusMap: Record<string, string> = {
+              'tax_invoice_receivable': 'RECEIVABLE',
+              'tax_invoice_bank_received': 'BANK RECEIVED',
+              'tax_invoice_cash_received': 'CASH RECEIVED',
+            };
+            const statusDisplay = statusMap[invoiceStatus.toLowerCase()];
+            if (statusDisplay) {
+              invoiceTitle = `${invoiceTitle} - ${statusDisplay}`;
+            }
           }
         }
         // Decreased heading font size, standardize to match rest of content
@@ -8470,6 +8488,354 @@ export class ReportGeneratorService {
             width: contentWidth,
           });
         }
+
+        doc.end();
+      } catch (error) {
+        reject(error);
+      }
+    });
+  }
+
+  /**
+   * Generate professional Purchase Order PDF
+   * Similar design to invoice PDF but adapted for purchase orders
+   */
+  private async generatePurchaseOrderPDF(reportData: ReportData): Promise<Buffer> {
+    const metadata = reportData.metadata || {};
+    const logoUrl = metadata.logoUrl;
+    let logoBuffer: Buffer | null = (metadata as any).logoBuffer || null;
+
+    if (
+      !logoBuffer &&
+      logoUrl &&
+      (logoUrl.startsWith('http://') || logoUrl.startsWith('https://'))
+    ) {
+      logoBuffer = await this.fetchImageAsBuffer(logoUrl);
+    }
+
+    return new Promise((resolve, reject) => {
+      try {
+        const po = reportData.data;
+        const organization = po.organization;
+        const vendor = po.vendor;
+        const currency = metadata.currency || po.currency || 'AED';
+
+        const doc = new PDFDocument({
+          margin: 56,
+          size: 'A4',
+          layout: 'portrait',
+        });
+
+        const buffers: Buffer[] = [];
+        doc.on('data', buffers.push.bind(buffers));
+        doc.on('end', () => {
+          const pdfBuffer = Buffer.concat(buffers);
+          resolve(pdfBuffer);
+        });
+        doc.on('error', reject);
+
+        const pageWidth = doc.page.width;
+        const margin = 56;
+        const contentWidth = pageWidth - 2 * margin;
+
+        const colors = {
+          primary: '#1976d2',
+          text: '#0f172a',
+          textLight: '#475569',
+          textMuted: '#94a3b8',
+          border: '#e2e8f0',
+          background: '#ffffff',
+          backgroundDark: '#0f172a',
+        };
+
+        const formatAmount = (value: number | string): string => {
+          const numValue =
+            typeof value === 'string' ? parseFloat(value) : value;
+          if (isNaN(numValue)) return '0.00';
+          return numValue.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+        };
+
+        // Top border bar
+        doc.fillColor(colors.primary).rect(0, 0, pageWidth, 6).fill();
+
+        // Header: Logo and Title
+        let currentY = 40;
+        let logoHeight = 0;
+
+        if (logoBuffer) {
+          try {
+            const bufferStart = logoBuffer.slice(0, 100).toString('utf-8').toLowerCase();
+            if (!bufferStart.includes('<svg') && !bufferStart.includes('<?xml')) {
+              const logoSize = 140;
+              const logoX = margin;
+              const logoY = currentY;
+              logoHeight = logoSize;
+              doc.image(logoBuffer, logoX, logoY, {
+                width: logoSize,
+                height: logoSize,
+                fit: [logoSize, logoSize],
+              });
+            }
+          } catch (error) {
+            console.warn('Failed to load PO logo:', error);
+          }
+        }
+
+        // Purchase Order Title - Right aligned
+        doc.fontSize(32).font('Helvetica-Bold').fillColor(colors.primary);
+        const titleText = 'PURCHASE ORDER';
+        const titleWidth = doc.widthOfString(titleText);
+        doc.text(titleText, pageWidth - margin - titleWidth, currentY);
+
+        currentY = Math.max(currentY + logoHeight, currentY + 50) + 30;
+
+        // Company Details (Left)
+        if (organization) {
+          doc.fontSize(10).font('Helvetica-Bold').fillColor(colors.text);
+          doc.text(organization.name || 'Company Name', margin, currentY);
+          currentY += 16;
+
+          doc.fontSize(9).font('Helvetica').fillColor(colors.textLight);
+          if (organization.address) {
+            doc.text(organization.address, margin, currentY, {
+              width: contentWidth / 2 - 20,
+            });
+            currentY += 12;
+          }
+          if (organization.phone) {
+            doc.text(`Phone: ${organization.phone}`, margin, currentY);
+            currentY += 12;
+          }
+          if (organization.contactEmail) {
+            doc.text(`Email: ${organization.contactEmail}`, margin, currentY);
+            currentY += 12;
+          }
+          if (organization.vatNumber) {
+            doc.text(`VAT: ${organization.vatNumber}`, margin, currentY);
+            currentY += 12;
+          }
+        }
+
+        // PO Details (Right) - use fixed label width so "Expected Delivery:" doesn't overlap value
+        const rightX = pageWidth - margin - contentWidth / 2;
+        const rightLabelWidth = 105; // fits "Expected Delivery:" without overlap
+        currentY = Math.max(currentY, 100);
+        doc.fontSize(9).font('Helvetica').fillColor(colors.textLight);
+        doc.text('PO Number:', rightX, currentY, { width: rightLabelWidth });
+        doc.font('Helvetica-Bold').fillColor(colors.text);
+        doc.text(po.poNumber || 'N/A', rightX + rightLabelWidth, currentY);
+        currentY += 16;
+
+        doc.font('Helvetica').fillColor(colors.textLight);
+        doc.text('PO Date:', rightX, currentY, { width: rightLabelWidth });
+        doc.font('Helvetica-Bold').fillColor(colors.text);
+        const poDate = po.poDate ? new Date(po.poDate).toLocaleDateString() : 'N/A';
+        doc.text(poDate, rightX + rightLabelWidth, currentY);
+        currentY += 16;
+
+        if (po.expectedDeliveryDate) {
+          doc.font('Helvetica').fillColor(colors.textLight);
+          doc.text('Expected Delivery:', rightX, currentY, { width: rightLabelWidth });
+          doc.font('Helvetica-Bold').fillColor(colors.text);
+          const deliveryDate = new Date(po.expectedDeliveryDate).toLocaleDateString();
+          doc.text(deliveryDate, rightX + rightLabelWidth, currentY);
+          currentY += 16;
+        }
+
+        doc.font('Helvetica').fillColor(colors.textLight);
+        doc.text('Status:', rightX, currentY, { width: rightLabelWidth });
+        doc.font('Helvetica-Bold').fillColor(colors.text);
+        const statusMap: Record<string, string> = {
+          'draft': 'Draft',
+          'sent': 'Sent',
+          'acknowledged': 'Acknowledged',
+          'partially_received': 'Partially Received',
+          'fully_received': 'Fully Received',
+          'invoiced': 'Invoiced',
+          'closed': 'Closed',
+          'cancelled': 'Cancelled',
+        };
+        doc.text(statusMap[po.status] || po.status, rightX + rightLabelWidth, currentY);
+        currentY += 30;
+
+        // Vendor Details Section
+        doc.fontSize(11).font('Helvetica-Bold').fillColor(colors.text);
+        doc.text('Vendor Details', margin, currentY);
+        currentY += 20;
+
+        doc.fontSize(9).font('Helvetica').fillColor(colors.textLight);
+        const vendorName = vendor?.name || po.vendorName || 'N/A';
+        doc.text(`Name: ${vendorName}`, margin, currentY);
+        currentY += 14;
+
+        if (vendor?.address || po.vendor?.address) {
+          doc.text(`Address: ${vendor?.address || po.vendor?.address || ''}`, margin, currentY, {
+            width: contentWidth / 2,
+          });
+          currentY += 12;
+        }
+
+        if (vendor?.phone || po.vendor?.phone) {
+          doc.text(`Phone: ${vendor?.phone || po.vendor?.phone || ''}`, margin, currentY);
+          currentY += 14;
+        }
+
+        if (vendor?.email || po.vendor?.email) {
+          doc.text(`Email: ${vendor?.email || po.vendor?.email || ''}`, margin, currentY);
+          currentY += 14;
+        }
+
+        if (vendor?.vendorTrn || po.vendorTrn) {
+          doc.text(`TRN: ${vendor?.vendorTrn || po.vendorTrn || ''}`, margin, currentY);
+          currentY += 20;
+        }
+
+        // Line Items Table - column widths fit within contentWidth (no overflow)
+        currentY += 10;
+        const rowHeight = 30;
+        const headerHeight = 35;
+        const tablePadding = 10;
+        const col = {
+          item: 98,
+          description: 82,
+          qty: 38,
+          unitPrice: 64,
+          amount: 64,
+          vat: 54,
+          total: 54,
+        };
+        // Table Header
+        doc.fillColor(colors.backgroundDark).rect(margin, currentY, contentWidth, headerHeight).fill();
+        doc.fontSize(9).font('Helvetica-Bold').fillColor('#ffffff');
+
+        let headerX = margin + tablePadding;
+        doc.text('Item', headerX, currentY + 12, { width: col.item - 4 });
+        headerX += col.item;
+        doc.text('Description', headerX, currentY + 12, { width: col.description - 4 });
+        headerX += col.description;
+        doc.text('Qty', headerX, currentY + 12, { align: 'right', width: col.qty });
+        headerX += col.qty;
+        doc.text('Unit Price', headerX, currentY + 12, { align: 'right', width: col.unitPrice });
+        headerX += col.unitPrice;
+        doc.text('Amount', headerX, currentY + 12, { align: 'right', width: col.amount });
+        headerX += col.amount;
+        doc.text('VAT', headerX, currentY + 12, { align: 'right', width: col.vat });
+        headerX += col.vat;
+        doc.text('Total', headerX, currentY + 12, { align: 'right', width: col.total });
+
+        currentY += headerHeight;
+
+        // Table Rows
+        doc.fontSize(9).font('Helvetica').fillColor(colors.text);
+        const lineItems = po.lineItems || [];
+
+        lineItems.forEach((item: any, index: number) => {
+          if (currentY > doc.page.height - 100) {
+            doc.addPage();
+            currentY = margin + 40;
+          }
+
+          const bgColor = index % 2 === 0 ? colors.background : '#f8fafc';
+          doc.fillColor(bgColor).rect(margin, currentY, contentWidth, rowHeight).fill();
+
+          let cellX = margin + tablePadding;
+          doc.fillColor(colors.text);
+          doc.text(item.itemName || 'N/A', cellX, currentY + 10, { width: col.item - 4 });
+          cellX += col.item;
+          doc.text(item.description || '—', cellX, currentY + 10, { width: col.description - 4 });
+          cellX += col.description;
+          doc.text(
+            `${formatAmount(item.orderedQuantity || 0)} ${item.unitOfMeasure || 'unit'}`,
+            cellX,
+            currentY + 10,
+            { align: 'right', width: col.qty },
+          );
+          cellX += col.qty;
+          doc.text(formatAmount(item.unitPrice || 0), cellX, currentY + 10, {
+            align: 'right',
+            width: col.unitPrice,
+          });
+          cellX += col.unitPrice;
+          doc.text(formatAmount(item.amount || 0), cellX, currentY + 10, {
+            align: 'right',
+            width: col.amount,
+          });
+          cellX += col.amount;
+          doc.text(formatAmount(item.vatAmount || 0), cellX, currentY + 10, {
+            align: 'right',
+            width: col.vat,
+          });
+          cellX += col.vat;
+          doc.font('Helvetica-Bold');
+          doc.text(formatAmount(item.totalAmount || 0), cellX, currentY + 10, {
+            align: 'right',
+            width: col.total,
+          });
+          doc.font('Helvetica');
+
+          currentY += rowHeight;
+        });
+
+        // Totals Section
+        currentY += 20;
+        const totalsX = pageWidth - margin - 200;
+
+        doc.fontSize(9).font('Helvetica').fillColor(colors.textLight);
+        let subtotal = 0;
+        let totalVat = 0;
+        lineItems.forEach((item: any) => {
+          subtotal += parseFloat(item.amount || '0');
+          totalVat += parseFloat(item.vatAmount || '0');
+        });
+
+        doc.text('Subtotal:', totalsX, currentY);
+        doc.font('Helvetica-Bold').fillColor(colors.text);
+        doc.text(`${formatAmount(subtotal)} ${currency}`, totalsX + 100, currentY, {
+          align: 'right',
+        });
+        currentY += 16;
+
+        doc.font('Helvetica').fillColor(colors.textLight);
+        doc.text('Total VAT:', totalsX, currentY);
+        doc.font('Helvetica-Bold').fillColor(colors.text);
+        doc.text(`${formatAmount(totalVat)} ${currency}`, totalsX + 100, currentY, {
+          align: 'right',
+        });
+        currentY += 20;
+
+        // Total Amount
+        doc.fontSize(12).font('Helvetica-Bold').fillColor(colors.primary);
+        doc.text('Total Amount:', totalsX, currentY);
+        doc.fontSize(14);
+        const totalAmount = parseFloat(po.totalAmount || '0');
+        doc.text(`${formatAmount(totalAmount)} ${currency}`, totalsX + 100, currentY, {
+          align: 'right',
+        });
+
+        // Notes Section
+        if (po.notes) {
+          currentY += 40;
+          if (currentY > doc.page.height - 100) {
+            doc.addPage();
+            currentY = margin + 40;
+          }
+
+          doc.fontSize(10).font('Helvetica-Bold').fillColor(colors.text);
+          doc.text('Notes:', margin, currentY);
+          currentY += 16;
+          doc.fontSize(9).font('Helvetica').fillColor(colors.textLight);
+          doc.text(po.notes, margin, currentY, { width: contentWidth });
+        }
+
+        // Footer
+        const footerY = doc.page.height - 40;
+        doc.fontSize(8).font('Helvetica').fillColor(colors.textMuted);
+        doc.text(
+          `Generated on ${new Date().toLocaleDateString()} at ${new Date().toLocaleTimeString()}`,
+          margin,
+          footerY,
+          { align: 'center', width: contentWidth },
+        );
 
         doc.end();
       } catch (error) {

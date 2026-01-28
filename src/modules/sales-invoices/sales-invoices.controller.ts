@@ -281,4 +281,18 @@ export class SalesInvoicesController {
     );
     return { message: 'Invoice email sent successfully' };
   }
+
+  @Post(':id/convert')
+  @UseGuards(JwtAuthGuard, RolesGuard, TenantGuard)
+  @Roles(UserRole.ADMIN, UserRole.ACCOUNTANT)
+  async convertProformaToInvoice(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.salesInvoicesService.convertProformaToInvoice(
+      user?.organizationId as string,
+      id,
+      user?.userId as string,
+    );
+  }
 }

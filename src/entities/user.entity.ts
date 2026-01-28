@@ -22,6 +22,7 @@ import { CreditNote } from './credit-note.entity';
 import { DebitNote } from './debit-note.entity';
 import { JournalEntry } from './journal-entry.entity';
 import { LedgerAccount } from './ledger-account.entity';
+import { PurchaseOrder } from './purchase-order.entity';
 
 @Index('idx_users_email', ['email'], { unique: true })
 @Entity({ name: 'users' })
@@ -108,4 +109,7 @@ export class User extends AbstractEntity {
 
   @OneToMany(() => LedgerAccount, (ledgerAccount) => ledgerAccount.createdBy)
   createdLedgerAccounts: LedgerAccount[];
+
+  @OneToMany(() => PurchaseOrder, (po) => po.user)
+  purchaseOrders: PurchaseOrder[];
 }
