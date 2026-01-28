@@ -7957,9 +7957,9 @@ export class ReportGeneratorService {
 
           doc.fontSize(9).font('Helvetica').fillColor(colors.text);
           // Use word wrap to prevent awkward splits
-          doc.text(value, x + labelWidth, y, { 
+          doc.text(value, x + labelWidth, y, {
             width: width - labelWidth,
-            ellipsis: false // Don't truncate, wrap instead
+            ellipsis: false, // Don't truncate, wrap instead
           });
 
           // Return total line height for spacing calculations
@@ -8001,17 +8001,35 @@ export class ReportGeneratorService {
 
         // Use consistent label formatting (bold labels like other columns)
         if (customerPhone) {
-          const h = drawLabelValue('Phone', customerPhone, billToX, billToY, columnWidth);
+          const h = drawLabelValue(
+            'Phone',
+            customerPhone,
+            billToX,
+            billToY,
+            columnWidth,
+          );
           billToY += h + lineGap;
         }
 
         if (customerEmail) {
-          const h = drawLabelValue('Email', customerEmail, billToX, billToY, columnWidth);
+          const h = drawLabelValue(
+            'Email',
+            customerEmail,
+            billToX,
+            billToY,
+            columnWidth,
+          );
           billToY += h + lineGap;
         }
 
         if (customerTrn) {
-          const h = drawLabelValue('TRN', customerTrn, billToX, billToY, columnWidth);
+          const h = drawLabelValue(
+            'TRN',
+            customerTrn,
+            billToX,
+            billToY,
+            columnWidth,
+          );
           billToY += h + lineGap;
         }
 
@@ -8819,7 +8837,8 @@ export class ReportGeneratorService {
 
         const pageWidth = doc.page.width;
         const margin = 56;
-        const contentWidth = pageWidth - 2 * margin;
+        const rightMarginExtra = 0; // No extra right margin for PO
+        const contentWidth = pageWidth - 2 * margin - rightMarginExtra;
 
         const getColorScheme = () => {
           if (colorScheme === 'custom' && customColor) return customColor;
@@ -8839,6 +8858,7 @@ export class ReportGeneratorService {
           textLight: '#475569',
           textMuted: '#94a3b8',
           border: '#e2e8f0',
+          borderLight: '#f1f5f9',
           background: '#ffffff',
           backgroundLight: '#f8fafc',
           backgroundDark: '#0f172a',
@@ -8902,182 +8922,267 @@ export class ReportGeneratorService {
 
         currentY = Math.max(currentY + logoHeight, currentY + 60) + 30;
 
-        // Company Details (Left)
+        // ========== PARALLEL SECTIONS: Company Details (Left) + PO Details (Right) ==========
+        const sectionStartY = currentY;
+        const leftColumnWidth = contentWidth / 2 - 10;
+        const rightColumnWidth = contentWidth / 2 - 10;
+        const rightColumnX = margin + contentWidth / 2 + 10;
+        
+        // Track heights to find max
+        let leftColumnEndY = sectionStartY;
+        let rightColumnEndY = sectionStartY;
+
+        // ----- LEFT COLUMN: Company Details -----
         if (showCompanyDetails && organization) {
+          let leftY = sectionStartY;
+          
           doc.fontSize(10).font('Helvetica-Bold').fillColor(colors.text);
-          doc.text(organization.name || 'Company Name', margin, currentY);
-          currentY += 16;
+          doc.text(organization.name || 'Company Name', margin, leftY, {
+            width: leftColumnWidth,
+          });
+          leftY += 16;
 
           doc.fontSize(9).font('Helvetica').fillColor(colors.textLight);
           if (organization.address) {
-            doc.text(organization.address, margin, currentY, {
-              width: contentWidth / 2 - 20,
+            doc.text(organization.address, margin, leftY, {
+              width: leftColumnWidth,
             });
-            currentY += 12;
+            leftY += 14;
           }
           if (organization.phone) {
-            doc.text(`Phone: ${organization.phone}`, margin, currentY);
-            currentY += 12;
+            doc.text(`Phone: ${organization.phone}`, margin, leftY, {
+              width: leftColumnWidth,
+            });
+            leftY += 12;
           }
           if (organization.contactEmail) {
-            doc.text(`Email: ${organization.contactEmail}`, margin, currentY);
-            currentY += 12;
+            doc.text(`Email: ${organization.contactEmail}`, margin, leftY, {
+              width: leftColumnWidth,
+            });
+            leftY += 12;
           }
           if (organization.vatNumber) {
-            doc.text(`VAT: ${organization.vatNumber}`, margin, currentY);
-            currentY += 12;
+            doc.text(`VAT: ${organization.vatNumber}`, margin, leftY, {
+              width: leftColumnWidth,
+            });
+            leftY += 12;
           }
+          leftColumnEndY = leftY;
         }
 
-        // PO Details (Right) - use fixed label width so "Expected Delivery:" doesn't overlap value
-        const rightX = pageWidth - margin - contentWidth / 2;
-        const rightLabelWidth = 105; // fits "Expected Delivery:" without overlap
-        currentY = Math.max(currentY, 100);
-        doc.fontSize(9).font('Helvetica').fillColor(colors.textLight);
-        doc.text('PO Number:', rightX, currentY, { width: rightLabelWidth });
-        doc.font('Helvetica-Bold').fillColor(colors.text);
-        doc.text(po.poNumber || 'N/A', rightX + rightLabelWidth, currentY);
-        currentY += 16;
-
-        doc.font('Helvetica').fillColor(colors.textLight);
-        doc.text('PO Date:', rightX, currentY, { width: rightLabelWidth });
-        doc.font('Helvetica-Bold').fillColor(colors.text);
-        const poDate = po.poDate
-          ? new Date(po.poDate).toLocaleDateString()
-          : 'N/A';
-        doc.text(poDate, rightX + rightLabelWidth, currentY);
-        currentY += 16;
-
-        if (po.expectedDeliveryDate) {
-          doc.font('Helvetica').fillColor(colors.textLight);
-          doc.text('Expected Delivery:', rightX, currentY, {
-            width: rightLabelWidth,
-          });
+        // ----- RIGHT COLUMN: PO Details -----
+        {
+          let rightY = sectionStartY;
+          const rightLabelWidth = 110; // fits "Expected Delivery:" without overlap
+          const rightValueX = rightColumnX + rightLabelWidth;
+          const rightValueWidth = rightColumnWidth - rightLabelWidth;
+          
+          doc.fontSize(9).font('Helvetica').fillColor(colors.textLight);
+          doc.text('PO Number:', rightColumnX, rightY, { width: rightLabelWidth });
           doc.font('Helvetica-Bold').fillColor(colors.text);
-          const deliveryDate = new Date(
-            po.expectedDeliveryDate,
-          ).toLocaleDateString();
-          doc.text(deliveryDate, rightX + rightLabelWidth, currentY);
-          currentY += 16;
+          doc.text(po.poNumber || 'N/A', rightValueX, rightY, { width: rightValueWidth });
+          rightY += 16;
+
+          doc.font('Helvetica').fillColor(colors.textLight);
+          doc.text('PO Date:', rightColumnX, rightY, { width: rightLabelWidth });
+          doc.font('Helvetica-Bold').fillColor(colors.text);
+          const poDate = po.poDate
+            ? new Date(po.poDate).toLocaleDateString()
+            : 'N/A';
+          doc.text(poDate, rightValueX, rightY, { width: rightValueWidth });
+          rightY += 16;
+
+          if (po.expectedDeliveryDate) {
+            doc.font('Helvetica').fillColor(colors.textLight);
+            doc.text('Expected Delivery:', rightColumnX, rightY, {
+              width: rightLabelWidth,
+            });
+            doc.font('Helvetica-Bold').fillColor(colors.text);
+            const deliveryDate = new Date(
+              po.expectedDeliveryDate,
+            ).toLocaleDateString();
+            doc.text(deliveryDate, rightValueX, rightY, { width: rightValueWidth });
+            rightY += 16;
+          }
+
+          doc.font('Helvetica').fillColor(colors.textLight);
+          doc.text('Status:', rightColumnX, rightY, { width: rightLabelWidth });
+          doc.font('Helvetica-Bold').fillColor(colors.text);
+          const statusMap: Record<string, string> = {
+            draft: 'Draft',
+            sent: 'Sent',
+            acknowledged: 'Acknowledged',
+            partially_received: 'Partially Received',
+            fully_received: 'Fully Received',
+            invoiced: 'Invoiced',
+            closed: 'Closed',
+            cancelled: 'Cancelled',
+          };
+          doc.text(
+            statusMap[po.status] || po.status,
+            rightValueX,
+            rightY,
+            { width: rightValueWidth },
+          );
+          rightY += 16;
+          rightColumnEndY = rightY;
         }
 
-        doc.font('Helvetica').fillColor(colors.textLight);
-        doc.text('Status:', rightX, currentY, { width: rightLabelWidth });
-        doc.font('Helvetica-Bold').fillColor(colors.text);
-        const statusMap: Record<string, string> = {
-          draft: 'Draft',
-          sent: 'Sent',
-          acknowledged: 'Acknowledged',
-          partially_received: 'Partially Received',
-          fully_received: 'Fully Received',
-          invoiced: 'Invoiced',
-          closed: 'Closed',
-          cancelled: 'Cancelled',
-        };
-        doc.text(
-          statusMap[po.status] || po.status,
-          rightX + rightLabelWidth,
-          currentY,
-        );
-        currentY += 30;
+        // Move currentY to after both columns
+        currentY = Math.max(leftColumnEndY, rightColumnEndY) + 20;
 
-        // Vendor Details Section
+        // Vendor Details Section (improved spacing and formatting)
+        const vendorBoxY = currentY;
+        let vendorContentY = vendorBoxY + 12;
+
+        // Calculate vendor box height
+        let vendorFieldCount = 1; // Name is always shown
+        if (vendor?.address || po.vendor?.address) vendorFieldCount++;
+        if (vendor?.phone || po.vendor?.phone) vendorFieldCount++;
+        if (vendor?.email || po.vendor?.email) vendorFieldCount++;
+        if (vendor?.vendorTrn || po.vendorTrn) vendorFieldCount++;
+        const vendorBoxHeight = Math.max(vendorFieldCount * 16 + 40, 60);
+
+        // Draw vendor details box
+        doc
+          .fillColor(colors.backgroundLight)
+          .rect(margin, vendorBoxY, contentWidth, vendorBoxHeight)
+          .fill();
+        doc
+          .strokeColor(colors.border)
+          .lineWidth(1)
+          .rect(margin, vendorBoxY, contentWidth, vendorBoxHeight)
+          .stroke();
+        doc
+          .fillColor(colors.primary)
+          .rect(margin, vendorBoxY, 4, vendorBoxHeight)
+          .fill(); // Left accent border
+
         doc.fontSize(11).font('Helvetica-Bold').fillColor(colors.text);
-        doc.text('Vendor Details', margin, currentY);
-        currentY += 20;
+        doc.text('Vendor Details', margin + 12, vendorContentY);
+        vendorContentY += 20;
 
-        doc.fontSize(9).font('Helvetica').fillColor(colors.textLight);
+        // Helper function for consistent label formatting
+        const drawVendorLabelValue = (
+          label: string,
+          value: string,
+          y: number,
+        ): number => {
+          const labelText = `${label}: `;
+          doc.fontSize(9).font('Helvetica-Bold').fillColor(colors.text);
+          doc.text(labelText, margin + 12, y, { width: 100 });
+          const labelWidth = doc.widthOfString(labelText);
+
+          doc.fontSize(9).font('Helvetica').fillColor(colors.text);
+          doc.text(value, margin + 12 + labelWidth, y, {
+            width: contentWidth - 24 - labelWidth,
+          });
+          return 14; // Line height
+        };
+
         const vendorName = vendor?.name || po.vendorName || 'N/A';
-        doc.text(`Name: ${vendorName}`, margin, currentY);
-        currentY += 14;
+        doc.fontSize(10).font('Helvetica-Bold').fillColor(colors.text);
+        doc.text(vendorName, margin + 12, vendorContentY, {
+          width: contentWidth - 24,
+        });
+        vendorContentY += 16;
 
         if (vendor?.address || po.vendor?.address) {
+          doc.fontSize(9).font('Helvetica').fillColor(colors.text);
           doc.text(
-            `Address: ${vendor?.address || po.vendor?.address || ''}`,
-            margin,
-            currentY,
+            vendor?.address || po.vendor?.address || '',
+            margin + 12,
+            vendorContentY,
             {
-              width: contentWidth / 2,
+              width: contentWidth - 24,
             },
           );
-          currentY += 12;
+          vendorContentY += 14;
         }
 
         if (vendor?.phone || po.vendor?.phone) {
-          doc.text(
-            `Phone: ${vendor?.phone || po.vendor?.phone || ''}`,
-            margin,
-            currentY,
+          vendorContentY += drawVendorLabelValue(
+            'Phone',
+            vendor?.phone || po.vendor?.phone || '',
+            vendorContentY,
           );
-          currentY += 14;
         }
 
         if (vendor?.email || po.vendor?.email) {
-          doc.text(
-            `Email: ${vendor?.email || po.vendor?.email || ''}`,
-            margin,
-            currentY,
+          vendorContentY += drawVendorLabelValue(
+            'Email',
+            vendor?.email || po.vendor?.email || '',
+            vendorContentY,
           );
-          currentY += 14;
         }
 
         if (vendor?.vendorTrn || po.vendorTrn) {
-          doc.text(
-            `TRN: ${vendor?.vendorTrn || po.vendorTrn || ''}`,
-            margin,
-            currentY,
+          vendorContentY += drawVendorLabelValue(
+            'TRN',
+            vendor?.vendorTrn || po.vendorTrn || '',
+            vendorContentY,
           );
-          currentY += 20;
         }
 
-        // Line Items Table - invoice-like styling
+        currentY = vendorBoxY + vendorBoxHeight + 20;
+
+        // Line Items Table - invoice-like styling (stretched to full width)
         currentY += 10;
         const rowHeight = 30;
         const headerHeight = 35;
-        const tablePadding = 10;
+        const padding = 14; // Padding inside each cell
+        const totalPaddingPerColumn = padding * 2; // Left + right padding per column
+        const totalPaddingForAllColumns = totalPaddingPerColumn * 7; // 7 columns
+
+        // Use full contentWidth for table
+        const tableWidth = contentWidth;
+        const availableWidth = tableWidth - totalPaddingForAllColumns;
+
+        // Calculate proportional column widths based on available width
         const col = {
-          item: 98,
-          description: 82,
-          qty: 38,
-          unitPrice: 64,
-          amount: 64,
-          vat: 54,
-          total: 54,
+          item: Math.floor(availableWidth * 0.15), // 15%
+          description: Math.floor(availableWidth * 0.2), // 20%
+          qty: Math.floor(availableWidth * 0.1), // 10%
+          unitPrice: Math.floor(availableWidth * 0.13), // 13%
+          amount: Math.floor(availableWidth * 0.13), // 13%
+          vat: Math.floor(availableWidth * 0.14), // 14%
+          total: Math.floor(availableWidth * 0.15), // 15%
         };
+
         // Table Header
         doc
           .fillColor(colors.backgroundDark)
-          .rect(margin, currentY, contentWidth, headerHeight)
+          .rect(margin, currentY, tableWidth, headerHeight)
           .fill();
         doc.fontSize(9).font('Helvetica-Bold').fillColor('#ffffff');
 
-        let headerX = margin + tablePadding;
-        doc.text('Item', headerX, currentY + 12, { width: col.item - 4 });
-        headerX += col.item;
+        let headerX = margin + padding;
+        doc.text('Item', headerX, currentY + 12, { width: col.item });
+        headerX += col.item + totalPaddingPerColumn;
         doc.text('Description', headerX, currentY + 12, {
-          width: col.description - 4,
+          width: col.description,
         });
-        headerX += col.description;
+        headerX += col.description + totalPaddingPerColumn;
         doc.text('Qty', headerX, currentY + 12, {
           align: 'right',
           width: col.qty,
         });
-        headerX += col.qty;
+        headerX += col.qty + totalPaddingPerColumn;
         doc.text('Unit Price', headerX, currentY + 12, {
           align: 'right',
           width: col.unitPrice,
         });
-        headerX += col.unitPrice;
+        headerX += col.unitPrice + totalPaddingPerColumn;
         doc.text('Amount', headerX, currentY + 12, {
           align: 'right',
           width: col.amount,
         });
-        headerX += col.amount;
+        headerX += col.amount + totalPaddingPerColumn;
         doc.text('VAT', headerX, currentY + 12, {
           align: 'right',
           width: col.vat,
         });
-        headerX += col.vat;
+        headerX += col.vat + totalPaddingPerColumn;
         doc.text('Total', headerX, currentY + 12, {
           align: 'right',
           width: col.total,
@@ -9090,49 +9195,90 @@ export class ReportGeneratorService {
         const lineItems = po.lineItems || [];
 
         lineItems.forEach((item: any, index: number) => {
-          if (currentY > doc.page.height - 100) {
+          if (currentY > doc.page.height - 150) {
             doc.addPage();
             currentY = margin + 40;
+
+            // Redraw table header on new page
+            doc
+              .fillColor(colors.backgroundDark)
+              .rect(margin, currentY, tableWidth, headerHeight)
+              .fill();
+            doc.fontSize(9).font('Helvetica-Bold').fillColor('#ffffff');
+
+            let newHeaderX = margin + padding;
+            doc.text('Item', newHeaderX, currentY + 12, { width: col.item });
+            newHeaderX += col.item + totalPaddingPerColumn;
+            doc.text('Description', newHeaderX, currentY + 12, {
+              width: col.description,
+            });
+            newHeaderX += col.description + totalPaddingPerColumn;
+            doc.text('Qty', newHeaderX, currentY + 12, {
+              align: 'right',
+              width: col.qty,
+            });
+            newHeaderX += col.qty + totalPaddingPerColumn;
+            doc.text('Unit Price', newHeaderX, currentY + 12, {
+              align: 'right',
+              width: col.unitPrice,
+            });
+            newHeaderX += col.unitPrice + totalPaddingPerColumn;
+            doc.text('Amount', newHeaderX, currentY + 12, {
+              align: 'right',
+              width: col.amount,
+            });
+            newHeaderX += col.amount + totalPaddingPerColumn;
+            doc.text('VAT', newHeaderX, currentY + 12, {
+              align: 'right',
+              width: col.vat,
+            });
+            newHeaderX += col.vat + totalPaddingPerColumn;
+            doc.text('Total', newHeaderX, currentY + 12, {
+              align: 'right',
+              width: col.total,
+            });
+            currentY += headerHeight;
           }
 
-          const bgColor = index % 2 === 0 ? colors.background : '#f8fafc';
+          const bgColor =
+            index % 2 === 0 ? colors.background : colors.backgroundLight;
           doc
             .fillColor(bgColor)
-            .rect(margin, currentY, contentWidth, rowHeight)
+            .rect(margin, currentY, tableWidth, rowHeight)
             .fill();
 
-          let cellX = margin + tablePadding;
+          let cellX = margin + padding;
           doc.fillColor(colors.text);
           doc.text(item.itemName || 'N/A', cellX, currentY + 10, {
-            width: col.item - 4,
+            width: col.item,
           });
-          cellX += col.item;
+          cellX += col.item + totalPaddingPerColumn;
           doc.text(item.description || '—', cellX, currentY + 10, {
-            width: col.description - 4,
+            width: col.description,
           });
-          cellX += col.description;
+          cellX += col.description + totalPaddingPerColumn;
           doc.text(
             `${formatAmount(item.orderedQuantity || 0)} ${item.unitOfMeasure || 'unit'}`,
             cellX,
             currentY + 10,
             { align: 'right', width: col.qty },
           );
-          cellX += col.qty;
+          cellX += col.qty + totalPaddingPerColumn;
           doc.text(formatAmount(item.unitPrice || 0), cellX, currentY + 10, {
             align: 'right',
             width: col.unitPrice,
           });
-          cellX += col.unitPrice;
+          cellX += col.unitPrice + totalPaddingPerColumn;
           doc.text(formatAmount(item.amount || 0), cellX, currentY + 10, {
             align: 'right',
             width: col.amount,
           });
-          cellX += col.amount;
+          cellX += col.amount + totalPaddingPerColumn;
           doc.text(formatAmount(item.vatAmount || 0), cellX, currentY + 10, {
             align: 'right',
             width: col.vat,
           });
-          cellX += col.vat;
+          cellX += col.vat + totalPaddingPerColumn;
           doc.font('Helvetica-Bold');
           doc.text(formatAmount(item.totalAmount || 0), cellX, currentY + 10, {
             align: 'right',
@@ -9140,8 +9286,22 @@ export class ReportGeneratorService {
           });
           doc.font('Helvetica');
 
+          // Subtle row separator
+          doc.strokeColor(colors.borderLight).lineWidth(0.5);
+          doc
+            .moveTo(margin, currentY + rowHeight)
+            .lineTo(margin + tableWidth, currentY + rowHeight)
+            .stroke();
+
           currentY += rowHeight;
         });
+
+        // Table bottom border
+        doc.strokeColor(colors.border).lineWidth(0.5);
+        doc
+          .moveTo(margin, currentY)
+          .lineTo(margin + tableWidth, currentY)
+          .stroke();
 
         // Totals Section (invoice-like totals box)
         currentY += 20;
@@ -9228,7 +9388,7 @@ export class ReportGeneratorService {
 
         currentY = totalsBoxY + totalsBoxHeight + 10;
 
-        // Bank Details (reuse invoice logic & gating)
+        // Bank Details (with box styling matching invoice)
         if (
           showBankDetails &&
           organization &&
@@ -9237,60 +9397,116 @@ export class ReportGeneratorService {
             organization.bankName ||
             organization.bankAccountHolder)
         ) {
-          currentY += 40;
           if (currentY > doc.page.height - 200) {
             doc.addPage();
             currentY = margin + 40;
           }
+          currentY += 20;
 
+          // Calculate box height based on number of bank detail fields
+          let bankDetailCount = 0;
+          if (organization.bankAccountHolder) bankDetailCount++;
+          if (organization.bankName) bankDetailCount++;
+          if (organization.bankAccountNumber) bankDetailCount++;
+          if (organization.bankIban) bankDetailCount++;
+          if (organization.bankBranch) bankDetailCount++;
+
+          const bankBoxY = currentY;
+          const bankBoxHeight = Math.max(bankDetailCount * 14 + 40, 50);
+
+          // Box background and border (matching invoice style)
+          doc
+            .fillColor(colors.backgroundLight)
+            .rect(margin, bankBoxY, contentWidth, bankBoxHeight)
+            .fill();
+          doc
+            .strokeColor(colors.border)
+            .lineWidth(1)
+            .rect(margin, bankBoxY, contentWidth, bankBoxHeight)
+            .stroke();
+          doc
+            .fillColor(colors.primary)
+            .rect(margin, bankBoxY, 4, bankBoxHeight)
+            .fill(); // Left accent border
+
+          // Content inside box
+          const contentStartY = bankBoxY + 12;
           doc.fontSize(10).font('Helvetica-Bold').fillColor(colors.text);
-          doc.text('Bank Details:', margin, currentY);
-          currentY += 16;
+          doc.text('Bank Details:', margin + 12, contentStartY);
 
+          let bankY = contentStartY + 16;
           doc.fontSize(10).font('Helvetica').fillColor(colors.text);
           if (organization.bankAccountHolder) {
             doc.text(
               `Account Holder: ${organization.bankAccountHolder}`,
-              margin,
-              currentY,
+              margin + 12,
+              bankY,
             );
-            currentY += 14;
+            bankY += 14;
           }
           if (organization.bankName) {
-            doc.text(`Bank: ${organization.bankName}`, margin, currentY);
-            currentY += 14;
+            doc.text(`Bank: ${organization.bankName}`, margin + 12, bankY);
+            bankY += 14;
           }
           if (organization.bankAccountNumber) {
             doc.text(
               `Account Number: ${organization.bankAccountNumber}`,
-              margin,
-              currentY,
+              margin + 12,
+              bankY,
             );
-            currentY += 14;
+            bankY += 14;
           }
           if (organization.bankIban) {
-            doc.text(`IBAN: ${organization.bankIban}`, margin, currentY);
-            currentY += 14;
+            doc.text(`IBAN: ${organization.bankIban}`, margin + 12, bankY);
+            bankY += 14;
           }
           if (organization.bankBranch) {
-            doc.text(`Branch: ${organization.bankBranch}`, margin, currentY);
-            currentY += 14;
+            doc.text(`Branch: ${organization.bankBranch}`, margin + 12, bankY);
+            bankY += 14;
           }
+
+          currentY = bankBoxY + bankBoxHeight + 20;
         }
 
-        // Notes Section
+        // Notes Section (with box styling matching invoice)
         if (po.notes) {
-          currentY += 40;
-          if (currentY > doc.page.height - 100) {
+          if (currentY > doc.page.height - 200) {
             doc.addPage();
             currentY = margin + 40;
           }
+          currentY += 20;
 
+          // Calculate box height based on content
+          const notesLines = Math.ceil(po.notes.length / 80);
+          const notesBoxY = currentY;
+          const notesBoxHeight = Math.max(notesLines * 12 + 40, 50);
+
+          // Box background and border (matching invoice style)
+          doc
+            .fillColor(colors.backgroundLight)
+            .rect(margin, notesBoxY, contentWidth, notesBoxHeight)
+            .fill();
+          doc
+            .strokeColor(colors.border)
+            .lineWidth(1)
+            .rect(margin, notesBoxY, contentWidth, notesBoxHeight)
+            .stroke();
+          doc
+            .fillColor(colors.primary)
+            .rect(margin, notesBoxY, 4, notesBoxHeight)
+            .fill(); // Left accent border
+
+          // Content inside box
+          const contentStartY = notesBoxY + 12;
           doc.fontSize(10).font('Helvetica-Bold').fillColor(colors.text);
-          doc.text('Notes:', margin, currentY);
-          currentY += 16;
-          doc.fontSize(9).font('Helvetica').fillColor(colors.textLight);
-          doc.text(po.notes, margin, currentY, { width: contentWidth });
+          doc.text('Notes:', margin + 12, contentStartY);
+
+          doc.fontSize(10).font('Helvetica').fillColor(colors.text);
+          doc.text(po.notes, margin + 12, contentStartY + 16, {
+            width: contentWidth - 24,
+          });
+
+          currentY = notesBoxY + notesBoxHeight + 20;
         }
 
         // Footer
