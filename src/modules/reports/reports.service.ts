@@ -22,6 +22,7 @@ import { AccrualStatus } from '../../common/enums/accrual-status.enum';
 import { PaymentStatus } from '../../common/enums/payment-status.enum';
 import { CreditNoteStatus } from '../../common/enums/credit-note-status.enum';
 import { DebitNoteStatus } from '../../common/enums/debit-note-status.enum';
+import { InvoiceStatus } from '../../common/enums/invoice-status.enum';
 import { SettingsService } from '../settings/settings.service';
 import {
   JournalEntryAccount,
@@ -80,6 +81,31 @@ export class ReportsService {
     if (!accountCode.startsWith('ledger:')) return null;
     const id = accountCode.slice('ledger:'.length).trim();
     return id.length > 0 ? id : null;
+  }
+
+  /** Exclude proforma invoices from report queries; they are only shown on the Proforma Invoice page. */
+  private excludeProformaInvoice(
+    qb: { andWhere: (cond: string, params?: object) => unknown },
+  ): void {
+    qb.andWhere('invoice.status != :proformaStatus', {
+      proformaStatus: InvoiceStatus.PROFORMA_INVOICE,
+    });
+  }
+
+  /**
+   * Exclude invoice payments against proforma invoices from report aggregates (e.g. Trial Balance cash).
+   * Joins payment -> invoice and filters so only tax-invoice payments count.
+   */
+  private excludeProformaFromInvoicePaymentQuery(
+    qb: {
+      innerJoin: (relation: string, alias: string) => unknown;
+      andWhere: (cond: string, params?: object) => unknown;
+    },
+  ): void {
+    qb.innerJoin('payment.invoice', 'inv');
+    qb.andWhere('inv.status != :proformaStatus', {
+      proformaStatus: InvoiceStatus.PROFORMA_INVOICE,
+    });
   }
 
   private async loadLedgerAccountsByIds(
@@ -168,7 +194,7 @@ export class ReportsService {
         .andWhere("expense.vendor_name != ''")
         .getRawMany();
 
-      const customerResults = await this.salesInvoicesRepository
+      const customerQuery = this.salesInvoicesRepository
         .createQueryBuilder('invoice')
         .leftJoin('invoice.customer', 'customer')
         .select(
@@ -178,8 +204,9 @@ export class ReportsService {
         .distinct(true)
         .where('invoice.organization_id = :organizationId', { organizationId })
         .andWhere('COALESCE(customer.name, invoice.customer_name) IS NOT NULL')
-        .andWhere("COALESCE(customer.name, invoice.customer_name) != ''")
-        .getRawMany();
+        .andWhere("COALESCE(customer.name, invoice.customer_name) != ''");
+      this.excludeProformaInvoice(customerQuery);
+      const customerResults = await customerQuery.getRawMany();
 
       const vendors = vendorResults
         .map((r) => r.vendorname || r.vendorName || r.vendor_name)
@@ -341,21 +368,22 @@ export class ReportsService {
       // Original code had 12+ queries in parallel, causing "MaxClientsInSessionMode" errors
 
       // Batch 1: Revenue queries (3 queries in parallel - safe for pool_size=5)
+      const revenueInvoiceQuery = this.salesInvoicesRepository
+        .createQueryBuilder('invoice')
+        .select([
+          'SUM(COALESCE(invoice.base_amount, invoice.amount)) AS revenue',
+          'SUM(invoice.vat_amount) AS vat',
+        ])
+        .where('invoice.organization_id = :organizationId', {
+          organizationId,
+        })
+        .andWhere('invoice.is_deleted = false')
+        .andWhere('invoice.invoice_date >= :startDate', { startDate })
+        .andWhere('invoice.invoice_date <= :endDate', { endDate });
+      this.excludeProformaInvoice(revenueInvoiceQuery);
       const revenueResult = await Promise.all([
         // Revenue from invoices
-        this.salesInvoicesRepository
-          .createQueryBuilder('invoice')
-          .select([
-            'SUM(COALESCE(invoice.base_amount, invoice.amount)) AS revenue',
-            'SUM(invoice.vat_amount) AS vat',
-          ])
-          .where('invoice.organization_id = :organizationId', {
-            organizationId,
-          })
-          .andWhere('invoice.is_deleted = false')
-          .andWhere('invoice.invoice_date >= :startDate', { startDate })
-          .andWhere('invoice.invoice_date <= :endDate', { endDate })
-          .getRawOne(),
+        revenueInvoiceQuery.getRawOne(),
         // Credit notes (matching P&L logic)
         this.creditNotesRepository
           .createQueryBuilder('creditNote')
@@ -644,11 +672,10 @@ export class ReportsService {
       });
 
       // Batch 6: Receivables summary (2 queries in parallel)
-      const receivablesSummary = await Promise.all([
-        this.salesInvoicesRepository
-          .createQueryBuilder('invoice')
-          .select([
-            `SUM(GREATEST(0, COALESCE(invoice.total_amount, 0) - COALESCE(invoice.paid_amount, 0) - COALESCE((
+      const receivablesInvoiceQuery = this.salesInvoicesRepository
+        .createQueryBuilder('invoice')
+        .select([
+          `SUM(GREATEST(0, COALESCE(invoice.total_amount, 0) - COALESCE(invoice.paid_amount, 0) - COALESCE((
                 SELECT SUM(cna."appliedAmount") 
                 FROM credit_note_applications cna
                 INNER JOIN credit_notes cn ON cna.credit_note_id = cn.id
@@ -668,20 +695,22 @@ export class ReportsService {
                 AND cn.organization_id = invoice.organization_id
                 AND cn.status IN ('${CreditNoteStatus.DRAFT}', '${CreditNoteStatus.ISSUED}', '${CreditNoteStatus.APPLIED}')
               ), 0))) AS total_outstanding`,
-            `COUNT(DISTINCT invoice.id) FILTER (WHERE COALESCE(invoice.paid_amount, 0) = 0) AS unpaid_invoices`,
-            `COUNT(DISTINCT invoice.id) FILTER (WHERE COALESCE(invoice.paid_amount, 0) > 0 AND COALESCE(invoice.paid_amount, 0) < invoice.total_amount) AS partial_invoices`,
-            `COUNT(DISTINCT invoice.id) FILTER (WHERE invoice.due_date < CURRENT_DATE AND COALESCE(invoice.paid_amount, 0) < invoice.total_amount) AS overdue_invoices`,
-          ])
-          .where('invoice.organization_id = :organizationId', {
-            organizationId,
-          })
-          .andWhere('invoice.is_deleted = false')
-          .andWhere('invoice.invoice_date <= :endDate', { endDate })
-          .andWhere('invoice.payment_status IN (:...statuses)', {
-            statuses: [PaymentStatus.UNPAID, PaymentStatus.PARTIAL],
-          })
-          .setParameter('draftStatus', CreditNoteStatus.DRAFT)
-          .getRawOne()
+          `COUNT(DISTINCT invoice.id) FILTER (WHERE COALESCE(invoice.paid_amount, 0) = 0) AS unpaid_invoices`,
+          `COUNT(DISTINCT invoice.id) FILTER (WHERE COALESCE(invoice.paid_amount, 0) > 0 AND COALESCE(invoice.paid_amount, 0) < invoice.total_amount) AS partial_invoices`,
+          `COUNT(DISTINCT invoice.id) FILTER (WHERE invoice.due_date < CURRENT_DATE AND COALESCE(invoice.paid_amount, 0) < invoice.total_amount) AS overdue_invoices`,
+        ])
+        .where('invoice.organization_id = :organizationId', {
+          organizationId,
+        })
+        .andWhere('invoice.is_deleted = false')
+        .andWhere('invoice.invoice_date <= :endDate', { endDate })
+        .andWhere('invoice.payment_status IN (:...statuses)', {
+          statuses: [PaymentStatus.UNPAID, PaymentStatus.PARTIAL],
+        })
+        .setParameter('draftStatus', CreditNoteStatus.DRAFT);
+      this.excludeProformaInvoice(receivablesInvoiceQuery);
+      const receivablesSummary = await Promise.all([
+        receivablesInvoiceQuery.getRawOne()
           .then((row) => {
             return {
               invoiceOutstanding: Number(row?.total_outstanding || 0),
@@ -1437,6 +1466,7 @@ export class ReportsService {
         .andWhere('invoice.invoice_date >= :startDate', { startDate })
         .andWhere('invoice.invoice_date <= :endDate', { endDate });
 
+      this.excludeProformaInvoice(revenueQuery);
       if (filters?.['status']) {
         const statuses = Array.isArray(filters.status)
           ? filters.status
@@ -1907,6 +1937,7 @@ export class ReportsService {
         })
         .setParameter('organizationId', organizationId)
         .setParameter('endDate', endDate);
+      this.excludeProformaInvoice(receivablesAtEndQuery);
 
       const receivablesAtStartQuery = this.salesInvoicesRepository
         .createQueryBuilder('invoice')
@@ -1920,6 +1951,7 @@ export class ReportsService {
         })
         .setParameter('organizationId', organizationId)
         .setParameter('startDate', startDate);
+      this.excludeProformaInvoice(receivablesAtStartQuery);
 
       // Customer debit notes (for accounts receivable in Trial Balance)
       // Only include debit notes linked to invoices, not expenses
@@ -1995,6 +2027,7 @@ export class ReportsService {
         .andWhere('invoice.is_deleted = false')
         .andWhere('invoice.invoice_date >= :startDate', { startDate })
         .andWhere('invoice.invoice_date <= :endDate', { endDate });
+      this.excludeProformaInvoice(invoicesTotalPeriodQuery);
 
       const customerDebitNotesPeriodQuery = this.debitNotesRepository
         .createQueryBuilder('debitNote')
@@ -2134,7 +2167,7 @@ export class ReportsService {
         .andWhere('invoice.invoice_date >= :startDate', { startDate })
         .andWhere('invoice.invoice_date <= :endDate', { endDate })
         .andWhere('invoice.vat_amount > 0');
-
+      this.excludeProformaInvoice(vatPayableQuery);
       if (filters?.['status']) {
         const statuses = Array.isArray(filters.status)
           ? filters.status
@@ -2225,6 +2258,7 @@ export class ReportsService {
         ])
         .where('payment.organization_id = :organizationId', { organizationId })
         .andWhere('payment.payment_date < :startDate', { startDate });
+      this.excludeProformaFromInvoicePaymentQuery(openingInvoicePaymentsQuery);
 
       // Query journal entries for Cash separately (opening)
       const openingCashJournalEntriesQuery = this.journalEntriesRepository
@@ -2276,6 +2310,7 @@ export class ReportsService {
         .where('payment.organization_id = :organizationId', { organizationId })
         .andWhere('payment.payment_date >= :startDate', { startDate })
         .andWhere('payment.payment_date <= :endDate', { endDate });
+      this.excludeProformaFromInvoicePaymentQuery(periodInvoicePaymentsQuery);
 
       // Query journal entries for Cash separately (period)
       const periodCashJournalEntriesQuery = this.journalEntriesRepository
@@ -3017,7 +3052,7 @@ export class ReportsService {
         ])
         .where('invoice.organization_id = :organizationId', { organizationId })
         .andWhere('invoice.invoice_date < :startDate', { startDate });
-
+      this.excludeProformaInvoice(openingRevenueQuery);
       if (filters?.['status']) {
         const statuses = Array.isArray(filters.status)
           ? filters.status
@@ -3166,6 +3201,7 @@ export class ReportsService {
           statuses: [PaymentStatus.UNPAID, PaymentStatus.PARTIAL],
         })
         .setParameter('organizationId', organizationId);
+      this.excludeProformaInvoice(openingReceivablesQuery);
 
       const openingReceivablesRow = await openingReceivablesQuery.getRawOne();
       const openingReceivablesDebit = Number(
@@ -3268,7 +3304,7 @@ export class ReportsService {
         .where('invoice.organization_id = :organizationId', { organizationId })
         .andWhere('invoice.invoice_date < :startDate', { startDate })
         .andWhere('invoice.vat_amount > 0');
-
+      this.excludeProformaInvoice(openingVatPayableQuery);
       if (filters?.['status']) {
         const statuses = Array.isArray(filters.status)
           ? filters.status
@@ -3780,6 +3816,7 @@ export class ReportsService {
           statuses: [PaymentStatus.UNPAID, PaymentStatus.PARTIAL],
         })
         .setParameter('organizationId', organizationId);
+      this.excludeProformaInvoice(receivablesQuery);
 
       // Customer debit notes (for accounts receivable in Balance Sheet)
       // Only include debit notes linked to invoices, not expenses
@@ -3830,6 +3867,7 @@ export class ReportsService {
         .andWhere('payment.is_deleted = false')
         .andWhere('payment.deleted_at IS NULL')
         .andWhere('payment.payment_date <= :asOfDate', { asOfDate });
+      this.excludeProformaFromInvoicePaymentQuery(invoicePaymentsQuery);
 
       const expensePaymentsQuery = this.expensePaymentsRepository
         .createQueryBuilder('payment')
@@ -4181,7 +4219,7 @@ export class ReportsService {
         .where('invoice.organization_id = :organizationId', { organizationId })
         .andWhere('invoice.invoice_date <= :asOfDate', { asOfDate })
         .andWhere('invoice.vat_amount > 0');
-
+      this.excludeProformaInvoice(vatPayableQuery);
       if (filters?.['status']) {
         const statuses = Array.isArray(filters.status)
           ? filters.status
@@ -4256,6 +4294,7 @@ export class ReportsService {
         ])
         .where('invoice.organization_id = :organizationId', { organizationId })
         .andWhere('invoice.invoice_date <= :asOfDate', { asOfDate });
+      this.excludeProformaInvoice(revenueQuery);
 
       // Include credit notes that have applications, even if in DRAFT status
       const balanceSheetCreditNotesWithApplicationsSubquery =
@@ -4753,6 +4792,7 @@ export class ReportsService {
           statuses: [PaymentStatus.UNPAID, PaymentStatus.PARTIAL],
         })
         .setParameter('organizationId', organizationId);
+      this.excludeProformaInvoice(openingReceivablesQuery);
 
       // Opening customer debit notes (for accounts receivable in Balance Sheet)
       // Only include debit notes linked to invoices, not expenses
@@ -4777,6 +4817,7 @@ export class ReportsService {
         ])
         .where('payment.organization_id = :organizationId', { organizationId })
         .andWhere('payment.payment_date < :startDate', { startDate });
+      this.excludeProformaFromInvoicePaymentQuery(openingCashQuery);
 
       const openingExpensePaymentsQuery = this.expensePaymentsRepository
         .createQueryBuilder('payment')
@@ -4840,6 +4881,7 @@ export class ReportsService {
         .where('invoice.organization_id = :organizationId', { organizationId })
         .andWhere('invoice.invoice_date < :startDate', { startDate })
         .andWhere('invoice.vat_amount > 0');
+      this.excludeProformaInvoice(openingVatPayableQuery);
 
       const openingRevenueQuery = this.salesInvoicesRepository
         .createQueryBuilder('invoice')
@@ -4848,6 +4890,7 @@ export class ReportsService {
         ])
         .where('invoice.organization_id = :organizationId', { organizationId })
         .andWhere('invoice.invoice_date < :startDate', { startDate });
+      this.excludeProformaInvoice(openingRevenueQuery);
 
       // Include opening credit notes that have applications, even if in DRAFT status
       const pnlOpeningCreditNotesWithApplicationsSubquery =
@@ -5573,7 +5616,7 @@ export class ReportsService {
       .andWhere('invoice.is_deleted = false')
       .andWhere('invoice.invoice_date >= :startDate', { startDate })
       .andWhere('invoice.invoice_date <= :endDate', { endDate });
-
+    this.excludeProformaInvoice(revenueQuery);
     if (filters?.['status']) {
       const statuses = Array.isArray(filters.status)
         ? filters.status
@@ -6020,6 +6063,7 @@ export class ReportsService {
       .where('invoice.organization_id = :organizationId', { organizationId })
       .andWhere('invoice.is_deleted = false')
       .andWhere('invoice.invoice_date < :startDate', { startDate });
+    this.excludeProformaInvoice(openingRevenueQuery);
 
     const openingExpensesQuery = this.expensesRepository
       .createQueryBuilder('expense')
@@ -6612,6 +6656,7 @@ export class ReportsService {
       ])
       .where('invoice.organization_id = :organizationId', { organizationId })
       .setParameter('organizationId', organizationId);
+    this.excludeProformaInvoice(query);
 
     if (filters?.['paymentStatus']) {
       const statuses = Array.isArray(filters.paymentStatus)
@@ -6936,6 +6981,7 @@ export class ReportsService {
           statuses: [PaymentStatus.UNPAID, PaymentStatus.PARTIAL],
         })
         .setParameter('organizationId', organizationId);
+      this.excludeProformaInvoice(openingInvoicesQueryWithCN);
 
       if (filters?.['paymentStatus']) {
         const statuses = Array.isArray(filters.paymentStatus)
@@ -6994,6 +7040,7 @@ export class ReportsService {
           statuses: [PaymentStatus.UNPAID, PaymentStatus.PARTIAL],
         })
         .setParameter('organizationId', organizationId);
+      this.excludeProformaInvoice(periodInvoicesQuery);
 
       if (filters?.['paymentStatus']) {
         const statuses = Array.isArray(filters.paymentStatus)
@@ -7150,6 +7197,7 @@ export class ReportsService {
       .andWhere('invoice.invoice_date <= :endDate', { endDate })
       .andWhere('CAST(invoice.vat_amount AS DECIMAL) > 0')
       .orderBy('invoice.created_at', 'DESC');
+    this.excludeProformaInvoice(vatOutputQuery);
 
     // Include DRAFT credit notes that are linked to invoices
     // DRAFT credit notes represent returns/refunds and should reduce output VAT immediately
@@ -8408,7 +8456,7 @@ export class ReportsService {
           account.code === JournalEntryAccount.CASH ||
           account.code === JournalEntryAccount.BANK
         ) {
-          const invoicePayments = await this.invoicePaymentsRepository
+          const cashBankInvoicePaymentsQuery = this.invoicePaymentsRepository
             .createQueryBuilder('payment')
             .leftJoin('payment.invoice', 'invoice')
             .where('payment.organization_id = :organizationId', {
@@ -8422,8 +8470,11 @@ export class ReportsService {
                 : "payment.payment_method = 'bank_transfer'",
             )
             .orderBy('payment.payment_date', 'ASC')
-            .addOrderBy('payment.created_at', 'ASC')
-            .getMany();
+            .addOrderBy('payment.created_at', 'ASC');
+          cashBankInvoicePaymentsQuery.andWhere('invoice.status != :proformaStatus', {
+            proformaStatus: InvoiceStatus.PROFORMA_INVOICE,
+          });
+          const invoicePayments = await cashBankInvoicePaymentsQuery.getMany();
 
           invoicePayments.forEach((payment) => {
             transactions.push({
@@ -8447,7 +8498,7 @@ export class ReportsService {
 
         // 5. Sales Revenue: Invoices in period
         if (account.code === JournalEntryAccount.SALES_REVENUE) {
-          const invoices = await this.salesInvoicesRepository
+          const salesRevenueQuery = this.salesInvoicesRepository
             .createQueryBuilder('invoice')
             .where('invoice.organization_id = :organizationId', {
               organizationId,
@@ -8455,8 +8506,9 @@ export class ReportsService {
             .andWhere('invoice.is_deleted = false')
             .andWhere('invoice.invoice_date >= :startDate', { startDate })
             .andWhere('invoice.invoice_date <= :endDate', { endDate })
-            .orderBy('invoice.invoice_date', 'ASC')
-            .getMany();
+            .orderBy('invoice.invoice_date', 'ASC');
+          this.excludeProformaInvoice(salesRevenueQuery);
+          const invoices = await salesRevenueQuery.getMany();
 
           invoices.forEach((invoice) => {
             transactions.push({
@@ -8476,7 +8528,7 @@ export class ReportsService {
         // 6. Accounts Receivable: Invoices, credit notes, and applications
         if (account.code === JournalEntryAccount.ACCOUNTS_RECEIVABLE) {
           // Invoices in period (unpaid portion)
-          const invoices = await this.salesInvoicesRepository
+          const arInvoicesQuery = this.salesInvoicesRepository
             .createQueryBuilder('invoice')
             .where('invoice.organization_id = :organizationId', {
               organizationId,
@@ -8484,8 +8536,9 @@ export class ReportsService {
             .andWhere('invoice.is_deleted = false')
             .andWhere('invoice.invoice_date >= :startDate', { startDate })
             .andWhere('invoice.invoice_date <= :endDate', { endDate })
-            .orderBy('invoice.invoice_date', 'ASC')
-            .getMany();
+            .orderBy('invoice.invoice_date', 'ASC');
+          this.excludeProformaInvoice(arInvoicesQuery);
+          const invoices = await arInvoicesQuery.getMany();
 
           for (const invoice of invoices) {
             const totalAmount =
@@ -8609,7 +8662,7 @@ export class ReportsService {
           });
 
           // Invoice payments (reduces AR)
-          const invoicePayments = await this.invoicePaymentsRepository
+          const arInvoicePaymentsQuery = this.invoicePaymentsRepository
             .createQueryBuilder('payment')
             .leftJoin('payment.invoice', 'invoice')
             .where('payment.organization_id = :organizationId', {
@@ -8617,8 +8670,11 @@ export class ReportsService {
             })
             .andWhere('payment.payment_date >= :startDate', { startDate })
             .andWhere('payment.payment_date <= :endDate', { endDate })
-            .orderBy('payment.payment_date', 'ASC')
-            .getMany();
+            .orderBy('payment.payment_date', 'ASC');
+          arInvoicePaymentsQuery.andWhere('invoice.status != :proformaStatus', {
+            proformaStatus: InvoiceStatus.PROFORMA_INVOICE,
+          });
+          const invoicePayments = await arInvoicePaymentsQuery.getMany();
 
           invoicePayments.forEach((payment) => {
             transactions.push({
@@ -8737,7 +8793,7 @@ export class ReportsService {
         // 9. VAT Payable: Invoice VAT amounts + Credit Note VAT reductions
         if (account.code === JournalEntryAccount.VAT_PAYABLE) {
           // Invoice VAT
-          const invoices = await this.salesInvoicesRepository
+          const vatPayableInvoicesQuery = this.salesInvoicesRepository
             .createQueryBuilder('invoice')
             .where('invoice.organization_id = :organizationId', {
               organizationId,
@@ -8746,8 +8802,9 @@ export class ReportsService {
             .andWhere('invoice.invoice_date >= :startDate', { startDate })
             .andWhere('invoice.invoice_date <= :endDate', { endDate })
             .andWhere('invoice.vat_amount > 0')
-            .orderBy('invoice.invoice_date', 'ASC')
-            .getMany();
+            .orderBy('invoice.invoice_date', 'ASC');
+          this.excludeProformaInvoice(vatPayableInvoicesQuery);
+          const invoices = await vatPayableInvoicesQuery.getMany();
 
           invoices.forEach((invoice) => {
             transactions.push({
@@ -8868,7 +8925,7 @@ export class ReportsService {
             .andWhere('payment.payment_date < :startDate', { startDate })
             .getRawOne();
 
-          const openingInvoicePayments = await this.invoicePaymentsRepository
+          const openingInvoicePaymentsCashQuery = this.invoicePaymentsRepository
             .createQueryBuilder('payment')
             .select([
               "SUM(CASE WHEN payment.payment_method = 'cash' THEN COALESCE(payment.amount, 0) ELSE 0 END) AS cashReceipts",
@@ -8876,8 +8933,9 @@ export class ReportsService {
             .where('payment.organization_id = :organizationId', {
               organizationId,
             })
-            .andWhere('payment.payment_date < :startDate', { startDate })
-            .getRawOne();
+            .andWhere('payment.payment_date < :startDate', { startDate });
+          this.excludeProformaFromInvoicePaymentQuery(openingInvoicePaymentsCashQuery);
+          const openingInvoicePayments = await openingInvoicePaymentsCashQuery.getRawOne();
 
           const openingCashReceipts = Number(
             openingInvoicePayments?.cashreceipts ||
@@ -8916,7 +8974,7 @@ export class ReportsService {
             .andWhere('payment.payment_date < :startDate', { startDate })
             .getRawOne();
 
-          const openingInvoicePayments = await this.invoicePaymentsRepository
+          const openingInvoicePaymentsBankQuery = this.invoicePaymentsRepository
             .createQueryBuilder('payment')
             .select([
               "SUM(CASE WHEN payment.payment_method = 'bank_transfer' THEN COALESCE(payment.amount, 0) ELSE 0 END) AS bankReceipts",
@@ -8924,8 +8982,9 @@ export class ReportsService {
             .where('payment.organization_id = :organizationId', {
               organizationId,
             })
-            .andWhere('payment.payment_date < :startDate', { startDate })
-            .getRawOne();
+            .andWhere('payment.payment_date < :startDate', { startDate });
+          this.excludeProformaFromInvoicePaymentQuery(openingInvoicePaymentsBankQuery);
+          const openingInvoicePayments = await openingInvoicePaymentsBankQuery.getRawOne();
 
           const openingBankReceipts = Number(
             openingInvoicePayments?.bankreceipts ||
@@ -9057,6 +9116,7 @@ export class ReportsService {
             })
             .setParameter('organizationId', organizationId)
             .setParameter('startDate', startDate);
+          this.excludeProformaInvoice(receivablesAtStartQuery);
 
           const debitNotesAtStartQuery = this.debitNotesRepository
             .createQueryBuilder('debitNote')
@@ -9166,7 +9226,7 @@ export class ReportsService {
         }
         // VAT Payable: Opening invoice VAT - credit note VAT
         else if (account.code === JournalEntryAccount.VAT_PAYABLE) {
-          const openingInvoiceVat = await this.salesInvoicesRepository
+          const openingInvoiceVatQuery = this.salesInvoicesRepository
             .createQueryBuilder('invoice')
             .select(['SUM(COALESCE(invoice.vat_amount, 0)) AS vat'])
             .where('invoice.organization_id = :organizationId', {
@@ -9174,8 +9234,9 @@ export class ReportsService {
             })
             .andWhere('invoice.is_deleted = false')
             .andWhere('invoice.invoice_date < :startDate', { startDate })
-            .andWhere('invoice.vat_amount > 0')
-            .getRawOne();
+            .andWhere('invoice.vat_amount > 0');
+          this.excludeProformaInvoice(openingInvoiceVatQuery);
+          const openingInvoiceVat = await openingInvoiceVatQuery.getRawOne();
 
           const openingCreditNoteVat = await this.creditNotesRepository
             .createQueryBuilder('cn')
@@ -9203,15 +9264,16 @@ export class ReportsService {
         }
         // Sales Revenue: Opening invoices
         else if (account.code === JournalEntryAccount.SALES_REVENUE) {
-          const openingInvoices = await this.salesInvoicesRepository
+          const openingInvoicesQuery = this.salesInvoicesRepository
             .createQueryBuilder('invoice')
             .select(['SUM(COALESCE(invoice.amount, 0)) AS revenue'])
             .where('invoice.organization_id = :organizationId', {
               organizationId,
             })
             .andWhere('invoice.is_deleted = false')
-            .andWhere('invoice.invoice_date < :startDate', { startDate })
-            .getRawOne();
+            .andWhere('invoice.invoice_date < :startDate', { startDate });
+          this.excludeProformaInvoice(openingInvoicesQuery);
+          const openingInvoices = await openingInvoicesQuery.getRawOne();
 
           openingCredit = parseFloat(openingInvoices?.revenue || '0');
           openingBalance = openingCredit - openingDebit;
@@ -9635,7 +9697,7 @@ export class ReportsService {
       // Handle Sales Revenue
       else if (accountName === 'Sales Revenue' && accountType === 'Revenue') {
         // Get invoices
-        const invoices = await this.salesInvoicesRepository
+        const salesRevenueInvoicesQuery = this.salesInvoicesRepository
           .createQueryBuilder('invoice')
           .where('invoice.organization_id = :organizationId', {
             organizationId,
@@ -9643,8 +9705,9 @@ export class ReportsService {
           .andWhere('invoice.invoice_date >= :startDate', { startDate })
           .andWhere('invoice.invoice_date <= :endDate', { endDate })
           .orderBy('invoice.invoice_date', 'ASC')
-          .addOrderBy('invoice.created_at', 'ASC')
-          .getMany();
+          .addOrderBy('invoice.created_at', 'ASC');
+        this.excludeProformaInvoice(salesRevenueInvoicesQuery);
+        const invoices = await salesRevenueInvoicesQuery.getMany();
 
         invoices.forEach((invoice) => {
           entries.push({
@@ -10021,7 +10084,7 @@ export class ReportsService {
         // Get unpaid/partial invoices up to end date
         // Note: Accounts Receivable closing balance includes ALL unpaid invoices up to endDate
         // This matches the trial balance calculation which shows closing balance
-        const invoices = await this.salesInvoicesRepository
+        const arInvoicesQuery = this.salesInvoicesRepository
           .createQueryBuilder('invoice')
           .where('invoice.organization_id = :organizationId', {
             organizationId,
@@ -10031,8 +10094,9 @@ export class ReportsService {
             statuses: [PaymentStatus.UNPAID, PaymentStatus.PARTIAL],
           })
           .orderBy('invoice.invoice_date', 'ASC')
-          .addOrderBy('invoice.created_at', 'ASC')
-          .getMany();
+          .addOrderBy('invoice.created_at', 'ASC');
+        this.excludeProformaInvoice(arInvoicesQuery);
+        const invoices = await arInvoicesQuery.getMany();
 
         invoices.forEach((invoice) => {
           // Use totalAmount (includes VAT) to match trial balance calculation
@@ -10194,7 +10258,7 @@ export class ReportsService {
         });
 
         // Get invoice payments
-        const invoicePayments = await this.invoicePaymentsRepository
+        const accountEntriesInvoicePaymentsQuery = this.invoicePaymentsRepository
           .createQueryBuilder('payment')
           .leftJoinAndSelect('payment.invoice', 'invoice')
           .where('payment.organization_id = :organizationId', {
@@ -10210,8 +10274,11 @@ export class ReportsService {
                 : PaymentMethod.BANK_TRANSFER,
           })
           .orderBy('payment.payment_date', 'ASC')
-          .addOrderBy('payment.created_at', 'ASC')
-          .getMany();
+          .addOrderBy('payment.created_at', 'ASC');
+        accountEntriesInvoicePaymentsQuery.andWhere('invoice.status != :proformaStatus', {
+          proformaStatus: InvoiceStatus.PROFORMA_INVOICE,
+        });
+        const invoicePayments = await accountEntriesInvoicePaymentsQuery.getMany();
 
         invoicePayments.forEach((payment) => {
           entries.push({
@@ -10370,7 +10437,7 @@ export class ReportsService {
           // VAT Payable (Output VAT) - from invoices, credit notes, customer debit notes, and journal entries
           
           // Get VAT from invoices (output VAT)
-          const invoices = await this.salesInvoicesRepository
+          const vatPayableInvoicesQuery = this.salesInvoicesRepository
             .createQueryBuilder('invoice')
             .where('invoice.organization_id = :organizationId', {
               organizationId,
@@ -10379,8 +10446,9 @@ export class ReportsService {
             .andWhere('invoice.invoice_date <= :endDate', { endDate })
             .andWhere('invoice.vat_amount > 0')
             .orderBy('invoice.invoice_date', 'ASC')
-            .addOrderBy('invoice.created_at', 'ASC')
-            .getMany();
+            .addOrderBy('invoice.created_at', 'ASC');
+          this.excludeProformaInvoice(vatPayableInvoicesQuery);
+          const invoices = await vatPayableInvoicesQuery.getMany();
 
           invoices.forEach((invoice) => {
             const vatAmount = Number(invoice.vatAmount || 0);

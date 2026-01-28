@@ -7574,7 +7574,8 @@ export class ReportGeneratorService {
 
         const pageWidth = doc.page.width;
         const margin = 56; // Increased from 50 to match premium preview
-        const contentWidth = pageWidth - 2 * margin;
+        const rightMarginExtra = 24; // Extra space on right so invoice isn't flush to edge
+        const contentWidth = pageWidth - 2 * margin - rightMarginExtra;
 
         // Get template settings from metadata
         // For proforma invoices, always use "PROFORMA INVOICE" as title
@@ -7772,7 +7773,7 @@ export class ReportGeneratorService {
         doc.strokeColor(colors.border).lineWidth(2);
         doc
           .moveTo(margin, currentY)
-          .lineTo(pageWidth - margin, currentY)
+          .lineTo(margin + contentWidth, currentY)
           .stroke();
 
         // Accent line below separator
@@ -7811,23 +7812,6 @@ export class ReportGeneratorService {
           const orgEmail = organization?.contactEmail || metadata.email || '';
           if (orgEmail) {
             tempY += 14;
-          }
-
-          // Bank Details
-          if (
-            templateSettings.showBankDetails &&
-            organization &&
-            (organization.bankAccountNumber ||
-              organization.bankIban ||
-              organization.bankName ||
-              organization.bankAccountHolder)
-          ) {
-            if (organization.bankAccountHolder) tempY += 14;
-            if (organization.bankName) tempY += 14;
-            if (organization.bankAccountNumber) tempY += 14;
-            if (organization.bankIban) tempY += 14;
-            if (organization.bankBranch) tempY += 14;
-            if (organization.bankSwiftCode) tempY += 14;
           }
 
           if (templateSettings.showVatDetails) {
@@ -7885,57 +7869,6 @@ export class ReportGeneratorService {
             currentY += 14;
           }
 
-          // Bank Details - Display inline with company info - use dark text color
-          if (
-            templateSettings.showBankDetails &&
-            organization &&
-            (organization.bankAccountNumber ||
-              organization.bankIban ||
-              organization.bankName ||
-              organization.bankAccountHolder)
-          ) {
-            if (organization.bankAccountHolder) {
-              doc.text(
-                `Account Holder: ${organization.bankAccountHolder}`,
-                margin + 20,
-                currentY,
-              );
-              currentY += 14;
-            }
-            if (organization.bankName) {
-              doc.text(`Bank: ${organization.bankName}`, margin + 20, currentY);
-              currentY += 14;
-            }
-            if (organization.bankAccountNumber) {
-              doc.text(
-                `Account Number: ${organization.bankAccountNumber}`,
-                margin + 20,
-                currentY,
-              );
-              currentY += 14;
-            }
-            if (organization.bankIban) {
-              doc.text(`IBAN: ${organization.bankIban}`, margin + 20, currentY);
-              currentY += 14;
-            }
-            if (organization.bankBranch) {
-              doc.text(
-                `Branch: ${organization.bankBranch}`,
-                margin + 20,
-                currentY,
-              );
-              currentY += 14;
-            }
-            if (organization.bankSwiftCode) {
-              doc.text(
-                `SWIFT Code: ${organization.bankSwiftCode}`,
-                margin + 20,
-                currentY,
-              );
-              currentY += 14;
-            }
-          }
-
           if (templateSettings.showVatDetails) {
             const orgTrn = organization?.vatNumber || metadata.vatNumber || '';
             if (orgTrn) {
@@ -7958,63 +7891,63 @@ export class ReportGeneratorService {
         let maxBillToY = boxY + 16;
 
         // Calculate content height first to determine box size
-        // Left side - Invoice details
+        // Left side - Bill To section
         const leftColX = margin + 20;
-        const leftLabelWidth = 120;
-        let detailY = boxY + 16;
-
-        // Calculate heights for invoice details
-        detailY += 16; // Invoice Number
-        maxDetailY = Math.max(maxDetailY, detailY);
-        detailY += 16; // Invoice Date
-        maxDetailY = Math.max(maxDetailY, detailY);
-        
-        if (invoice.dueDate) {
-          detailY += 16; // Due Date
-          maxDetailY = Math.max(maxDetailY, detailY);
-        }
-        
-        if (templateSettings.showPaymentTerms) {
-          detailY += 16; // Payment Terms
-          maxDetailY = Math.max(maxDetailY, detailY);
-        }
-
-        // Right side - Bill To section
-        const rightColX = margin + contentWidth / 2 + 32;
-        const separatorX = margin + contentWidth / 2;
+        const leftColWidth = contentWidth / 2 - 20;
         let billToY = boxY + 16;
 
+        // Right side - Invoice details
+        const rightColX = margin + contentWidth / 2 + 32;
+        const rightColWidth = contentWidth / 2 - 32;
+        const separatorX = margin + contentWidth / 2;
+        let detailY = boxY + 16;
+
+        // Calculate heights for Bill To (left)
         billToY += 16; // "BILL TO:" label
         maxBillToY = Math.max(maxBillToY, billToY);
 
         const customerName = customer?.name || invoice.customerName || '';
         if (customerName) {
-          billToY += 18; // Customer name
+          billToY += 18;
           maxBillToY = Math.max(maxBillToY, billToY);
         }
 
         const customerAddress = customer?.address || '';
         if (customerAddress) {
-          billToY += 18; // Customer address
+          billToY += 18;
           maxBillToY = Math.max(maxBillToY, billToY);
         }
 
         const customerPhone = customer?.phone || '';
         if (customerPhone) {
-          billToY += 18; // Customer phone
+          billToY += 18;
           maxBillToY = Math.max(maxBillToY, billToY);
         }
 
         const customerEmail = customer?.email || '';
         if (customerEmail) {
-          billToY += 18; // Customer email
+          billToY += 18;
           maxBillToY = Math.max(maxBillToY, billToY);
         }
 
         const customerTrn = customer?.customerTrn || invoice.customerTrn || '';
         if (customerTrn && templateSettings.showVatDetails) {
-          billToY += 18; // Customer TRN
+          billToY += 18;
           maxBillToY = Math.max(maxBillToY, billToY);
+        }
+
+        // Calculate heights for Invoice details (right)
+        detailY += 16; // Invoice Number
+        maxDetailY = Math.max(maxDetailY, detailY);
+        detailY += 16; // Invoice Date
+        maxDetailY = Math.max(maxDetailY, detailY);
+        if (invoice.dueDate) {
+          detailY += 16;
+          maxDetailY = Math.max(maxDetailY, detailY);
+        }
+        if (templateSettings.showPaymentTerms) {
+          detailY += 16;
+          maxDetailY = Math.max(maxDetailY, detailY);
         }
 
         // Calculate dynamic box height based on content
@@ -8039,98 +7972,91 @@ export class ReportGeneratorService {
           .stroke();
 
         // Now write the text content on top of the box
-        detailY = boxY + 16;
-
-        // Left side - Invoice details - standardize to 10px - use dark text color
-        doc.fontSize(10).font('Helvetica-Bold').fillColor(colors.text);
-        doc.text('INVOICE NUMBER:', leftColX, detailY);
-        doc.font('Helvetica-Bold').fillColor(colors.text);
-        doc.text(
-          invoice.invoiceNumber || '',
-          leftColX + leftLabelWidth,
-          detailY,
-        );
-        detailY += 16;
-
-        doc.fontSize(10).font('Helvetica-Bold').fillColor(colors.text);
-        doc.text('INVOICE DATE:', leftColX, detailY);
-        doc.font('Helvetica-Bold').fillColor(colors.text);
-        doc.text(
-          this.formatDateForInvoice(invoice.invoiceDate || ''),
-          leftColX + leftLabelWidth,
-          detailY,
-        );
-        detailY += 16;
-
-        // Due Date
-        if (invoice.dueDate) {
-          doc.fontSize(10).font('Helvetica-Bold').fillColor(colors.text);
-          doc.text('DUE DATE:', leftColX, detailY);
-          doc.font('Helvetica-Bold').fillColor(colors.text);
-          doc.text(
-            this.formatDateForInvoice(invoice.dueDate),
-            leftColX + leftLabelWidth,
-            detailY,
-          );
-          detailY += 16;
-        }
-
-        // Payment Terms
-        if (templateSettings.showPaymentTerms) {
-          const paymentTerms =
-            templateSettings.paymentTerms ||
-            (customer?.paymentTerms
-              ? `Net ${customer.paymentTerms}`
-              : 'Net 30');
-          doc.fontSize(10).font('Helvetica-Bold').fillColor(colors.text);
-          doc.text('PAYMENT TERMS:', leftColX, detailY);
-          doc.font('Helvetica-Bold').fillColor(colors.text);
-          doc.text(paymentTerms, leftColX + leftLabelWidth, detailY);
-        }
-
-        // Right side - Bill To section
         billToY = boxY + 16;
 
-        doc.fontSize(10).font('Helvetica-Bold').fillColor(colors.text); // Use dark text color
-        doc.text('BILL TO:', rightColX, billToY);
+        // Left side - Bill To section
+        doc.fontSize(10).font('Helvetica-Bold').fillColor(colors.text);
+        doc.text('BILL TO:', leftColX, billToY);
         billToY += 16;
 
         if (customerName) {
-          // Standardize font size to 10px - use dark text color
           doc.fontSize(10).font('Helvetica-Bold').fillColor(colors.text);
-          doc.text(customerName, rightColX, billToY, {
-            width: contentWidth / 2 - 20,
+          doc.text(customerName, leftColX, billToY, {
+            width: leftColWidth,
           });
           billToY += 14;
         }
 
         if (customerAddress) {
-          // Standardize font size to 10px - use dark text color
           doc.fontSize(10).font('Helvetica').fillColor(colors.text);
-          doc.text(customerAddress, rightColX, billToY, {
-            width: contentWidth / 2 - 20,
+          doc.text(customerAddress, leftColX, billToY, {
+            width: leftColWidth,
           });
           billToY += 14;
         }
 
         if (customerPhone) {
           doc.fontSize(10).font('Helvetica').fillColor(colors.text);
-          doc.text(`Phone: ${customerPhone}`, rightColX, billToY);
+          doc.text(`Phone: ${customerPhone}`, leftColX, billToY);
           billToY += 14;
         }
 
         if (customerEmail) {
           doc.fontSize(10).font('Helvetica').fillColor(colors.text);
-          doc.text(`Email: ${customerEmail}`, rightColX, billToY);
+          doc.text(`Email: ${customerEmail}`, leftColX, billToY);
           billToY += 14;
         }
 
         if (customerTrn && templateSettings.showVatDetails) {
           doc.fontSize(10).font('Helvetica').fillColor(colors.text);
-          doc.text(`TRN: ${customerTrn}`, rightColX, billToY);
+          doc.text(`TRN: ${customerTrn}`, leftColX, billToY);
         }
 
-        currentY = boxY + boxHeight + 32;
+        // Right side - Invoice details (right-aligned)
+        // Use heightOfString so wrapped lines don't overlap; advance by actual height + gap
+        detailY = boxY + 16;
+        const detailOpts = { width: rightColWidth, align: 'right' as const };
+        const lineGap = 4;
+
+        const invoiceNumberLabel =
+          invoice.status?.toLowerCase() === 'proforma_invoice'
+            ? 'PROFORMA INVOICE NUMBER'
+            : 'INVOICE NUMBER';
+        const invoiceNumberStr = `${invoiceNumberLabel}: ${invoice.invoiceNumber || ''}`;
+        doc.fontSize(10).font('Helvetica-Bold').fillColor(colors.text);
+        doc.text(invoiceNumberStr, rightColX, detailY, detailOpts);
+        detailY += doc.heightOfString(invoiceNumberStr, detailOpts) + lineGap;
+
+        const invoiceDateLabel =
+          invoice.status?.toLowerCase() === 'proforma_invoice'
+            ? 'PROFORMA INVOICE DATE'
+            : 'INVOICE DATE';
+        const invoiceDateStr = `${invoiceDateLabel}: ${this.formatDateForInvoice(invoice.invoiceDate || '')}`;
+        doc.fontSize(10).font('Helvetica-Bold').fillColor(colors.text);
+        doc.text(invoiceDateStr, rightColX, detailY, detailOpts);
+        detailY += doc.heightOfString(invoiceDateStr, detailOpts) + lineGap;
+
+        if (invoice.dueDate) {
+          const dueDateStr = `DUE DATE: ${this.formatDateForInvoice(invoice.dueDate)}`;
+          doc.fontSize(10).font('Helvetica-Bold').fillColor(colors.text);
+          doc.text(dueDateStr, rightColX, detailY, detailOpts);
+          detailY += doc.heightOfString(dueDateStr, detailOpts) + lineGap;
+        }
+
+        if (templateSettings.showPaymentTerms) {
+          const paymentTerms =
+            templateSettings.paymentTerms ||
+            (customer?.paymentTerms
+              ? `Net ${customer.paymentTerms}`
+              : 'Net 30');
+          const paymentTermsStr = `PAYMENT TERMS: ${paymentTerms}`;
+          doc.fontSize(10).font('Helvetica-Bold').fillColor(colors.text);
+          doc.text(paymentTermsStr, rightColX, detailY, detailOpts);
+          detailY += doc.heightOfString(paymentTermsStr, detailOpts) + lineGap;
+        }
+
+        // Position next section below the invoice-details content (may extend past box if wrapped)
+        currentY = Math.max(detailY + 20, boxY + boxHeight + 32);
 
         // ============================================================================
         // LINE ITEMS TABLE - Clean modern design matching preview
@@ -8307,7 +8233,7 @@ export class ReportGeneratorService {
         // ============================================================================
         // TOTALS SECTION - Premium design matching preview
         // ============================================================================
-        const totalsX = pageWidth - margin - 250;
+        const totalsX = margin + contentWidth - 250;
         const totalVat = parseFloat(invoice.vatAmount || '0');
         const subtotal = parseFloat(invoice.amount || '0');
         const totalAmount = parseFloat(invoice.totalAmount || '0');
@@ -8378,6 +8304,69 @@ export class ReportGeneratorService {
         );
 
         currentY = totalsBoxY + totalsBoxHeight + 30;
+
+        // ============================================================================
+        // BANK DETAILS - Own section below totals, before notes
+        // ============================================================================
+        if (
+          templateSettings.showBankDetails &&
+          organization &&
+          (organization.bankAccountNumber ||
+            organization.bankIban ||
+            organization.bankName ||
+            organization.bankAccountHolder)
+        ) {
+          if (currentY > doc.page.height - 200) {
+            doc.addPage();
+            currentY = margin + 40;
+          }
+          currentY += 20;
+          doc.fontSize(10).font('Helvetica-Bold').fillColor(colors.text);
+          doc.text('Bank Details:', margin, currentY);
+          currentY += 16;
+          doc.fontSize(10).font('Helvetica').fillColor(colors.text);
+          if (organization.bankAccountHolder) {
+            doc.text(
+              `Account Holder: ${organization.bankAccountHolder}`,
+              margin,
+              currentY,
+            );
+            currentY += 14;
+          }
+          if (organization.bankName) {
+            doc.text(`Bank: ${organization.bankName}`, margin, currentY);
+            currentY += 14;
+          }
+          if (organization.bankAccountNumber) {
+            doc.text(
+              `Account Number: ${organization.bankAccountNumber}`,
+              margin,
+              currentY,
+            );
+            currentY += 14;
+          }
+          if (organization.bankIban) {
+            doc.text(`IBAN: ${organization.bankIban}`, margin, currentY);
+            currentY += 14;
+          }
+          if (organization.bankBranch) {
+            doc.text(
+              `Branch: ${organization.bankBranch}`,
+              margin,
+              currentY,
+            );
+            currentY += 14;
+          }
+          if (organization.bankSwiftCode) {
+            doc.text(
+              `SWIFT Code: ${organization.bankSwiftCode}`,
+              margin,
+              currentY,
+            );
+            currentY += 14;
+          }
+          currentY += 20;
+        }
 
         // ============================================================================
         // DEFAULT NOTES - Display default notes if provided
@@ -8460,7 +8449,7 @@ export class ReportGeneratorService {
         doc.strokeColor(colors.border).lineWidth(0.5);
         doc
           .moveTo(margin, footerY - 12)
-          .lineTo(pageWidth - margin, footerY - 12)
+          .lineTo(margin + contentWidth, footerY - 12)
           .stroke();
 
         // Payment methods if enabled - use dark text color
