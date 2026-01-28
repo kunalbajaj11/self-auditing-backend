@@ -702,6 +702,19 @@ export class PurchaseOrdersService {
         organizationId: organization.id,
         logoBuffer: logoBuffer,
         logoUrl: null, // Logo is provided as buffer, not URL
+        // Reuse invoice template settings schema so PDF generator can honor styling + flags
+        invoiceTemplate: {
+          logoBuffer: logoBuffer,
+          logoUrl: null,
+          headerText:
+            templateSettings.invoiceHeaderText || organization.name || 'Company',
+          colorScheme: templateSettings.invoiceColorScheme || 'blue',
+          customColor: templateSettings.invoiceCustomColor,
+          footerText: templateSettings.invoiceFooterText,
+          showFooter: templateSettings.invoiceShowFooter ?? true,
+          showCompanyDetails: templateSettings.invoiceShowCompanyDetails ?? true,
+          showBankDetails: templateSettings.invoiceShowBankDetails ?? false,
+        },
         currencySettings: {
           displayFormat: currencySettings.currencyDisplayFormat,
           rounding: currencySettings.currencyRounding,

@@ -346,6 +346,9 @@ export class EmailService {
             .header { background-color: #1976d2; color: white; padding: 20px; text-align: center; }
             .content { padding: 20px; background-color: #f9f9f9; }
             .footer { text-align: center; padding: 20px; font-size: 12px; color: #666; }
+            .social { margin-top: 10px; }
+            .social a { color: #1976d2; text-decoration: none; margin: 0 8px; }
+            .social a:hover { text-decoration: underline; }
           </style>
         </head>
         <body>
@@ -375,6 +378,11 @@ export class EmailService {
             </div>
             <div class="footer">
               <p>This is an automated welcome email from SelfAccounting.AI.</p>
+              <div class="social">
+                <span>Follow us:</span>
+                <a href="https://www.instagram.com/selfaccounting.ai?igsh=MWo0NDg5bDVodGYwdg==" target="_blank" rel="noopener noreferrer">Instagram</a>
+                <a href="https://www.linkedin.com/company/111421971" target="_blank" rel="noopener noreferrer">LinkedIn</a>
+              </div>
             </div>
           </div>
         </body>
@@ -409,7 +417,11 @@ Best regards,
 The SelfAccounting.AI Team
 
 ---
-This is an automated welcome email from SelfAccounting.AI.`;
+This is an automated welcome email from SelfAccounting.AI.
+
+Follow us:
+- Instagram: https://www.instagram.com/selfaccounting.ai?igsh=MWo0NDg5bDVodGYwdg==
+- LinkedIn: https://www.linkedin.com/company/111421971`;
   }
 
   isConfigured(): boolean {
