@@ -7884,179 +7884,229 @@ export class ReportGeneratorService {
         }
 
         // ============================================================================
-        // INVOICE DETAILS BOX (Premium styled with gradient-like background)
+        // INVOICE DETAILS BOX (3-column layout: Bill To / Invoice Details / Commercial)
         // ============================================================================
         const boxY = currentY;
-        let maxDetailY = boxY + 16;
-        let maxBillToY = boxY + 16;
+        const headerHeight = 140; // fixed height that comfortably fits all header lines
 
-        // Calculate content height first to determine box size
-        // Left side - Bill To section
-        const leftColX = margin + 20;
-        const leftColWidth = contentWidth / 2 - 20;
-        let billToY = boxY + 16;
+        // Three equal-width columns inside the box
+        const innerX = margin + 20;
+        const innerWidth = contentWidth - 40;
+        const columnGap = 18;
+        const columnWidth = (innerWidth - columnGap * 2) / 3;
 
-        // Right side - Invoice details
-        const rightColX = margin + contentWidth / 2 + 32;
-        const rightColWidth = contentWidth / 2 - 32;
-        const separatorX = margin + contentWidth / 2;
-        let detailY = boxY + 16;
+        const billToX = innerX;
+        const invoiceX = innerX + columnWidth + columnGap;
+        const commercialX = innerX + (columnWidth + columnGap) * 2;
 
-        // Calculate heights for Bill To (left)
-        billToY += 16; // "BILL TO:" label
-        maxBillToY = Math.max(maxBillToY, billToY);
-
-        const customerName = customer?.name || invoice.customerName || '';
-        if (customerName) {
-          billToY += 18;
-          maxBillToY = Math.max(maxBillToY, billToY);
-        }
-
-        const customerAddress = customer?.address || '';
-        if (customerAddress) {
-          billToY += 18;
-          maxBillToY = Math.max(maxBillToY, billToY);
-        }
-
-        const customerPhone = customer?.phone || '';
-        if (customerPhone) {
-          billToY += 18;
-          maxBillToY = Math.max(maxBillToY, billToY);
-        }
-
-        const customerEmail = customer?.email || '';
-        if (customerEmail) {
-          billToY += 18;
-          maxBillToY = Math.max(maxBillToY, billToY);
-        }
-
-        const customerTrn = customer?.customerTrn || invoice.customerTrn || '';
-        if (customerTrn && templateSettings.showVatDetails) {
-          billToY += 18;
-          maxBillToY = Math.max(maxBillToY, billToY);
-        }
-
-        // Calculate heights for Invoice details (right)
-        detailY += 16; // Invoice Number
-        maxDetailY = Math.max(maxDetailY, detailY);
-        detailY += 16; // Invoice Date
-        maxDetailY = Math.max(maxDetailY, detailY);
-        if (invoice.dueDate) {
-          detailY += 16;
-          maxDetailY = Math.max(maxDetailY, detailY);
-        }
-        if (templateSettings.showPaymentTerms) {
-          detailY += 16;
-          maxDetailY = Math.max(maxDetailY, detailY);
-        }
-
-        // Calculate dynamic box height based on content
-        const boxHeight = Math.max(maxDetailY, maxBillToY) - boxY + 20;
-
-        // Draw premium background box with border FIRST (so text appears on top)
+        // Draw premium background box with border
         doc
           .fillColor(colors.backgroundLight)
-          .rect(margin, boxY, contentWidth, boxHeight)
+          .rect(margin, boxY, contentWidth, headerHeight)
           .fill();
         doc
           .strokeColor(colors.border)
           .lineWidth(1)
-          .rect(margin, boxY, contentWidth, boxHeight)
+          .rect(margin, boxY, contentWidth, headerHeight)
           .stroke();
 
-        // Vertical separator line
+        // Vertical separators between the three columns
+        const sep1X = invoiceX - columnGap / 2;
+        const sep2X = commercialX - columnGap / 2;
         doc.strokeColor(colors.border).lineWidth(1);
         doc
-          .moveTo(separatorX, boxY + 10)
-          .lineTo(separatorX, boxY + boxHeight - 10)
+          .moveTo(sep1X, boxY + 10)
+          .lineTo(sep1X, boxY + headerHeight - 10)
+          .stroke();
+        doc
+          .moveTo(sep2X, boxY + 10)
+          .lineTo(sep2X, boxY + headerHeight - 10)
           .stroke();
 
-        // Now write the text content on top of the box
-        billToY = boxY + 16;
+        const colHeaderGap = 10;
+        const lineGap = 3;
 
-        // Left side - Bill To section
+        // Small helper to render "LABEL: value" with bold label and regular value
+        const drawLabelValue = (
+          label: string,
+          value: string,
+          x: number,
+          y: number,
+          width: number,
+        ): number => {
+          const labelText = `${label}: `;
+          doc.fontSize(9).font('Helvetica-Bold').fillColor(colors.text);
+          doc.text(labelText, x, y, { width });
+          const labelWidth = doc.widthOfString(labelText);
+
+          doc.fontSize(9).font('Helvetica').fillColor(colors.text);
+          doc.text(value, x + labelWidth, y, { width: width - labelWidth });
+
+          // Return total line height for spacing calculations
+          return doc.heightOfString(`${labelText}${value}`, { width });
+        };
+
+        // Column 1 - BILL TO
+        let billToY = boxY + 16;
+        const customerName = customer?.name || invoice.customerName || '';
+        const customerAddress = customer?.address || '';
+        const customerPhone = customer?.phone || '';
+        const customerEmail = customer?.email || '';
+        const customerTrn =
+          templateSettings.showVatDetails && (customer?.customerTrn || invoice.customerTrn)
+            ? (customer?.customerTrn || invoice.customerTrn)
+            : '';
+
         doc.fontSize(10).font('Helvetica-Bold').fillColor(colors.text);
-        doc.text('BILL TO:', leftColX, billToY);
-        billToY += 16;
+        doc.text('BILL TO:', billToX, billToY, { width: columnWidth });
+        billToY += colHeaderGap;
 
         if (customerName) {
+          const h = doc.heightOfString(customerName, { width: columnWidth });
           doc.fontSize(10).font('Helvetica-Bold').fillColor(colors.text);
-          doc.text(customerName, leftColX, billToY, {
-            width: leftColWidth,
-          });
-          billToY += 14;
+          doc.text(customerName, billToX, billToY, { width: columnWidth });
+          billToY += h + lineGap;
         }
 
         if (customerAddress) {
-          doc.fontSize(10).font('Helvetica').fillColor(colors.text);
-          doc.text(customerAddress, leftColX, billToY, {
-            width: leftColWidth,
-          });
-          billToY += 14;
+          const line = customerAddress;
+          const h = doc.heightOfString(line, { width: columnWidth });
+          doc.fontSize(9).font('Helvetica').fillColor(colors.text);
+          doc.text(line, billToX, billToY, { width: columnWidth });
+          billToY += h + lineGap;
         }
 
         if (customerPhone) {
-          doc.fontSize(10).font('Helvetica').fillColor(colors.text);
-          doc.text(`Phone: ${customerPhone}`, leftColX, billToY);
-          billToY += 14;
+          const line = `Phone: ${customerPhone}`;
+          const h = doc.heightOfString(line, { width: columnWidth });
+          doc.fontSize(9).font('Helvetica').fillColor(colors.text);
+          doc.text(line, billToX, billToY, { width: columnWidth });
+          billToY += h + lineGap;
         }
 
         if (customerEmail) {
-          doc.fontSize(10).font('Helvetica').fillColor(colors.text);
-          doc.text(`Email: ${customerEmail}`, leftColX, billToY);
-          billToY += 14;
+          const line = `Email: ${customerEmail}`;
+          const h = doc.heightOfString(line, { width: columnWidth });
+          doc.fontSize(9).font('Helvetica').fillColor(colors.text);
+          doc.text(line, billToX, billToY, { width: columnWidth });
+          billToY += h + lineGap;
         }
 
-        if (customerTrn && templateSettings.showVatDetails) {
-          doc.fontSize(10).font('Helvetica').fillColor(colors.text);
-          doc.text(`TRN: ${customerTrn}`, leftColX, billToY);
+        if (customerTrn) {
+          const line = `TRN: ${customerTrn}`;
+          const h = doc.heightOfString(line, { width: columnWidth });
+          doc.fontSize(9).font('Helvetica').fillColor(colors.text);
+          doc.text(line, billToX, billToY, { width: columnWidth });
+          billToY += h + lineGap;
         }
 
-        // Right side - Invoice details (right-aligned)
-        // Use heightOfString so wrapped lines don't overlap; advance by actual height + gap
-        detailY = boxY + 16;
-        const detailOpts = { width: rightColWidth, align: 'right' as const };
-        const lineGap = 4;
+        // Column 2 - INVOICE DETAILS
+        let invoiceY = boxY + 16;
+        doc.fontSize(10).font('Helvetica-Bold').fillColor(colors.text);
+        doc.text('INVOICE DETAILS', invoiceX, invoiceY, { width: columnWidth });
+        invoiceY += colHeaderGap;
 
         const invoiceNumberLabel =
           invoice.status?.toLowerCase() === 'proforma_invoice'
-            ? 'PROFORMA INVOICE NUMBER'
+            ? 'PROFORMA INVOICE NO.'
             : 'INVOICE NUMBER';
-        const invoiceNumberStr = `${invoiceNumberLabel}: ${invoice.invoiceNumber || ''}`;
-        doc.fontSize(10).font('Helvetica-Bold').fillColor(colors.text);
-        doc.text(invoiceNumberStr, rightColX, detailY, detailOpts);
-        detailY += doc.heightOfString(invoiceNumberStr, detailOpts) + lineGap;
+        let h = drawLabelValue(
+          invoiceNumberLabel,
+          invoice.invoiceNumber || '',
+          invoiceX,
+          invoiceY,
+          columnWidth,
+        );
+        invoiceY += h + lineGap;
 
         const invoiceDateLabel =
           invoice.status?.toLowerCase() === 'proforma_invoice'
             ? 'PROFORMA INVOICE DATE'
             : 'INVOICE DATE';
-        const invoiceDateStr = `${invoiceDateLabel}: ${this.formatDateForInvoice(invoice.invoiceDate || '')}`;
-        doc.fontSize(10).font('Helvetica-Bold').fillColor(colors.text);
-        doc.text(invoiceDateStr, rightColX, detailY, detailOpts);
-        detailY += doc.heightOfString(invoiceDateStr, detailOpts) + lineGap;
+        h = drawLabelValue(
+          invoiceDateLabel,
+          this.formatDateForInvoice(invoice.invoiceDate || ''),
+          invoiceX,
+          invoiceY,
+          columnWidth,
+        );
+        invoiceY += h + lineGap;
 
         if (invoice.dueDate) {
-          const dueDateStr = `DUE DATE: ${this.formatDateForInvoice(invoice.dueDate)}`;
-          doc.fontSize(10).font('Helvetica-Bold').fillColor(colors.text);
-          doc.text(dueDateStr, rightColX, detailY, detailOpts);
-          detailY += doc.heightOfString(dueDateStr, detailOpts) + lineGap;
+          h = drawLabelValue(
+            'DUE DATE',
+            this.formatDateForInvoice(invoice.dueDate),
+            invoiceX,
+            invoiceY,
+            columnWidth,
+          );
+          invoiceY += h + lineGap;
         }
 
         if (templateSettings.showPaymentTerms) {
           const paymentTerms =
             templateSettings.paymentTerms ||
-            (customer?.paymentTerms
-              ? `Net ${customer.paymentTerms}`
-              : 'Net 30');
-          const paymentTermsStr = `PAYMENT TERMS: ${paymentTerms}`;
-          doc.fontSize(10).font('Helvetica-Bold').fillColor(colors.text);
-          doc.text(paymentTermsStr, rightColX, detailY, detailOpts);
-          detailY += doc.heightOfString(paymentTermsStr, detailOpts) + lineGap;
+            (customer?.paymentTerms ? `Net ${customer.paymentTerms}` : 'Net 30');
+          h = drawLabelValue('PAYMENT TERMS', paymentTerms, invoiceX, invoiceY, columnWidth);
+          invoiceY += h + lineGap;
         }
 
-        // Position next section below the invoice-details content (may extend past box if wrapped)
-        currentY = Math.max(detailY + 20, boxY + boxHeight + 32);
+        // Column 3 - COMMERCIAL DETAILS
+        let commercialY = boxY + 16;
+        doc.fontSize(10).font('Helvetica-Bold').fillColor(colors.text);
+        doc.text('COMMERCIAL DETAILS', commercialX, commercialY, { width: columnWidth });
+        commercialY += colHeaderGap;
+
+        const commercialLines: { label: string; value: string }[] = [];
+        const deliveryNote = (invoice as any).deliveryNote as string | undefined;
+        if (deliveryNote) {
+          commercialLines.push({ label: 'DELIVERY NOTE', value: deliveryNote });
+        }
+
+        const suppliersRef = (invoice as any).suppliersRef as string | undefined;
+        if (suppliersRef) {
+          commercialLines.push({ label: "SUPPLIER'S REF", value: suppliersRef });
+        }
+
+        const otherReference = (invoice as any).otherReference as string | undefined;
+        if (otherReference) {
+          commercialLines.push({ label: 'OTHER REFERENCE', value: otherReference });
+        }
+
+        const buyerOrderNo = (invoice as any).buyerOrderNo as string | undefined;
+        if (buyerOrderNo) {
+          commercialLines.push({ label: 'BUYER ORDER NO.', value: buyerOrderNo });
+        }
+
+        const buyerOrderDate = (invoice as any).buyerOrderDate as string | undefined;
+        if (buyerOrderDate) {
+          commercialLines.push({
+            label: 'DATED',
+            value: this.formatDateForInvoice(buyerOrderDate),
+          });
+        }
+
+        const despatchedThrough = (invoice as any).despatchedThrough as string | undefined;
+        if (despatchedThrough) {
+          commercialLines.push({
+            label: 'DESPATCHED THROUGH',
+            value: despatchedThrough,
+          });
+        }
+
+        const destination = (invoice as any).destination as string | undefined;
+        if (destination) {
+          commercialLines.push({ label: 'DESTINATION', value: destination });
+        }
+
+        for (const { label, value } of commercialLines) {
+          const lh = drawLabelValue(label, value, commercialX, commercialY, columnWidth);
+          commercialY += lh + lineGap;
+        }
+
+        // Position next section below the tallest column or the fixed box height
+        const headerBottomY = Math.max(billToY, invoiceY, commercialY);
+        currentY = Math.max(headerBottomY + 24, boxY + headerHeight + 24);
 
         // ============================================================================
         // LINE ITEMS TABLE - Clean modern design matching preview
@@ -8066,14 +8116,15 @@ export class ReportGeneratorService {
         const tableStartX = margin;
 
         // Column widths for cleaner table: Item, Description, Qty, Unit Price, Total
+        // Keep total width safely within contentWidth to avoid overflow
         const colWidths = {
           item: 80,
-          description: 150,
-          quantity: 80,
-          unitPrice: 100,
-          total: 85,
+          description: 145,
+          quantity: 70,
+          unitPrice: 95,
+          total: 90,
         };
-        const tableWidth = contentWidth;
+        const tableWidth = colWidths.item + colWidths.description + colWidths.quantity + colWidths.unitPrice + colWidths.total;
         const rowHeight = 32; // Increased for better padding
 
         // Table Header row - Premium dark background with white text
@@ -8089,9 +8140,13 @@ export class ReportGeneratorService {
         // Draw header text in white with right-aligned numeric columns
         doc.fontSize(10).font('Helvetica-Bold').fillColor('#ffffff');
 
-        doc.text('Item', tableX + 14, headerY + 12);
+        doc.text('Item', tableX + 14, headerY + 12, {
+          width: colWidths.item - 28,
+        });
         tableX += colWidths.item;
-        doc.text('Description', tableX + 14, headerY + 12);
+        doc.text('Description', tableX + 14, headerY + 12, {
+          width: colWidths.description - 28,
+        });
         tableX += colWidths.description;
         doc.text('Qty', tableX + 14, headerY + 12, {
           align: 'right',
@@ -8127,9 +8182,13 @@ export class ReportGeneratorService {
               .fill();
 
             doc.fontSize(10).font('Helvetica-Bold').fillColor('#ffffff');
-            doc.text('Item', tableX + 14, rowY + 12);
+            doc.text('Item', tableX + 14, rowY + 12, {
+              width: colWidths.item - 28,
+            });
             tableX += colWidths.item;
-            doc.text('Description', tableX + 14, rowY + 12);
+            doc.text('Description', tableX + 14, rowY + 12, {
+              width: colWidths.description - 28,
+            });
             tableX += colWidths.description;
             doc.text('Qty', tableX + 14, rowY + 12, {
               align: 'right',
@@ -8163,7 +8222,9 @@ export class ReportGeneratorService {
           doc.fontSize(10).font('Helvetica').fillColor(colors.text);
 
           // Item name
-          doc.text(item.itemName || '', tableX + 14, rowY + 12);
+          doc.text(item.itemName || '', tableX + 14, rowY + 12, {
+            width: colWidths.item - 28,
+          });
           tableX += colWidths.item;
 
           // Description
@@ -8306,66 +8367,31 @@ export class ReportGeneratorService {
         currentY = totalsBoxY + totalsBoxHeight + 30;
 
         // ============================================================================
-        // BANK DETAILS - Own section below totals, before notes
+        // AMOUNT IN WORDS - below totals, above bank details
         // ============================================================================
-        if (
-          templateSettings.showBankDetails &&
-          organization &&
-          (organization.bankAccountNumber ||
-            organization.bankIban ||
-            organization.bankName ||
-            organization.bankAccountHolder)
-        ) {
+        const totalNumeric =
+          typeof totalAmount === 'string'
+            ? parseFloat(totalAmount || '0')
+            : totalAmount || 0;
+        const amountInWords = this.numberToWords(Math.floor(totalNumeric));
+
+        if (!isNaN(totalNumeric)) {
           if (currentY > doc.page.height - 200) {
             doc.addPage();
             currentY = margin + 40;
           }
-          currentY += 20;
-          doc.fontSize(10).font('Helvetica-Bold').fillColor(colors.text);
-          doc.text('Bank Details:', margin, currentY);
-          currentY += 16;
-          doc.fontSize(10).font('Helvetica').fillColor(colors.text);
-          if (organization.bankAccountHolder) {
-            doc.text(
-              `Account Holder: ${organization.bankAccountHolder}`,
-              margin,
-              currentY,
-            );
-            currentY += 14;
-          }
-          if (organization.bankName) {
-            doc.text(`Bank: ${organization.bankName}`, margin, currentY);
-            currentY += 14;
-          }
-          if (organization.bankAccountNumber) {
-            doc.text(
-              `Account Number: ${organization.bankAccountNumber}`,
-              margin,
-              currentY,
-            );
-            currentY += 14;
-          }
-          if (organization.bankIban) {
-            doc.text(`IBAN: ${organization.bankIban}`, margin, currentY);
-            currentY += 14;
-          }
-          if (organization.bankBranch) {
-            doc.text(
-              `Branch: ${organization.bankBranch}`,
-              margin,
-              currentY,
-            );
-            currentY += 14;
-          }
-          if (organization.bankSwiftCode) {
-            doc.text(
-              `SWIFT Code: ${organization.bankSwiftCode}`,
-              margin,
-              currentY,
-            );
-            currentY += 14;
-          }
-          currentY += 20;
+
+          doc.fontSize(9).font('Helvetica-Bold').fillColor(colors.text);
+          doc.text('Amount Chargeable (in words):', margin, currentY);
+          currentY += 14;
+
+          doc.fontSize(9).font('Helvetica').fillColor(colors.text);
+          const currencyLabel = (metadata.currency || 'AED').toUpperCase();
+          const wordsLine = `${currencyLabel} ${amountInWords} Only`;
+          doc.text(wordsLine, margin, currentY, {
+            width: contentWidth,
+          });
+          currentY += 22;
         }
 
         // ============================================================================
@@ -8430,10 +8456,73 @@ export class ReportGeneratorService {
         }
 
         // ============================================================================
-        // FOOTER - Position dynamically based on content end
+        // BANK DETAILS - Move below terms & conditions (and notes)
         // ============================================================================
-        // Reserve space for footer (at least 80pt from bottom)
-        const footerReservedSpace = 80;
+        if (
+          templateSettings.showBankDetails &&
+          organization &&
+          (organization.bankAccountNumber ||
+            organization.bankIban ||
+            organization.bankName ||
+            organization.bankAccountHolder)
+        ) {
+          if (currentY > doc.page.height - 200) {
+            doc.addPage();
+            currentY = margin + 40;
+          }
+          currentY += 20;
+          doc.fontSize(10).font('Helvetica-Bold').fillColor(colors.text);
+          doc.text('Bank Details:', margin, currentY);
+          currentY += 16;
+          doc.fontSize(10).font('Helvetica').fillColor(colors.text);
+          if (organization.bankAccountHolder) {
+            doc.text(
+              `Account Holder: ${organization.bankAccountHolder}`,
+              margin,
+              currentY,
+            );
+            currentY += 14;
+          }
+          if (organization.bankName) {
+            doc.text(`Bank: ${organization.bankName}`, margin, currentY);
+            currentY += 14;
+          }
+          if (organization.bankAccountNumber) {
+            doc.text(
+              `Account Number: ${organization.bankAccountNumber}`,
+              margin,
+              currentY,
+            );
+            currentY += 14;
+          }
+          if (organization.bankIban) {
+            doc.text(`IBAN: ${organization.bankIban}`, margin, currentY);
+            currentY += 14;
+          }
+          if (organization.bankBranch) {
+            doc.text(
+              `Branch: ${organization.bankBranch}`,
+              margin,
+              currentY,
+            );
+            currentY += 14;
+          }
+          if (organization.bankSwiftCode) {
+            doc.text(
+              `SWIFT Code: ${organization.bankSwiftCode}`,
+              margin,
+              currentY,
+            );
+            currentY += 14;
+          }
+          currentY += 20;
+        }
+
+        // ============================================================================
+        // AUTHORISED SIGNATORY + FOOTER - bottom of page
+        // ============================================================================
+        // Reserve space for signatory + footer (at least 120pt from bottom)
+        const footerReservedSpace = 120;
         let footerY = Math.max(
           currentY + 40,
           doc.page.height - footerReservedSpace,
@@ -8445,34 +8534,66 @@ export class ReportGeneratorService {
           footerY = doc.page.height - footerReservedSpace;
         }
 
-        // Footer separator line
+        // Signatory block on the right
+        const signatoryBlockWidth = 220;
+        const signatoryX = margin + contentWidth - signatoryBlockWidth;
+        const signatoryY = footerY;
+
+        doc.fontSize(9).font('Helvetica-Bold').fillColor(colors.text);
+        doc.text(
+          `For ${organization?.name || 'the Company'}`,
+          signatoryX,
+          signatoryY,
+          { width: signatoryBlockWidth, align: 'right' },
+        );
+
+        // Signature line
+        const lineY = signatoryY + 28;
+        doc
+          .moveTo(signatoryX, lineY)
+          .lineTo(signatoryX + signatoryBlockWidth, lineY)
+          .strokeColor(colors.border)
+          .lineWidth(0.8)
+          .stroke();
+
+        // Label
+        doc.fontSize(8).font('Helvetica-Bold').fillColor(colors.textMuted);
+        doc.text('Authorised Signatory', signatoryX, lineY + 4, {
+          width: signatoryBlockWidth,
+          align: 'right',
+        });
+
+        // Footer separator line across bottom
+        const footerLineY = doc.page.height - 60;
         doc.strokeColor(colors.border).lineWidth(0.5);
         doc
-          .moveTo(margin, footerY - 12)
-          .lineTo(margin + contentWidth, footerY - 12)
+          .moveTo(margin, footerLineY)
+          .lineTo(margin + contentWidth, footerLineY)
           .stroke();
+
+        let footerTextY = footerLineY + 8;
 
         // Payment methods if enabled - use dark text color
         if (templateSettings.showPaymentMethods) {
-          doc.fontSize(10).font('Helvetica').fillColor(colors.text);
+          doc.fontSize(9).font('Helvetica').fillColor(colors.text);
           const paymentMethodsText =
             'Payment Methods: Bank Transfer, Cash, Credit Card';
-          doc.text(paymentMethodsText, margin, footerY, {
+          doc.text(paymentMethodsText, margin, footerTextY, {
             align: 'center',
             width: contentWidth,
           });
-          footerY += 14;
+          footerTextY += 14;
         }
 
-        // Footer text - show custom footer text or default message - use dark text color
+        // Footer text - show custom footer text or default message
         if (templateSettings.showFooter) {
           const footerText =
             templateSettings.footerText &&
             templateSettings.footerText.trim().length > 0
               ? templateSettings.footerText
               : 'This is a Computer Generated Invoice';
-          doc.fontSize(10).font('Helvetica').fillColor(colors.text);
-          doc.text(footerText, margin, footerY, {
+          doc.fontSize(8).font('Helvetica').fillColor(colors.textMuted);
+          doc.text(footerText, margin, footerTextY, {
             align: 'center',
             width: contentWidth,
           });

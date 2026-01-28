@@ -74,8 +74,9 @@ export class SalesInvoice extends AbstractEntity {
     type: 'decimal',
     precision: 12,
     scale: 2,
-    generatedType: 'STORED',
-    asExpression: '"amount" + "vat_amount"',
+    nullable: true,
+    insert: false,
+    update: false,
   })
   totalAmount: string;
 
@@ -142,11 +143,36 @@ export class SalesInvoice extends AbstractEntity {
   @Column({ type: 'text', nullable: true })
   notes?: string | null;
 
+  // Commercial header fields for Tally-style invoices
+  @Column({ name: 'delivery_note', length: 200, nullable: true })
+  deliveryNote?: string | null;
+
+  @Column({ name: 'suppliers_ref', length: 200, nullable: true })
+  suppliersRef?: string | null;
+
+  @Column({ name: 'other_reference', length: 200, nullable: true })
+  otherReference?: string | null;
+
+  @Column({ name: 'buyer_order_no', length: 100, nullable: true })
+  buyerOrderNo?: string | null;
+
+  @Column({ name: 'buyer_order_date', type: 'date', nullable: true })
+  buyerOrderDate?: string | null;
+
+  @Column({ name: 'despatched_through', length: 200, nullable: true })
+  despatchedThrough?: string | null;
+
+  @Column({ name: 'destination', length: 200, nullable: true })
+  destination?: string | null;
+
+  @Column({ name: 'terms_of_delivery', type: 'text', nullable: true })
+  termsOfDelivery?: string | null;
+
   @OneToMany(() => InvoicePayment, (payment) => payment.invoice)
   payments: InvoicePayment[];
 
   @OneToMany(() => InvoiceLineItem, (lineItem) => lineItem.invoice, {
-    cascade: true,
+    cascade: false, // manage line items explicitly in service to avoid accidental updates
   })
   lineItems: InvoiceLineItem[];
 

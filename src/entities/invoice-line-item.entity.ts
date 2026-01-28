@@ -10,17 +10,17 @@ import { VatTaxType } from '../common/enums/vat-tax-type.enum';
 @Index(['organization', 'invoice'])
 export class InvoiceLineItem extends AbstractEntity {
   @ManyToOne(() => SalesInvoice, (invoice) => invoice.lineItems, {
-    nullable: false,
+    nullable: true,
     onDelete: 'CASCADE',
   })
   @JoinColumn({ name: 'invoice_id' })
-  invoice: SalesInvoice;
+  invoice: SalesInvoice | null;
 
   @ManyToOne(() => Organization, {
-    nullable: false,
+    nullable: true,
   })
   @JoinColumn({ name: 'organization_id' })
-  organization: Organization;
+  organization?: Organization | null;
 
   @ManyToOne(() => Product, {
     nullable: true,
@@ -83,8 +83,9 @@ export class InvoiceLineItem extends AbstractEntity {
     type: 'decimal',
     precision: 12,
     scale: 2,
-    generatedType: 'STORED',
-    asExpression: '"amount" + "vat_amount"',
+    nullable: true,
+    insert: false,
+    update: false,
   })
   totalAmount: string; // amount + vatAmount
 

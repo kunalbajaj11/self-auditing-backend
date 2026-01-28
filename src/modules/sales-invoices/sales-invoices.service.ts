@@ -607,6 +607,14 @@ export class SalesInvoicesService {
       currency: dto.currency || 'AED',
       description: dto.description,
       notes: dto.notes,
+      deliveryNote: dto.deliveryNote,
+      suppliersRef: dto.suppliersRef,
+      otherReference: dto.otherReference,
+      buyerOrderNo: dto.buyerOrderNo,
+      buyerOrderDate: dto.buyerOrderDate,
+      despatchedThrough: dto.despatchedThrough,
+      destination: dto.destination,
+      termsOfDelivery: dto.termsOfDelivery,
       status: dto.status
         ? (dto.status as InvoiceStatus)
         : InvoiceStatus.PROFORMA_INVOICE,
@@ -619,20 +627,6 @@ export class SalesInvoicesService {
     });
 
     const savedInvoice = await this.invoicesRepository.save(invoice);
-
-    // Override total_amount for invoices with reverse charge (DB generated column adds VAT incorrectly)
-    if (reverseChargeVatAmount > 0) {
-      // For invoices with reverse charge: total_amount = subtotal + standardVatAmount (excludes reverse charge VAT)
-      // The DB generated column would calculate: total_amount = amount + vatAmount
-      // But vatAmount includes reverse charge VAT, so we need to override
-      const correctTotal = subtotal + standardVatAmount;
-      await this.invoicesRepository
-        .createQueryBuilder()
-        .update(SalesInvoice)
-        .set({ totalAmount: correctTotal.toString() })
-        .where('id = :id', { id: savedInvoice.id })
-        .execute();
-    }
 
     // Create line items
     if (dto.lineItems && dto.lineItems.length > 0) {
@@ -808,10 +802,20 @@ export class SalesInvoicesService {
       : null;
 
     // For proforma invoices, always use "PROFORMA INVOICE" as title
-    const invoiceTitle = invoice.status === 'proforma_invoice' 
-      ? 'PROFORMA INVOICE' 
-      : (templateSettings.invoiceTitle || 'TAX INVOICE');
-    
+    const invoiceTitle =
+      invoice.status === 'proforma_invoice'
+        ? 'PROFORMA INVOICE'
+        : templateSettings.invoiceTitle || 'TAX INVOICE';
+
+    // Amount in words for preview (based on totalAmount)
+    const totalNumeric = parseFloat(invoice.totalAmount || '0');
+    const amountInWords =
+      !isNaN(totalNumeric) && totalNumeric > 0
+        ? `${(invoice.currency || 'AED').toUpperCase()} ${this.numberToWordsForPreview(
+            Math.floor(totalNumeric),
+          )} Only`
+        : null;
+
     return {
       invoice,
       outstandingBalance: outstanding,
@@ -839,7 +843,76 @@ export class SalesInvoicesService {
         showItemUnitPrice: templateSettings.invoiceShowItemUnitPrice,
         showItemTotal: templateSettings.invoiceShowItemTotal,
       },
+      amountInWords,
     };
+  }
+
+  /**
+   * Lightweight number-to-words helper for invoice preview
+   * (kept separate from PDF generator for simplicity)
+   */
+  private numberToWordsForPreview(num: number): string {
+    if (num === 0) return 'Zero';
+
+    const ones = [
+      '',
+      'One',
+      'Two',
+      'Three',
+      'Four',
+      'Five',
+      'Six',
+      'Seven',
+      'Eight',
+      'Nine',
+      'Ten',
+      'Eleven',
+      'Twelve',
+      'Thirteen',
+      'Fourteen',
+      'Fifteen',
+      'Sixteen',
+      'Seventeen',
+      'Eighteen',
+      'Nineteen',
+    ];
+    const tens = [
+      '',
+      '',
+      'Twenty',
+      'Thirty',
+      'Forty',
+      'Fifty',
+      'Sixty',
+      'Seventy',
+      'Eighty',
+      'Ninety',
+    ];
+
+    const toWords = (n: number): string => {
+      if (n < 20) return ones[n];
+      if (n < 100)
+        return `${tens[Math.floor(n / 10)]}${
+          n % 10 ? ` ${ones[n % 10]}` : ''
+        }`;
+      if (n < 1000)
+        return `${ones[Math.floor(n / 100)]} Hundred${
+          n % 100 ? ` ${toWords(n % 100)}` : ''
+        }`;
+      if (n < 1000000)
+        return `${toWords(Math.floor(n / 1000))} Thousand${
+          n % 1000 ? ` ${toWords(n % 1000)}` : ''
+        }`;
+      if (n < 1000000000)
+        return `${toWords(Math.floor(n / 1000000))} Million${
+          n % 1000000 ? ` ${toWords(n % 1000000)}` : ''
+        }`;
+      return `${toWords(Math.floor(n / 1000000000))} Billion${
+        n % 1000000000 ? ` ${toWords(n % 1000000000)}` : ''
+      }`;
+    };
+
+    return toWords(num).trim();
   }
 
   /**
@@ -1513,7 +1586,15 @@ export class SalesInvoicesService {
     userId: string,
     dto: any, // UpdateSalesInvoiceDto
   ): Promise<SalesInvoice> {
-    const invoice = await this.findById(organizationId, invoiceId);
+    // IMPORTANT: load a lean invoice WITHOUT lineItems so TypeORM does not
+    // try to auto-manage invoice_line_items when we save the invoice.
+    const invoice = await this.invoicesRepository.findOne({
+      where: { id: invoiceId, organization: { id: organizationId }, isDeleted: false },
+      relations: ['organization', 'customer'],
+    });
+    if (!invoice) {
+      throw new NotFoundException('Invoice not found');
+    }
 
     if (
       invoice.status === InvoiceStatus.PAID ||
@@ -1560,6 +1641,30 @@ export class SalesInvoicesService {
     if (dto.notes !== undefined) {
       invoice.notes = dto.notes;
     }
+    if (dto.deliveryNote !== undefined) {
+      invoice.deliveryNote = dto.deliveryNote;
+    }
+    if (dto.suppliersRef !== undefined) {
+      invoice.suppliersRef = dto.suppliersRef;
+    }
+    if (dto.otherReference !== undefined) {
+      invoice.otherReference = dto.otherReference;
+    }
+    if (dto.buyerOrderNo !== undefined) {
+      invoice.buyerOrderNo = dto.buyerOrderNo;
+    }
+    if (dto.buyerOrderDate !== undefined) {
+      invoice.buyerOrderDate = dto.buyerOrderDate;
+    }
+    if (dto.despatchedThrough !== undefined) {
+      invoice.despatchedThrough = dto.despatchedThrough;
+    }
+    if (dto.destination !== undefined) {
+      invoice.destination = dto.destination;
+    }
+    if (dto.termsOfDelivery !== undefined) {
+      invoice.termsOfDelivery = dto.termsOfDelivery;
+    }
     if (dto.customerId !== undefined) {
       if (dto.customerId) {
         const customer = await this.customersRepository.findOne({
@@ -1580,16 +1685,28 @@ export class SalesInvoicesService {
 
     // Update line items if provided
     if (dto.lineItems && Array.isArray(dto.lineItems)) {
+      // Always derive organizationId for line items from the loaded invoice.
+      // If it's missing, fail fast rather than inserting invalid rows.
+      const lineItemOrganizationId = invoice.organization?.id;
+      if (!lineItemOrganizationId) {
+        throw new BadRequestException(
+          'Cannot update invoice line items without an organization.',
+        );
+      }
+
       // Delete existing line items
       await this.lineItemsRepository.delete({
         invoice: { id: invoiceId },
-        organization: { id: organizationId },
+        organization: { id: lineItemOrganizationId },
       });
 
       // Get tax settings for reverse charge rate
-      const taxSettings =
-        await this.settingsService.getTaxSettings(organizationId);
-      const taxRates = await this.settingsService.getTaxRates(organizationId);
+      const taxSettings = await this.settingsService.getTaxSettings(
+        lineItemOrganizationId,
+      );
+      const taxRates = await this.settingsService.getTaxRates(
+        lineItemOrganizationId,
+      );
       const effectiveDefaultRate = taxSettings.taxDefaultRate || 5;
 
       // Create new line items
@@ -1617,7 +1734,7 @@ export class SalesInvoicesService {
 
         return this.lineItemsRepository.create({
           invoice: { id: invoiceId },
-          organization: { id: organizationId },
+          organization: { id: lineItemOrganizationId },
           itemName: item.itemName,
           description: item.description,
           quantity: item.quantity.toString(),
@@ -1704,48 +1821,6 @@ export class SalesInvoicesService {
     }
 
     const updated = await this.invoicesRepository.save(invoice);
-
-    // Override total_amount for invoices with reverse charge (DB generated column adds VAT incorrectly)
-    // Check if invoice has reverse charge line items
-    if (dto.lineItems && Array.isArray(dto.lineItems)) {
-      const hasReverseCharge = dto.lineItems.some(
-        (item: any) =>
-          item.vatTaxType === 'REVERSE_CHARGE' ||
-          item.vatTaxType === 'reverse_charge',
-      );
-      if (hasReverseCharge) {
-        // Recalculate to get correct total (excluding reverse charge VAT)
-        // Total = subtotal (invoice.amount) + standardVatAmount
-        const subtotal = parseFloat(updated.amount);
-        // Calculate standard VAT only (excluding reverse charge)
-        const lineItems = await this.lineItemsRepository.find({
-          where: { invoice: { id: invoice.id } },
-        });
-        let standardVatOnly = 0;
-        for (const item of lineItems) {
-          const vatTaxTypeStr = String(item.vatTaxType || '').toLowerCase();
-          const isReverseCharge =
-            vatTaxTypeStr === 'reverse_charge' ||
-            item.vatTaxType === VatTaxType.REVERSE_CHARGE;
-          const isZeroRated =
-            vatTaxTypeStr === 'zero_rated' ||
-            item.vatTaxType === VatTaxType.ZERO_RATED;
-          const isExempt =
-            vatTaxTypeStr === 'exempt' || item.vatTaxType === VatTaxType.EXEMPT;
-
-          if (!isReverseCharge && !isZeroRated && !isExempt) {
-            standardVatOnly += parseFloat(item.vatAmount);
-          }
-        }
-        const correctTotal = subtotal + standardVatOnly;
-        await this.invoicesRepository
-          .createQueryBuilder()
-          .update(SalesInvoice)
-          .set({ totalAmount: correctTotal.toString() })
-          .where('id = :id', { id: updated.id })
-          .execute();
-      }
-    }
 
     // Audit log
     await this.auditLogsService.record({
