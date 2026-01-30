@@ -9429,6 +9429,7 @@ export class ReportsService {
         date: string;
         referenceNumber?: string;
         description?: string;
+        customerName?: string; // For Accounts Receivable (invoices / customer debit notes)
         debitAmount: number;
         creditAmount: number;
         amount: number;
@@ -10086,6 +10087,7 @@ export class ReportsService {
         // This matches the trial balance calculation which shows closing balance
         const arInvoicesQuery = this.salesInvoicesRepository
           .createQueryBuilder('invoice')
+          .leftJoinAndSelect('invoice.customer', 'customer')
           .where('invoice.organization_id = :organizationId', {
             organizationId,
           })
@@ -10104,13 +10106,15 @@ export class ReportsService {
           const totalAmount = Number(invoice.totalAmount || invoice.baseAmount + (invoice.vatAmount || 0) || invoice.amount);
           const baseAmount = Number(invoice.baseAmount || invoice.amount);
           const vatAmount = Number(invoice.vatAmount || 0);
-          
+          const customerName = invoice.customer?.name ?? invoice.customerName ?? undefined;
+
           entries.push({
             id: invoice.id,
             type: 'Invoice',
             date: invoice.invoiceDate,
             referenceNumber: invoice.invoiceNumber || undefined,
             description: invoice.description || undefined,
+            customerName,
             debitAmount: totalAmount, // Include VAT to match trial balance
             creditAmount: 0,
             amount: totalAmount, // Include VAT to match trial balance
@@ -10128,6 +10132,7 @@ export class ReportsService {
         // Note: These increase Accounts Receivable, matching trial balance calculation
         const customerDebitNotes = await this.debitNotesRepository
           .createQueryBuilder('debitNote')
+          .leftJoinAndSelect('debitNote.customer', 'customer')
           .where('debitNote.organization_id = :organizationId', {
             organizationId,
           })
@@ -10146,13 +10151,15 @@ export class ReportsService {
           const totalAmount = Number(debitNote.totalAmount || debitNote.baseAmount + (debitNote.vatAmount || 0) || debitNote.amount);
           const baseAmount = Number(debitNote.baseAmount || debitNote.amount);
           const vatAmount = Number(debitNote.vatAmount || 0);
-          
+          const customerName = debitNote.customer?.name ?? debitNote.customerName ?? undefined;
+
           entries.push({
             id: debitNote.id,
             type: 'Customer Debit Note',
             date: debitNote.debitNoteDate,
             referenceNumber: debitNote.debitNoteNumber || undefined,
             description: debitNote.description || undefined,
+            customerName,
             debitAmount: totalAmount, // Include VAT to match trial balance
             creditAmount: 0,
             amount: totalAmount, // Include VAT to match trial balance
