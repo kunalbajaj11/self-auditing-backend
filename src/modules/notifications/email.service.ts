@@ -427,4 +427,310 @@ Follow us:
   isConfigured(): boolean {
     return this.resend !== null;
   }
+
+  /**
+   * Send notification to super admin when a new organization registers
+   */
+  async sendNewRegistrationNotificationToSuperAdmin(registrationDetails: {
+    licenseKey: string;
+    organizationName: string;
+    planType: string;
+    adminName: string;
+    adminEmail: string;
+    adminPhone?: string;
+    vatNumber?: string;
+    address?: string;
+    currency?: string;
+    region?: string;
+    contactPerson?: string;
+    contactEmail?: string;
+    storageQuotaMb?: number;
+    registrationDate: Date;
+  }): Promise<boolean> {
+    // Backup email used when env is not set or invalid
+    const backupEmail = 'kunalbajaj19@outlook.com';
+
+    const configuredEmail = this.configService.get<string>(
+      'SUPER_ADMIN_NOTIFICATION_EMAIL',
+    );
+    const rawEmail = (configuredEmail ?? '').trim();
+    const superAdminEmail =
+      rawEmail && this.isValidEmail(rawEmail) ? rawEmail : backupEmail;
+
+    if (!rawEmail || !this.isValidEmail(rawEmail)) {
+      console.warn(
+        'SUPER_ADMIN_NOTIFICATION_EMAIL not set or invalid; using backup:',
+        backupEmail,
+      );
+    }
+
+    // Sanitize organization name for subject line (remove potentially problematic characters)
+    const safeOrgName = registrationDetails.organizationName
+      .replace(/[<>]/g, '')
+      .substring(0, 100);
+    const subject = `🎉 New Registration: ${safeOrgName}`;
+
+    const html = this.buildNewRegistrationNotificationHtml(registrationDetails);
+    const text = this.buildNewRegistrationNotificationText(registrationDetails);
+
+    return this.sendEmail({
+      to: superAdminEmail,
+      subject,
+      html,
+      text,
+    });
+  }
+
+  /**
+   * Simple email validation
+   */
+  private isValidEmail(email: string): boolean {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    return emailRegex.test(email);
+  }
+
+  /**
+   * Escape HTML special characters to prevent XSS
+   */
+  private escapeHtml(text: string | undefined | null): string {
+    if (!text) return '';
+    return text
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  }
+
+  private buildNewRegistrationNotificationHtml(details: {
+    licenseKey: string;
+    organizationName: string;
+    planType: string;
+    adminName: string;
+    adminEmail: string;
+    adminPhone?: string;
+    vatNumber?: string;
+    address?: string;
+    currency?: string;
+    region?: string;
+    contactPerson?: string;
+    contactEmail?: string;
+    storageQuotaMb?: number;
+    registrationDate: Date;
+  }): string {
+    const formatDate = (date: Date) => {
+      return date.toLocaleString('en-US', {
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        timeZoneName: 'short',
+      });
+    };
+
+    // Escape all user-provided data to prevent XSS
+    const safe = {
+      organizationName: this.escapeHtml(details.organizationName),
+      planType: this.escapeHtml(details.planType),
+      adminName: this.escapeHtml(details.adminName),
+      adminEmail: this.escapeHtml(details.adminEmail),
+      adminPhone: this.escapeHtml(details.adminPhone),
+      vatNumber: this.escapeHtml(details.vatNumber),
+      address: this.escapeHtml(details.address),
+      currency: this.escapeHtml(details.currency),
+      region: this.escapeHtml(details.region),
+      contactPerson: this.escapeHtml(details.contactPerson),
+      contactEmail: this.escapeHtml(details.contactEmail),
+      licenseKey: this.escapeHtml(details.licenseKey),
+      storageQuotaMb: details.storageQuotaMb,
+    };
+
+    return `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="utf-8">
+          <style>
+            body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; margin: 0; padding: 0; }
+            .container { max-width: 650px; margin: 0 auto; padding: 20px; }
+            .header { background: linear-gradient(135deg, #1976d2 0%, #1565c0 100%); color: white; padding: 30px; text-align: center; border-radius: 8px 8px 0 0; }
+            .header h1 { margin: 0; font-size: 24px; }
+            .header p { margin: 10px 0 0 0; opacity: 0.9; }
+            .content { padding: 30px; background-color: #ffffff; border: 1px solid #e0e0e0; border-top: none; }
+            .section { margin-bottom: 25px; }
+            .section-title { font-size: 16px; font-weight: bold; color: #1976d2; margin-bottom: 15px; padding-bottom: 8px; border-bottom: 2px solid #e3f2fd; }
+            .detail-row { display: flex; margin-bottom: 12px; }
+            .detail-label { font-weight: 600; color: #666; width: 160px; flex-shrink: 0; }
+            .detail-value { color: #333; flex: 1; }
+            .highlight-box { background-color: #e3f2fd; border-left: 4px solid #1976d2; padding: 15px; margin: 20px 0; border-radius: 0 4px 4px 0; }
+            .footer { text-align: center; padding: 20px; font-size: 12px; color: #666; background-color: #f5f5f5; border-radius: 0 0 8px 8px; border: 1px solid #e0e0e0; border-top: none; }
+            .badge { display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: bold; }
+            .badge-success { background-color: #c8e6c9; color: #2e7d32; }
+            table { width: 100%; border-collapse: collapse; }
+            td { padding: 10px 0; vertical-align: top; }
+            td.label { width: 160px; font-weight: 600; color: #666; }
+            td.value { color: #333; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="header">
+              <h1>🎉 New Client Registration</h1>
+              <p>A new organization has registered on SelfAccounting.AI</p>
+            </div>
+            <div class="content">
+              <div class="highlight-box">
+                <strong>Organization:</strong> ${safe.organizationName}<br>
+                <strong>Registered:</strong> ${formatDate(details.registrationDate)}
+              </div>
+              
+              <div class="section">
+                <div class="section-title">📋 Organization Details</div>
+                <table>
+                  <tr>
+                    <td class="label">Organization Name</td>
+                    <td class="value">${safe.organizationName}</td>
+                  </tr>
+                  <tr>
+                    <td class="label">Plan Type</td>
+                    <td class="value"><span class="badge badge-success">${safe.planType}</span></td>
+                  </tr>
+                  ${safe.vatNumber ? `<tr><td class="label">VAT Number</td><td class="value">${safe.vatNumber}</td></tr>` : ''}
+                  ${safe.address ? `<tr><td class="label">Address</td><td class="value">${safe.address}</td></tr>` : ''}
+                  ${safe.currency ? `<tr><td class="label">Currency</td><td class="value">${safe.currency}</td></tr>` : ''}
+                  ${safe.region ? `<tr><td class="label">Region</td><td class="value">${safe.region}</td></tr>` : ''}
+                  ${safe.storageQuotaMb ? `<tr><td class="label">Storage Quota</td><td class="value">${safe.storageQuotaMb} MB</td></tr>` : ''}
+                </table>
+              </div>
+
+              <div class="section">
+                <div class="section-title">👤 Admin User Details</div>
+                <table>
+                  <tr>
+                    <td class="label">Admin Name</td>
+                    <td class="value">${safe.adminName}</td>
+                  </tr>
+                  <tr>
+                    <td class="label">Admin Email</td>
+                    <td class="value"><a href="mailto:${safe.adminEmail}">${safe.adminEmail}</a></td>
+                  </tr>
+                  ${safe.adminPhone ? `<tr><td class="label">Admin Phone</td><td class="value">${safe.adminPhone}</td></tr>` : ''}
+                </table>
+              </div>
+
+              ${
+                safe.contactPerson || safe.contactEmail
+                  ? `
+              <div class="section">
+                <div class="section-title">📞 Contact Information</div>
+                <table>
+                  ${safe.contactPerson ? `<tr><td class="label">Contact Person</td><td class="value">${safe.contactPerson}</td></tr>` : ''}
+                  ${safe.contactEmail ? `<tr><td class="label">Contact Email</td><td class="value"><a href="mailto:${safe.contactEmail}">${safe.contactEmail}</a></td></tr>` : ''}
+                </table>
+              </div>
+              `
+                  : ''
+              }
+
+              <div class="section">
+                <div class="section-title">🔑 License Information</div>
+                <table>
+                  <tr>
+                    <td class="label">License Key</td>
+                    <td class="value" style="font-family: monospace; background-color: #f5f5f5; padding: 8px; border-radius: 4px;">${safe.licenseKey}</td>
+                  </tr>
+                </table>
+              </div>
+            </div>
+            <div class="footer">
+              <p>This is an automated notification from SelfAccounting.AI</p>
+              <p style="color: #999; margin-top: 10px;">Registration tracked at ${formatDate(details.registrationDate)}</p>
+            </div>
+          </div>
+        </body>
+      </html>
+    `;
+  }
+
+  private buildNewRegistrationNotificationText(details: {
+    licenseKey: string;
+    organizationName: string;
+    planType: string;
+    adminName: string;
+    adminEmail: string;
+    adminPhone?: string;
+    vatNumber?: string;
+    address?: string;
+    currency?: string;
+    region?: string;
+    contactPerson?: string;
+    contactEmail?: string;
+    storageQuotaMb?: number;
+    registrationDate: Date;
+  }): string {
+    const formatDate = (date: Date) => {
+      return date.toLocaleString('en-US', {
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        timeZoneName: 'short',
+      });
+    };
+
+    let text = `
+🎉 NEW CLIENT REGISTRATION - SelfAccounting.AI
+================================================
+
+A new organization has registered on SelfAccounting.AI
+
+ORGANIZATION DETAILS
+--------------------
+Organization Name: ${details.organizationName}
+Plan Type: ${details.planType}`;
+
+    if (details.vatNumber) text += `\nVAT Number: ${details.vatNumber}`;
+    if (details.address) text += `\nAddress: ${details.address}`;
+    if (details.currency) text += `\nCurrency: ${details.currency}`;
+    if (details.region) text += `\nRegion: ${details.region}`;
+    if (details.storageQuotaMb)
+      text += `\nStorage Quota: ${details.storageQuotaMb} MB`;
+
+    text += `
+
+ADMIN USER DETAILS
+------------------
+Admin Name: ${details.adminName}
+Admin Email: ${details.adminEmail}`;
+
+    if (details.adminPhone) text += `\nAdmin Phone: ${details.adminPhone}`;
+
+    if (details.contactPerson || details.contactEmail) {
+      text += `
+
+CONTACT INFORMATION
+-------------------`;
+      if (details.contactPerson)
+        text += `\nContact Person: ${details.contactPerson}`;
+      if (details.contactEmail)
+        text += `\nContact Email: ${details.contactEmail}`;
+    }
+
+    text += `
+
+LICENSE INFORMATION
+-------------------
+License Key: ${details.licenseKey}
+
+---
+Registration Date: ${formatDate(details.registrationDate)}
+This is an automated notification from SelfAccounting.AI
+`;
+
+    return text;
+  }
 }

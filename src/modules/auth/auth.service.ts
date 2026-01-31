@@ -140,6 +140,29 @@ export class AuthService {
       console.error('Failed to send welcome email:', error);
     }
 
+    // Send notification to super admin about new registration
+    try {
+      await this.emailService.sendNewRegistrationNotificationToSuperAdmin({
+        licenseKey: license.key,
+        organizationName: dto.organizationName,
+        planType: planType,
+        adminName: dto.adminName,
+        adminEmail: dto.adminEmail,
+        adminPhone: dto.adminPhone || undefined,
+        vatNumber: dto.vatNumber || undefined,
+        address: dto.address || undefined,
+        currency: dto.currency || undefined,
+        region: dto.region || undefined,
+        contactPerson: dto.contactPerson || undefined,
+        contactEmail: dto.contactEmail || undefined,
+        storageQuotaMb: license.storageQuotaMb ?? undefined,
+        registrationDate: new Date(),
+      });
+    } catch (error) {
+      // Log error but don't fail registration if notification fails
+      console.error('Failed to send super admin notification:', error);
+    }
+
     const tokens = await this.generateTokens(adminUser);
     return { tokens, user: this.mapUser(adminUser) };
   }
