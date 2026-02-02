@@ -112,6 +112,9 @@ export class Organization extends AbstractEntity {
   @Column({ name: 'enable_inventory', type: 'boolean', default: false })
   enableInventory: boolean;
 
+  @Column({ name: 'enable_bulk_journal_import', type: 'boolean', default: false })
+  enableBulkJournalImport: boolean;
+
   @ManyToOne(() => Plan, (plan) => plan.organizations, {
     nullable: true,
     eager: false,

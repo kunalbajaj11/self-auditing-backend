@@ -80,6 +80,7 @@ export class OrganizationsController {
       contactEmail: organization.contactEmail,
       enablePayroll: organization.enablePayroll,
       enableInventory: organization.enableInventory,
+      enableBulkJournalImport: organization.enableBulkJournalImport,
       vatNumber: organization.vatNumber,
       address: organization.address,
       bankAccountHolder: organization.bankAccountHolder,
@@ -113,6 +114,7 @@ export class OrganizationsController {
       planType: updated.planType,
       enablePayroll: updated.enablePayroll,
       enableInventory: updated.enableInventory,
+      enableBulkJournalImport: updated.enableBulkJournalImport,
       vatNumber: updated.vatNumber,
       address: updated.address,
       bankAccountHolder: updated.bankAccountHolder,
@@ -211,6 +213,7 @@ export class OrganizationsController {
       region: updated.region,
       enablePayroll: updated.enablePayroll,
       enableInventory: updated.enableInventory,
+      enableBulkJournalImport: updated.enableBulkJournalImport,
     };
   }
 }

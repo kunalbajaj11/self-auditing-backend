@@ -10,6 +10,7 @@ import { Organization } from '../../entities/organization.entity';
 import { User } from '../../entities/user.entity';
 import { ExpensePayment } from '../../entities/expense-payment.entity';
 import { CreateJournalEntryDto } from './dto/create-journal-entry.dto';
+import { BulkCreateJournalEntryDto } from './dto/bulk-create-journal-entry.dto';
 import { UpdateJournalEntryDto } from './dto/update-journal-entry.dto';
 import { JournalEntryFilterDto } from './dto/journal-entry-filter.dto';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
@@ -207,6 +208,95 @@ export class JournalEntriesService {
     });
 
     return saved;
+  }
+
+  /**
+   * Bulk create journal entries (e.g. for opening balance migration from Tally/Zoho).
+   * Runs in a transaction; fails entirely if any entry fails validation.
+   */
+  async bulkCreate(
+    organizationId: string,
+    userId: string,
+    dto: BulkCreateJournalEntryDto,
+  ): Promise<{ created: JournalEntry[]; errors?: string[] }> {
+    const organization = await this.organizationsRepository.findOne({
+      where: { id: organizationId },
+    });
+    if (!organization) {
+      throw new NotFoundException('Organization not found');
+    }
+
+    const user = await this.usersRepository.findOne({
+      where: { id: userId },
+    });
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    const created: JournalEntry[] = [];
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
+    try {
+      for (const entryDto of dto.entries) {
+        // Same validations as create()
+        if (entryDto.debitAccount === entryDto.creditAccount) {
+          await queryRunner.rollbackTransaction();
+          throw new BadRequestException(
+            `Debit and credit account cannot be the same: ${entryDto.debitAccount}`,
+          );
+        }
+        if (
+          entryDto.debitAccount === 'retained_earnings' ||
+          entryDto.creditAccount === 'retained_earnings'
+        ) {
+          await queryRunner.rollbackTransaction();
+          throw new BadRequestException(
+            'Retained Earnings cannot be used in journal entries. Use Owner/Shareholder Account for opening balance equity.',
+          );
+        }
+
+        const journalEntry = this.journalEntriesRepository.create({
+          organization: { id: organizationId },
+          user: { id: userId },
+          debitAccount: entryDto.debitAccount,
+          creditAccount: entryDto.creditAccount,
+          amount: entryDto.amount.toFixed(2),
+          entryDate: entryDto.entryDate,
+          description: entryDto.description,
+          referenceNumber: entryDto.referenceNumber,
+          customerVendorId: entryDto.customerVendorId,
+          customerVendorName: entryDto.customerVendorName,
+          vendorTrn: entryDto.vendorTrn,
+          vatAmount: entryDto.vatAmount ? entryDto.vatAmount.toFixed(2) : null,
+          vatTaxType: entryDto.vatTaxType,
+          subAccount: entryDto.subAccount,
+          attachmentId: entryDto.attachmentId,
+          notes: entryDto.notes,
+        });
+
+        const saved = await queryRunner.manager.save(JournalEntry, journalEntry);
+        created.push(saved);
+
+        await this.auditLogsService.record({
+          organizationId,
+          userId,
+          entityType: 'JournalEntry',
+          entityId: saved.id,
+          action: AuditAction.CREATE,
+          changes: saved,
+        });
+      }
+
+      await queryRunner.commitTransaction();
+      return { created };
+    } catch (error) {
+      await queryRunner.rollbackTransaction();
+      throw error;
+    } finally {
+      await queryRunner.release();
+    }
   }
 
   async update(

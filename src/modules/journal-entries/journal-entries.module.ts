@@ -7,6 +7,8 @@ import { ExpensePayment } from '../../entities/expense-payment.entity';
 import { JournalEntriesService } from './journal-entries.service';
 import { JournalEntriesController } from './journal-entries.controller';
 import { AuditLogsModule } from '../audit-logs/audit-logs.module';
+import { LicenseKeysModule } from '../license-keys/license-keys.module';
+import { LicenseFeatureGuard } from '../../common/guards/license-feature.guard';
 
 @Module({
   imports: [
@@ -17,9 +19,10 @@ import { AuditLogsModule } from '../audit-logs/audit-logs.module';
       ExpensePayment,
     ]),
     AuditLogsModule,
+    LicenseKeysModule,
   ],
   controllers: [JournalEntriesController],
-  providers: [JournalEntriesService],
+  providers: [JournalEntriesService, LicenseFeatureGuard],
   exports: [JournalEntriesService],
 })
 export class JournalEntriesModule {}

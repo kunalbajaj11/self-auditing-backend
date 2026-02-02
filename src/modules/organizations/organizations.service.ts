@@ -68,6 +68,7 @@ export class OrganizationsService {
       region: region,
       enablePayroll: dto.enablePayroll ?? false,
       enableInventory: dto.enableInventory ?? false,
+      enableBulkJournalImport: dto.enableBulkJournalImport ?? false,
     });
 
     if (dto.planId) {
@@ -155,6 +156,9 @@ export class OrganizationsService {
     }
     if (dto.enableInventory !== undefined) {
       organization.enableInventory = dto.enableInventory;
+    }
+    if (dto.enableBulkJournalImport !== undefined) {
+      organization.enableBulkJournalImport = dto.enableBulkJournalImport;
     }
     if (dto.bankAccountHolder !== undefined) {
       organization.bankAccountHolder = dto.bankAccountHolder;

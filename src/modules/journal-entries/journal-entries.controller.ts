@@ -13,6 +13,8 @@ import { JournalEntriesService } from './journal-entries.service';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { TenantGuard } from '../../common/guards/tenant.guard';
+import { LicenseFeatureGuard } from '../../common/guards/license-feature.guard';
+import { RequireLicenseFeature } from '../../common/decorators/license-feature.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { UserRole } from '../../common/enums/user-role.enum';
 import {
@@ -20,6 +22,7 @@ import {
   CurrentUser,
 } from '../../common/decorators/current-user.decorator';
 import { CreateJournalEntryDto } from './dto/create-journal-entry.dto';
+import { BulkCreateJournalEntryDto } from './dto/bulk-create-journal-entry.dto';
 import { UpdateJournalEntryDto } from './dto/update-journal-entry.dto';
 import { JournalEntryFilterDto } from './dto/journal-entry-filter.dto';
 
@@ -56,6 +59,21 @@ export class JournalEntriesController {
     @Body() dto: CreateJournalEntryDto,
   ) {
     return this.journalEntriesService.create(
+      user?.organizationId as string,
+      user?.userId as string,
+      dto,
+    );
+  }
+
+  @Post('bulk')
+  @Roles(UserRole.ADMIN, UserRole.ACCOUNTANT)
+  @UseGuards(LicenseFeatureGuard)
+  @RequireLicenseFeature('bulkJournalImport')
+  async bulkCreate(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: BulkCreateJournalEntryDto,
+  ) {
+    return this.journalEntriesService.bulkCreate(
       user?.organizationId as string,
       user?.userId as string,
       dto,

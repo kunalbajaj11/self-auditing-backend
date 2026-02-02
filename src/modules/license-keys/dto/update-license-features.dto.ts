@@ -8,4 +8,8 @@ export class UpdateLicenseFeaturesDto {
   @IsOptional()
   @IsBoolean()
   enableInventory?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  enableBulkJournalImport?: boolean;
 }

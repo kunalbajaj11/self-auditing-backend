@@ -90,6 +90,7 @@ export interface OrganizationUsageItem {
   licenseExpiresAt?: Date | null;
   enablePayroll?: boolean;
   enableInventory?: boolean;
+  enableBulkJournalImport?: boolean;
 }
 
 @Injectable()
@@ -267,6 +268,7 @@ export class SuperAdminService {
             licenseExpiresAt: license?.expiresAt ?? null,
             enablePayroll: organization.enablePayroll,
             enableInventory: organization.enableInventory,
+            enableBulkJournalImport: organization.enableBulkJournalImport,
           };
         }),
       );

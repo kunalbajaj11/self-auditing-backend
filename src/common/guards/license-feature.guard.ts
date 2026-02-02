@@ -19,7 +19,7 @@ export class LicenseFeatureGuard implements CanActivate {
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const requiredFeature = this.reflector.getAllAndOverride<
-      'payroll' | 'inventory'
+      'payroll' | 'inventory' | 'bulkJournalImport'
     >(LICENSE_FEATURE_KEY, [context.getHandler(), context.getClass()]);
 
     // If no feature restriction, allow access
@@ -53,7 +53,11 @@ export class LicenseFeatureGuard implements CanActivate {
 
     if (!isEnabled) {
       const featureName =
-        requiredFeature === 'payroll' ? 'Payroll' : 'Inventory';
+        requiredFeature === 'payroll'
+          ? 'Payroll'
+          : requiredFeature === 'inventory'
+            ? 'Inventory'
+            : 'Bulk journal import (migration)';
       throw new ForbiddenException(
         `${featureName} feature is not enabled for your license. Please contact your administrator to enable this feature.`,
       );

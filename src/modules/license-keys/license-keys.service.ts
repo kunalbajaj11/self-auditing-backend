@@ -54,6 +54,7 @@ export class LicenseKeysService {
       region: dto.region ?? null,
       enablePayroll: false, // Default to disabled
       enableInventory: false, // Default to disabled
+      enableBulkJournalImport: false, // Default to disabled
       createdById,
     });
     const savedLicense = await this.licenseKeysRepository.save(license);
@@ -286,7 +287,10 @@ export class LicenseKeysService {
     license.consumedAt = new Date();
     license.consumedByOrganizationId = organizationId;
     license.consumedByUserId = userId;
-    await this.licenseKeysRepository.save(license);
+    const saved = await this.licenseKeysRepository.save(license);
+
+    // Sync license features to the organization so they take effect immediately
+    await this.syncLicenseFeaturesToOrganization(saved);
   }
 
   async findAndRenewByOrganizationId(
@@ -409,7 +413,11 @@ export class LicenseKeysService {
 
   async updateFeatures(
     id: string,
-    dto: { enablePayroll?: boolean; enableInventory?: boolean },
+    dto: {
+      enablePayroll?: boolean;
+      enableInventory?: boolean;
+      enableBulkJournalImport?: boolean;
+    },
   ): Promise<LicenseKey> {
     const license = await this.licenseKeysRepository.findOne({ where: { id } });
     if (!license) {
@@ -422,18 +430,44 @@ export class LicenseKeysService {
     if (dto.enableInventory !== undefined) {
       license.enableInventory = dto.enableInventory;
     }
+    if (dto.enableBulkJournalImport !== undefined) {
+      license.enableBulkJournalImport = dto.enableBulkJournalImport;
+    }
 
-    return this.licenseKeysRepository.save(license);
+    const saved = await this.licenseKeysRepository.save(license);
+
+    // Sync to consuming organization so the feature is effective
+    if (saved.consumedByOrganizationId) {
+      await this.syncLicenseFeaturesToOrganization(saved);
+    }
+
+    return saved;
+  }
+
+  private async syncLicenseFeaturesToOrganization(
+    license: LicenseKey,
+  ): Promise<void> {
+    if (!license.consumedByOrganizationId) return;
+
+    const org = await this.organizationsRepository.findOne({
+      where: { id: license.consumedByOrganizationId },
+    });
+    if (!org) return;
+
+    org.enablePayroll = license.enablePayroll;
+    org.enableInventory = license.enableInventory;
+    org.enableBulkJournalImport = license.enableBulkJournalImport;
+    await this.organizationsRepository.save(org);
   }
 
   async isFeatureEnabled(
     organizationId: string,
-    feature: 'payroll' | 'inventory',
+    feature: 'payroll' | 'inventory' | 'bulkJournalImport',
   ): Promise<boolean> {
-    // Check organization's direct feature flags (not license key)
+    // Check organization's feature flags (synced from license)
     const organization = await this.organizationsRepository.findOne({
       where: { id: organizationId },
-      select: ['enablePayroll', 'enableInventory'],
+      select: ['enablePayroll', 'enableInventory', 'enableBulkJournalImport'],
     });
 
     if (!organization) {
@@ -445,6 +479,9 @@ export class LicenseKeysService {
     }
     if (feature === 'inventory') {
       return organization.enableInventory ?? false;
+    }
+    if (feature === 'bulkJournalImport') {
+      return organization.enableBulkJournalImport ?? false;
     }
 
     return false;

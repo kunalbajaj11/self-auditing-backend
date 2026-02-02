@@ -56,6 +56,10 @@ export class CreateOrganizationDto {
   enableInventory?: boolean;
 
   @IsOptional()
+  @IsBoolean()
+  enableBulkJournalImport?: boolean;
+
+  @IsOptional()
   @IsString()
   bankAccountHolder?: string;
 
