@@ -139,6 +139,29 @@ export class LicenseKeysService {
       }
     }
 
+    // Send notification to super admin about new license creation
+    try {
+      await this.emailService.sendNewLicenseCreationNotificationToSuperAdmin({
+        key: savedLicense.key,
+        planType: dto.planType ?? undefined,
+        maxUsers: dto.maxUsers ?? undefined,
+        storageQuotaMb: dto.storageQuotaMb ?? undefined,
+        maxUploads: dto.maxUploads ?? undefined,
+        notes: dto.notes ?? undefined,
+        region: dto.region ?? undefined,
+        validityDays: dto.validityDays ?? undefined,
+        email: dto.email,
+        expiresAt: savedLicense.expiresAt,
+        createdAt: savedLicense.createdAt ?? new Date(),
+        createdById,
+      });
+    } catch (error) {
+      console.error(
+        'Failed to send super admin license creation notification:',
+        error,
+      );
+    }
+
     return savedLicense;
   }
 

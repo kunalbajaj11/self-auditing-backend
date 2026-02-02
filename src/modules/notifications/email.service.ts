@@ -447,28 +447,12 @@ Follow us:
     storageQuotaMb?: number;
     registrationDate: Date;
   }): Promise<boolean> {
-    // Backup email used when env is not set or invalid
-    const backupEmail = 'kunalbajaj19@outlook.com';
+    const superAdminEmail = this.getSuperAdminNotificationEmail();
 
-    const configuredEmail = this.configService.get<string>(
-      'SUPER_ADMIN_NOTIFICATION_EMAIL',
-    );
-    const rawEmail = (configuredEmail ?? '').trim();
-    const superAdminEmail =
-      rawEmail && this.isValidEmail(rawEmail) ? rawEmail : backupEmail;
-
-    if (!rawEmail || !this.isValidEmail(rawEmail)) {
-      console.warn(
-        'SUPER_ADMIN_NOTIFICATION_EMAIL not set or invalid; using backup:',
-        backupEmail,
-      );
-    }
-
-    // Sanitize organization name for subject line (remove potentially problematic characters)
-    const safeOrgName = registrationDetails.organizationName
-      .replace(/[<>]/g, '')
-      .substring(0, 100);
-    const subject = `🎉 New Registration: ${safeOrgName}`;
+    // Sanitize organization name for subject line (null-safe, remove problematic chars, limit length)
+    const rawOrgName = (registrationDetails.organizationName ?? '').trim();
+    const safeOrgName = rawOrgName.replace(/[<>]/g, '').substring(0, 100);
+    const subject = `🎉 New Registration: ${safeOrgName || 'New Client'}`;
 
     const html = this.buildNewRegistrationNotificationHtml(registrationDetails);
     const text = this.buildNewRegistrationNotificationText(registrationDetails);
@@ -479,6 +463,25 @@ Follow us:
       html,
       text,
     });
+  }
+
+  /**
+   * Resolve super admin notification email: env SUPER_ADMIN_NOTIFICATION_EMAIL or backup.
+   */
+  private getSuperAdminNotificationEmail(): string {
+    const backupEmail = 'kunalbajaj19@outlook.com';
+    const configuredEmail = this.configService.get<string>(
+      'SUPER_ADMIN_NOTIFICATION_EMAIL',
+    );
+    const rawEmail = (configuredEmail ?? '').trim();
+    if (!rawEmail || !this.isValidEmail(rawEmail)) {
+      console.warn(
+        'SUPER_ADMIN_NOTIFICATION_EMAIL not set or invalid; using backup:',
+        backupEmail,
+      );
+      return backupEmail;
+    }
+    return rawEmail;
   }
 
   /**
@@ -500,6 +503,14 @@ Follow us:
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&#039;');
+  }
+
+  /**
+   * Sanitize user content for plain-text email (collapse newlines to avoid layout spoofing)
+   */
+  private sanitizeForPlainText(text: string | undefined | null): string {
+    if (!text) return '';
+    return text.replace(/\r?\n/g, ' ').trim();
   }
 
   private buildNewRegistrationNotificationHtml(details: {
@@ -690,13 +701,17 @@ A new organization has registered on SelfAccounting.AI
 
 ORGANIZATION DETAILS
 --------------------
-Organization Name: ${details.organizationName}
-Plan Type: ${details.planType}`;
+Organization Name: ${this.sanitizeForPlainText(details.organizationName)}
+Plan Type: ${this.sanitizeForPlainText(details.planType)}`;
 
-    if (details.vatNumber) text += `\nVAT Number: ${details.vatNumber}`;
-    if (details.address) text += `\nAddress: ${details.address}`;
-    if (details.currency) text += `\nCurrency: ${details.currency}`;
-    if (details.region) text += `\nRegion: ${details.region}`;
+    if (details.vatNumber)
+      text += `\nVAT Number: ${this.sanitizeForPlainText(details.vatNumber)}`;
+    if (details.address)
+      text += `\nAddress: ${this.sanitizeForPlainText(details.address)}`;
+    if (details.currency)
+      text += `\nCurrency: ${this.sanitizeForPlainText(details.currency)}`;
+    if (details.region)
+      text += `\nRegion: ${this.sanitizeForPlainText(details.region)}`;
     if (details.storageQuotaMb)
       text += `\nStorage Quota: ${details.storageQuotaMb} MB`;
 
@@ -704,10 +719,11 @@ Plan Type: ${details.planType}`;
 
 ADMIN USER DETAILS
 ------------------
-Admin Name: ${details.adminName}
-Admin Email: ${details.adminEmail}`;
+Admin Name: ${this.sanitizeForPlainText(details.adminName)}
+Admin Email: ${this.sanitizeForPlainText(details.adminEmail)}`;
 
-    if (details.adminPhone) text += `\nAdmin Phone: ${details.adminPhone}`;
+    if (details.adminPhone)
+      text += `\nAdmin Phone: ${this.sanitizeForPlainText(details.adminPhone)}`;
 
     if (details.contactPerson || details.contactEmail) {
       text += `
@@ -715,22 +731,205 @@ Admin Email: ${details.adminEmail}`;
 CONTACT INFORMATION
 -------------------`;
       if (details.contactPerson)
-        text += `\nContact Person: ${details.contactPerson}`;
+        text += `\nContact Person: ${this.sanitizeForPlainText(details.contactPerson)}`;
       if (details.contactEmail)
-        text += `\nContact Email: ${details.contactEmail}`;
+        text += `\nContact Email: ${this.sanitizeForPlainText(details.contactEmail)}`;
     }
 
     text += `
 
 LICENSE INFORMATION
 -------------------
-License Key: ${details.licenseKey}
+License Key: ${this.sanitizeForPlainText(details.licenseKey)}
 
 ---
 Registration Date: ${formatDate(details.registrationDate)}
 This is an automated notification from SelfAccounting.AI
 `;
 
+    return text;
+  }
+
+  /**
+   * Send notification to super admin when a new license key is created
+   */
+  async sendNewLicenseCreationNotificationToSuperAdmin(details: {
+    key: string;
+    planType?: string;
+    maxUsers?: number;
+    storageQuotaMb?: number;
+    maxUploads?: number;
+    notes?: string;
+    region?: string;
+    validityDays?: number;
+    email: string;
+    expiresAt: Date;
+    createdAt: Date;
+    createdById?: string;
+  }): Promise<boolean> {
+    const superAdminEmail = this.getSuperAdminNotificationEmail();
+    const rawKey = (details.key ?? '').trim();
+    const subjectKey = rawKey.replace(/[<>]/g, '').substring(0, 50);
+    const subject = `🔑 New License Created: ${subjectKey || 'New License'}${rawKey.length > 50 ? '...' : ''}`;
+
+    const html = this.buildNewLicenseCreationNotificationHtml(details);
+    const text = this.buildNewLicenseCreationNotificationText(details);
+
+    return this.sendEmail({
+      to: superAdminEmail,
+      subject,
+      html,
+      text,
+    });
+  }
+
+  private buildNewLicenseCreationNotificationHtml(details: {
+    key: string;
+    planType?: string;
+    maxUsers?: number;
+    storageQuotaMb?: number;
+    maxUploads?: number;
+    notes?: string;
+    region?: string;
+    validityDays?: number;
+    email: string;
+    expiresAt: Date;
+    createdAt: Date;
+    createdById?: string;
+  }): string {
+    const formatDate = (date: Date) =>
+      date.toLocaleString('en-US', {
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        timeZoneName: 'short',
+      });
+
+    const safe = {
+      key: this.escapeHtml(details.key),
+      planType: this.escapeHtml(details.planType),
+      notes: this.escapeHtml(details.notes),
+      region: this.escapeHtml(details.region),
+      email: this.escapeHtml(details.email),
+    };
+
+    return `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="utf-8">
+          <style>
+            body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; margin: 0; padding: 0; }
+            .container { max-width: 650px; margin: 0 auto; padding: 20px; }
+            .header { background: linear-gradient(135deg, #2e7d32 0%, #1b5e20 100%); color: white; padding: 30px; text-align: center; border-radius: 8px 8px 0 0; }
+            .header h1 { margin: 0; font-size: 24px; }
+            .content { padding: 30px; background-color: #fff; border: 1px solid #e0e0e0; border-top: none; }
+            .section-title { font-size: 16px; font-weight: bold; color: #2e7d32; margin-bottom: 15px; padding-bottom: 8px; border-bottom: 2px solid #e8f5e9; }
+            .highlight-box { background-color: #e8f5e9; border-left: 4px solid #2e7d32; padding: 15px; margin: 20px 0; border-radius: 0 4px 4px 0; }
+            table { width: 100%; border-collapse: collapse; }
+            td { padding: 10px 0; vertical-align: top; }
+            td.label { width: 180px; font-weight: 600; color: #666; }
+            td.value { color: #333; }
+            .license-key { font-family: monospace; background-color: #f5f5f5; padding: 10px; border-radius: 4px; word-break: break-all; }
+            .footer { text-align: center; padding: 20px; font-size: 12px; color: #666; background-color: #f5f5f5; border-radius: 0 0 8px 8px; border: 1px solid #e0e0e0; border-top: none; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="header">
+              <h1>🔑 New License Key Created</h1>
+              <p>A new license key has been created on SelfAccounting.AI</p>
+            </div>
+            <div class="content">
+              <div class="highlight-box">
+                <strong>License Key:</strong> <span class="license-key">${safe.key}</span><br>
+                <strong>Created:</strong> ${formatDate(details.createdAt)}
+              </div>
+              <div class="section-title">📋 License Form Details</div>
+              <table>
+                <tr><td class="label">License Key</td><td class="value"><span class="license-key">${safe.key}</span></td></tr>
+                <tr><td class="label">Recipient Email</td><td class="value"><a href="mailto:${safe.email}">${safe.email}</a></td></tr>
+                ${safe.planType ? `<tr><td class="label">Plan Type</td><td class="value">${safe.planType}</td></tr>` : ''}
+                ${details.maxUsers != null ? `<tr><td class="label">Max Users</td><td class="value">${details.maxUsers}</td></tr>` : ''}
+                ${details.storageQuotaMb != null ? `<tr><td class="label">Storage Quota (MB)</td><td class="value">${details.storageQuotaMb}</td></tr>` : ''}
+                ${details.maxUploads != null ? `<tr><td class="label">Max Uploads</td><td class="value">${details.maxUploads}</td></tr>` : ''}
+                ${details.validityDays != null ? `<tr><td class="label">Validity (Days)</td><td class="value">${details.validityDays}</td></tr>` : ''}
+                <tr><td class="label">Expires At</td><td class="value">${formatDate(details.expiresAt)}</td></tr>
+                ${safe.region ? `<tr><td class="label">Region</td><td class="value">${safe.region}</td></tr>` : ''}
+                ${safe.notes ? `<tr><td class="label">Notes</td><td class="value">${safe.notes}</td></tr>` : ''}
+                ${details.createdById ? `<tr><td class="label">Created By (User ID)</td><td class="value">${this.escapeHtml(details.createdById)}</td></tr>` : ''}
+              </table>
+            </div>
+            <div class="footer">
+              <p>This is an automated notification from SelfAccounting.AI</p>
+              <p style="color: #999; margin-top: 10px;">License created at ${formatDate(details.createdAt)}</p>
+            </div>
+          </div>
+        </body>
+      </html>
+    `;
+  }
+
+  private buildNewLicenseCreationNotificationText(details: {
+    key: string;
+    planType?: string;
+    maxUsers?: number;
+    storageQuotaMb?: number;
+    maxUploads?: number;
+    notes?: string;
+    region?: string;
+    validityDays?: number;
+    email: string;
+    expiresAt: Date;
+    createdAt: Date;
+    createdById?: string;
+  }): string {
+    const formatDate = (date: Date) =>
+      date.toLocaleString('en-US', {
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        timeZoneName: 'short',
+      });
+
+    let text = `
+🔑 NEW LICENSE KEY CREATED - SelfAccounting.AI
+================================================
+
+LICENSE DETAILS
+---------------
+License Key: ${this.sanitizeForPlainText(details.key)}
+Recipient Email: ${this.sanitizeForPlainText(details.email)}
+Expires At: ${formatDate(details.expiresAt)}`;
+
+    if (details.planType)
+      text += `\nPlan Type: ${this.sanitizeForPlainText(details.planType)}`;
+    if (details.maxUsers != null) text += `\nMax Users: ${details.maxUsers}`;
+    if (details.storageQuotaMb != null)
+      text += `\nStorage Quota (MB): ${details.storageQuotaMb}`;
+    if (details.maxUploads != null)
+      text += `\nMax Uploads: ${details.maxUploads}`;
+    if (details.validityDays != null)
+      text += `\nValidity (Days): ${details.validityDays}`;
+    if (details.region)
+      text += `\nRegion: ${this.sanitizeForPlainText(details.region)}`;
+    if (details.notes)
+      text += `\nNotes: ${this.sanitizeForPlainText(details.notes)}`;
+    if (details.createdById)
+      text += `\nCreated By (User ID): ${this.sanitizeForPlainText(details.createdById)}`;
+
+    text += `
+
+---
+Created At: ${formatDate(details.createdAt)}
+This is an automated notification from SelfAccounting.AI
+`;
     return text;
   }
 }
