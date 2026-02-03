@@ -68,6 +68,18 @@ __decorate([
     (0, typeorm_1.Column)({ name: 'sent_at', type: 'timestamp', nullable: true }),
     __metadata("design:type", Date)
 ], Notification.prototype, "sentAt", void 0);
+__decorate([
+    (0, typeorm_1.Column)({ name: 'send_attempts', type: 'int', default: 0 }),
+    __metadata("design:type", Number)
+], Notification.prototype, "sendAttempts", void 0);
+__decorate([
+    (0, typeorm_1.Column)({ name: 'last_attempt_at', type: 'timestamp', nullable: true }),
+    __metadata("design:type", Date)
+], Notification.prototype, "lastAttemptAt", void 0);
+__decorate([
+    (0, typeorm_1.Column)({ name: 'last_error', type: 'text', nullable: true }),
+    __metadata("design:type", String)
+], Notification.prototype, "lastError", void 0);
 exports.Notification = Notification = __decorate([
     (0, typeorm_1.Entity)({ name: 'notifications' }),
     (0, typeorm_1.Index)('idx_notifications_user_read', ['user', 'isRead'])

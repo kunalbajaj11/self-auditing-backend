@@ -199,7 +199,13 @@ export class OrganizationsService {
   ): Promise<Organization> {
     const organization = await this.findById(id);
     organization.status = dto.status;
-    return this.organizationsRepository.save(organization);
+    const saved = await this.organizationsRepository.save(organization);
+    try {
+      this.superAdminService.invalidateOrganizationUsageCache();
+    } catch (error) {
+      console.warn('Failed to invalidate organization usage cache:', error);
+    }
+    return saved;
   }
 
   async activateWithExpiry(
@@ -214,7 +220,13 @@ export class OrganizationsService {
 
     // Activate the organization
     organization.status = OrganizationStatus.ACTIVE;
-    return this.organizationsRepository.save(organization);
+    const saved = await this.organizationsRepository.save(organization);
+    try {
+      this.superAdminService.invalidateOrganizationUsageCache();
+    } catch (error) {
+      console.warn('Failed to invalidate organization usage cache:', error);
+    }
+    return saved;
   }
 
   async upgradeLicense(

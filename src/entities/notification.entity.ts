@@ -48,6 +48,19 @@ export class Notification extends AbstractEntity {
   @Column({ name: 'sent_at', type: 'timestamp', nullable: true })
   sentAt?: Date | null;
 
+  /**
+   * Number of times we attempted to send this notification.
+   * Used by the hourly scheduler to cap retries.
+   */
+  @Column({ name: 'send_attempts', type: 'int', default: 0 })
+  sendAttempts: number;
+
+  @Column({ name: 'last_attempt_at', type: 'timestamp', nullable: true })
+  lastAttemptAt?: Date | null;
+
+  @Column({ name: 'last_error', type: 'text', nullable: true })
+  lastError?: string | null;
+
   @Column({ name: 'entity_type', length: 50, nullable: true })
   entityType?: string | null; // e.g., 'invoice', 'expense', 'accrual'
 

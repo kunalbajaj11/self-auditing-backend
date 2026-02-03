@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, In } from 'typeorm';
+import { Repository, In, LessThan, LessThanOrEqual } from 'typeorm';
 import { Notification } from '../../entities/notification.entity';
 import { Accrual } from '../../entities/accrual.entity';
 import { SalesInvoice } from '../../entities/sales-invoice.entity';
@@ -25,6 +25,7 @@ import { ForexRateService } from '../forex/forex-rate.service';
 @Injectable()
 export class SchedulerService {
   private readonly logger = new Logger(SchedulerService.name);
+  private static readonly MAX_NOTIFICATION_SEND_ATTEMPTS = 3;
 
   constructor(
     @InjectRepository(Notification)
@@ -55,32 +56,82 @@ export class SchedulerService {
       where: {
         isRead: false,
         sentAt: null,
+        scheduledFor: LessThanOrEqual(now),
+        sendAttempts: LessThan(SchedulerService.MAX_NOTIFICATION_SEND_ATTEMPTS),
       },
       relations: ['user', 'organization'],
     });
 
     for (const notification of scheduledNotifications) {
-      if (
-        notification.scheduledFor &&
-        new Date(notification.scheduledFor) <= now
-      ) {
-        // Send email if channel includes email
-        if (
-          notification.channel === NotificationChannel.EMAIL &&
-          notification.user?.email
-        ) {
-          const sent = await this.emailService.sendNotificationEmail(
-            notification.user.email,
-            notification.title,
-            notification.message,
-            notification.type,
-          );
+      // "Claim" an attempt atomically to avoid duplicate sends across instances.
+      const claim = await this.notificationsRepository
+        .createQueryBuilder()
+        .update(Notification)
+        .set({
+          sendAttempts: () => '"send_attempts" + 1',
+          lastAttemptAt: () => 'CURRENT_TIMESTAMP',
+        })
+        .where('id = :id', { id: notification.id })
+        .andWhere('sent_at IS NULL')
+        .andWhere('send_attempts < :max', {
+          max: SchedulerService.MAX_NOTIFICATION_SEND_ATTEMPTS,
+        })
+        .execute();
 
-          if (sent) {
-            notification.sentAt = new Date();
-            await this.notificationsRepository.save(notification);
-          }
+      if (!claim.affected) {
+        continue;
+      }
+
+      // Send email if channel includes email
+      if (notification.channel !== NotificationChannel.EMAIL) {
+        continue;
+      }
+
+      const recipientEmail =
+        notification.user?.email || notification.organization?.contactEmail;
+
+      if (!recipientEmail) {
+        await this.notificationsRepository.update(notification.id, {
+          sendAttempts: SchedulerService.MAX_NOTIFICATION_SEND_ATTEMPTS,
+          lastError: 'No recipient email available',
+        });
+        continue;
+      }
+
+      const expectedAttempts = (notification.sendAttempts ?? 0) + 1;
+
+      try {
+        const sent = await this.emailService.sendNotificationEmail(
+          recipientEmail,
+          notification.title,
+          notification.message,
+          notification.type,
+        );
+
+        if (sent) {
+          await this.notificationsRepository.update(notification.id, {
+            sentAt: new Date(),
+            lastError: null,
+          });
+        } else if (
+          expectedAttempts >= SchedulerService.MAX_NOTIFICATION_SEND_ATTEMPTS
+        ) {
+          await this.notificationsRepository.update(notification.id, {
+            lastError: 'Email send failed (max retries reached)',
+          });
+        } else {
+          await this.notificationsRepository.update(notification.id, {
+            lastError: 'Email send failed',
+          });
         }
+      } catch (error: any) {
+        const message = error?.message || 'Unknown error';
+        await this.notificationsRepository.update(notification.id, {
+          lastError:
+            expectedAttempts >= SchedulerService.MAX_NOTIFICATION_SEND_ATTEMPTS
+              ? `Email send error (max retries reached): ${message}`
+              : `Email send error: ${message}`,
+        });
       }
     }
   }

@@ -49,6 +49,8 @@ import { PayrollEntryDetail } from '../payroll/entities/payroll-entry-detail.ent
 import { EmployeeSalaryProfile } from '../payroll/entities/employee-salary-profile.entity';
 import { SalaryComponent } from '../payroll/entities/salary-component.entity';
 import { CategoryTaxRule } from '../../entities/category-tax-rule.entity';
+import { PurchaseOrder } from '../../entities/purchase-order.entity';
+import { PurchaseOrderLineItem } from '../../entities/purchase-order-line-item.entity';
 
 // Cache TTL: 5 minutes (300000 ms)
 const CACHE_TTL_MS = 5 * 60 * 1000;
@@ -499,18 +501,19 @@ export class SuperAdminService {
         .where('e.organization_id = :orgId', { orgId: organizationId })
         .execute();
 
-      await manager
-        .createQueryBuilder()
-        .delete()
-        .from(SalesInvoice, 'si')
-        .where('si.organization_id = :orgId', { orgId: organizationId })
-        .execute();
-
+      // Delete credit notes BEFORE sales_invoices (credit_notes.invoice_id references sales_invoices)
       await manager
         .createQueryBuilder()
         .delete()
         .from(CreditNote, 'cn')
         .where('cn.organization_id = :orgId', { orgId: organizationId })
+        .execute();
+
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(SalesInvoice, 'si')
+        .where('si.organization_id = :orgId', { orgId: organizationId })
         .execute();
 
       await manager
@@ -549,7 +552,24 @@ export class SuperAdminService {
         .where('il.organization_id = :orgId', { orgId: organizationId })
         .execute();
 
-      // 4. Delete master data
+      // 4. Delete master data (purchase_orders reference vendors, so delete POs first)
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(PurchaseOrderLineItem, 'poli')
+        .where(
+          'poli.purchase_order_id IN (SELECT id FROM purchase_orders WHERE organization_id = :orgId)',
+          { orgId: organizationId },
+        )
+        .execute();
+
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(PurchaseOrder, 'po')
+        .where('po.organization_id = :orgId', { orgId: organizationId })
+        .execute();
+
       await manager
         .createQueryBuilder()
         .delete()
@@ -878,17 +898,18 @@ export class SuperAdminService {
         .where('organization_id = :orgId', { orgId: organizationId })
         .execute();
 
+      // Delete credit notes BEFORE sales_invoices (credit_notes.invoice_id references sales_invoices)
       await manager
         .createQueryBuilder()
         .delete()
-        .from(SalesInvoice)
+        .from(CreditNote)
         .where('organization_id = :orgId', { orgId: organizationId })
         .execute();
 
       await manager
         .createQueryBuilder()
         .delete()
-        .from(CreditNote)
+        .from(SalesInvoice)
         .where('organization_id = :orgId', { orgId: organizationId })
         .execute();
 
@@ -921,7 +942,24 @@ export class SuperAdminService {
         .where('organization_id = :orgId', { orgId: organizationId })
         .execute();
 
-      // 4. Delete master data
+      // 4. Delete master data (purchase_orders reference vendors, so delete POs first)
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(PurchaseOrderLineItem)
+        .where(
+          'purchase_order_id IN (SELECT id FROM purchase_orders WHERE organization_id = :orgId)',
+          { orgId: organizationId },
+        )
+        .execute();
+
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(PurchaseOrder)
+        .where('organization_id = :orgId', { orgId: organizationId })
+        .execute();
+
       await manager
         .createQueryBuilder()
         .delete()

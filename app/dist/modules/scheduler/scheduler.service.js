@@ -43,20 +43,64 @@ let SchedulerService = class SchedulerService {
             where: {
                 isRead: false,
                 sentAt: null,
+                scheduledFor: (0, typeorm_2.LessThanOrEqual)(now),
+                sendAttempts: (0, typeorm_2.LessThan)(SchedulerService.MAX_NOTIFICATION_SEND_ATTEMPTS),
             },
             relations: ['user', 'organization'],
         });
         for (const notification of scheduledNotifications) {
-            if (notification.scheduledFor &&
-                new Date(notification.scheduledFor) <= now) {
-                if (notification.channel === notification_channel_enum_1.NotificationChannel.EMAIL &&
-                    notification.user?.email) {
-                    const sent = await this.emailService.sendNotificationEmail(notification.user.email, notification.title, notification.message, notification.type);
-                    if (sent) {
-                        notification.sentAt = new Date();
-                        await this.notificationsRepository.save(notification);
-                    }
+            const claim = await this.notificationsRepository
+                .createQueryBuilder()
+                .update(notification_entity_1.Notification)
+                .set({
+                sendAttempts: () => '"send_attempts" + 1',
+                lastAttemptAt: () => 'CURRENT_TIMESTAMP',
+            })
+                .where('id = :id', { id: notification.id })
+                .andWhere('sent_at IS NULL')
+                .andWhere('send_attempts < :max', { max: SchedulerService.MAX_NOTIFICATION_SEND_ATTEMPTS })
+                .execute();
+            if (!claim.affected) {
+                continue;
+            }
+            if (notification.channel !== notification_channel_enum_1.NotificationChannel.EMAIL) {
+                continue;
+            }
+            const recipientEmail = notification.user?.email || notification.organization?.contactEmail;
+            if (!recipientEmail) {
+                await this.notificationsRepository.update(notification.id, {
+                    sendAttempts: SchedulerService.MAX_NOTIFICATION_SEND_ATTEMPTS,
+                    lastError: 'No recipient email available',
+                });
+                continue;
+            }
+            const expectedAttempts = (notification.sendAttempts ?? 0) + 1;
+            try {
+                const sent = await this.emailService.sendNotificationEmail(recipientEmail, notification.title, notification.message, notification.type);
+                if (sent) {
+                    await this.notificationsRepository.update(notification.id, {
+                        sentAt: new Date(),
+                        lastError: null,
+                    });
                 }
+                else if (expectedAttempts >= SchedulerService.MAX_NOTIFICATION_SEND_ATTEMPTS) {
+                    await this.notificationsRepository.update(notification.id, {
+                        lastError: 'Email send failed (max retries reached)',
+                    });
+                }
+                else {
+                    await this.notificationsRepository.update(notification.id, {
+                        lastError: 'Email send failed',
+                    });
+                }
+            }
+            catch (error) {
+                const message = error?.message || 'Unknown error';
+                await this.notificationsRepository.update(notification.id, {
+                    lastError: expectedAttempts >= SchedulerService.MAX_NOTIFICATION_SEND_ATTEMPTS
+                        ? `Email send error (max retries reached): ${message}`
+                        : `Email send error: ${message}`,
+                });
             }
         }
     }
@@ -125,6 +169,7 @@ let SchedulerService = class SchedulerService {
     }
 };
 exports.SchedulerService = SchedulerService;
+SchedulerService.MAX_NOTIFICATION_SEND_ATTEMPTS = 3;
 __decorate([
     (0, schedule_1.Cron)(schedule_1.CronExpression.EVERY_HOUR),
     __metadata("design:type", Function),
