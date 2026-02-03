@@ -31,6 +31,7 @@ import { StockMovementType } from '../../common/enums/stock-movement-type.enum';
 import { PlanType } from '../../common/enums/plan-type.enum';
 import { PurchaseLineItem } from '../../entities/purchase-line-item.entity';
 import { Expense } from '../../entities/expense.entity';
+import { InvoiceHash } from '../../entities/invoice-hash.entity';
 import * as crypto from 'crypto';
 
 @Injectable()
@@ -58,6 +59,8 @@ export class SalesInvoicesService {
     private readonly purchaseLineItemsRepository: Repository<PurchaseLineItem>,
     @InjectRepository(Expense)
     private readonly expensesRepository: Repository<Expense>,
+    @InjectRepository(InvoiceHash)
+    private readonly invoiceHashesRepository: Repository<InvoiceHash>,
     private readonly emailService: EmailService,
     private readonly reportGeneratorService: ReportGeneratorService,
     private readonly auditLogsService: AuditLogsService,
@@ -601,7 +604,9 @@ export class SalesInvoicesService {
       user,
       invoiceNumber,
       invoiceDate: dto.invoiceDate,
+      supplyDate: dto.supplyDate || null, // Only store when explicitly provided (UAE: if different from invoice date)
       dueDate: dto.dueDate,
+      discountAmount: discountAmount.toString(),
       amount: subtotal.toString(), // Subtotal BEFORE VAT
       vatAmount: totalVatAmount.toString(),
       currency: dto.currency || 'AED',
@@ -1184,6 +1189,151 @@ export class SalesInvoicesService {
   }
 
   /**
+   * Export invoice in XML (UBL 2.1 / PINT AE compatible) or JSON for UAE e-invoicing
+   */
+  async exportToEInvoice(
+    invoiceId: string,
+    organizationId: string,
+    format: 'xml' | 'json',
+  ): Promise<string | object> {
+    const invoice = await this.invoicesRepository.findOne({
+      where: { id: invoiceId, organization: { id: organizationId } },
+      relations: ['organization', 'customer', 'lineItems'],
+    });
+
+    if (!invoice) {
+      throw new NotFoundException('Invoice not found');
+    }
+
+    const lineItems = invoice.lineItems || [];
+    if (lineItems.length === 0) {
+      throw new BadRequestException(
+        'Cannot export invoice with no line items for e-invoicing',
+      );
+    }
+
+    const org = invoice.organization;
+    const customer = invoice.customer;
+    const currency = invoice.currency || 'AED';
+
+    const payload = {
+      Invoice: {
+        InvoiceNumber: invoice.invoiceNumber,
+        IssueDate: invoice.invoiceDate,
+        SupplyDate: (invoice as any).supplyDate || invoice.invoiceDate,
+        DueDate: invoice.dueDate || null,
+        InvoiceTypeCode: invoice.status === 'proforma_invoice' ? 384 : 380,
+        CurrencyCode: currency,
+        Seller: {
+          Name: org?.name,
+          Address: org?.address,
+          TaxRegistrationNumber: org?.vatNumber,
+          Email: org?.contactEmail,
+          Phone: org?.phone,
+        },
+        Buyer: {
+          Name: customer?.name || invoice.customerName,
+          Address: customer?.address,
+          TaxRegistrationNumber: customer?.customerTrn || invoice.customerTrn,
+          Email: customer?.email,
+          Phone: customer?.phone,
+        },
+        LineItems: lineItems.map((item: any, i: number) => ({
+          LineId: i + 1,
+          Name: item.itemName,
+          Description: item.description,
+          Quantity: parseFloat(item.quantity || '0'),
+          UnitOfMeasure: item.unitOfMeasure || 'unit',
+          UnitPrice: parseFloat(item.unitPrice || '0'),
+          LineAmount: parseFloat(item.amount || '0'),
+          VATRate: parseFloat(item.vatRate || '5'),
+          VATTaxType: item.vatTaxType || 'STANDARD',
+          VATAmount: parseFloat(item.vatAmount || '0'),
+        })),
+        Subtotal: parseFloat(invoice.amount || '0'),
+        DiscountAmount: parseFloat((invoice as any).discountAmount || '0'),
+        VATAmount: parseFloat(invoice.vatAmount || '0'),
+        TotalAmount: parseFloat(invoice.totalAmount || '0'),
+        AmountInWords: null,
+      },
+    };
+
+    if (format === 'json') {
+      return payload;
+    }
+
+    // Minimal UBL 2.1 Invoice XML (PINT AE compatible structure)
+    const esc = (s: string | null | undefined) =>
+      String(s ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    const inv = payload.Invoice;
+    const lines = (inv.LineItems as any[])
+      .map(
+        (li) =>
+          `    <cac:InvoiceLine>
+      <cbc:ID>${li.LineId}</cbc:ID>
+      <cbc:InvoicedQuantity unitCode="C62">${li.Quantity}</cbc:InvoicedQuantity>
+      <cbc:LineExtensionAmount currencyID="${currency}">${li.LineAmount.toFixed(2)}</cbc:LineExtensionAmount>
+      <cac:Item>
+        <cbc:Name>${esc(li.Name)}</cbc:Name>
+        <cbc:Description>${esc(li.Description)}</cbc:Description>
+      </cac:Item>
+      <cac:Price>
+        <cbc:PriceAmount currencyID="${currency}">${li.UnitPrice.toFixed(2)}</cbc:PriceAmount>
+      </cac:Price>
+      <cac:TaxTotal>
+        <cbc:TaxAmount currencyID="${currency}">${li.VATAmount.toFixed(2)}</cbc:TaxAmount>
+      </cac:TaxTotal>
+    </cac:InvoiceLine>`,
+      )
+      .join('\n');
+
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"
+  xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2"
+  xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2">
+  <cbc:ID>${esc(inv.InvoiceNumber)}</cbc:ID>
+  <cbc:IssueDate>${inv.IssueDate}</cbc:IssueDate>
+  <cbc:DueDate>${inv.DueDate || inv.IssueDate}</cbc:DueDate>
+  <cbc:InvoiceTypeCode>${inv.InvoiceTypeCode}</cbc:InvoiceTypeCode>
+  <cbc:DocumentCurrencyCode>${currency}</cbc:DocumentCurrencyCode>
+  <cac:AccountingSupplierParty>
+    <cac:Party>
+      <cbc:Name>${esc(inv.Seller.Name)}</cbc:Name>
+      <cac:PostalAddress><cbc:StreetName>${esc(inv.Seller.Address)}</cbc:StreetName></cac:PostalAddress>
+      <cac:PartyTaxScheme>
+        <cbc:CompanyID>${esc(inv.Seller.TaxRegistrationNumber)}</cbc:CompanyID>
+      </cac:PartyTaxScheme>
+    </cac:Party>
+  </cac:AccountingSupplierParty>
+  <cac:AccountingCustomerParty>
+    <cac:Party>
+      <cbc:Name>${esc(inv.Buyer.Name)}</cbc:Name>
+      <cac:PostalAddress><cbc:StreetName>${esc(inv.Buyer.Address)}</cbc:StreetName></cac:PostalAddress>
+      <cac:PartyTaxScheme>
+        <cbc:CompanyID>${esc(inv.Buyer.TaxRegistrationNumber)}</cbc:CompanyID>
+      </cac:PartyTaxScheme>
+    </cac:Party>
+  </cac:AccountingCustomerParty>
+  <cac:TaxTotal>
+    <cbc:TaxAmount currencyID="${currency}">${inv.VATAmount.toFixed(2)}</cbc:TaxAmount>
+  </cac:TaxTotal>
+  <cac:LegalMonetaryTotal>
+    <cbc:LineExtensionAmount currencyID="${currency}">${inv.Subtotal.toFixed(2)}</cbc:LineExtensionAmount>
+    <cbc:TaxExclusiveAmount currencyID="${currency}">${(inv.Subtotal - (inv.DiscountAmount || 0)).toFixed(2)}</cbc:TaxExclusiveAmount>
+    <cbc:TaxInclusiveAmount currencyID="${currency}">${inv.TotalAmount.toFixed(2)}</cbc:TaxInclusiveAmount>
+    <cbc:PayableAmount currencyID="${currency}">${inv.TotalAmount.toFixed(2)}</cbc:PayableAmount>
+  </cac:LegalMonetaryTotal>
+${lines}
+</Invoice>`;
+
+    return xml;
+  }
+
+  /**
    * Send invoice via email with PDF attachment
    */
   async sendInvoiceEmail(
@@ -1276,6 +1426,7 @@ export class SalesInvoicesService {
     ) {
       invoice.status = InvoiceStatus.TAX_INVOICE_RECEIVABLE;
       await this.invoicesRepository.save(invoice);
+      await this.computeAndPersistInvoiceHash(invoice);
     }
   }
 
@@ -1632,6 +1783,9 @@ export class SalesInvoicesService {
     if (dto.invoiceDate !== undefined) {
       invoice.invoiceDate = dto.invoiceDate;
     }
+    if (dto.supplyDate !== undefined) {
+      invoice.supplyDate = dto.supplyDate || null;
+    }
     if (dto.dueDate !== undefined) {
       invoice.dueDate = dto.dueDate;
     }
@@ -1806,6 +1960,7 @@ export class SalesInvoicesService {
         subtotal -= discountAmount;
       }
 
+      invoice.discountAmount = discountAmount.toString();
       invoice.amount = subtotal.toString(); // Subtotal BEFORE VAT
       invoice.vatAmount = (
         standardVatAmount + reverseChargeVatAmount
@@ -1895,6 +2050,43 @@ export class SalesInvoicesService {
   }
 
   /**
+   * Compute and persist SHA-256 integrity hash when invoice is finalized.
+   * Hash input: supplier_trn + invoice_number + invoice_date + total_amount + vat_amount
+   * Used for: integrity proof, audit trail, future cryptographic stamp input.
+   */
+  async computeAndPersistInvoiceHash(
+    invoice: SalesInvoice,
+  ): Promise<InvoiceHash | null> {
+    const existing = await this.invoiceHashesRepository.findOne({
+      where: { invoice: { id: invoice.id } },
+    });
+    if (existing) return existing;
+
+    const supplierTrn = (invoice.organization?.vatNumber ?? '').toString().trim();
+    const invoiceNumber = (invoice.invoiceNumber ?? '').toString().trim();
+    const invoiceDate = (invoice.invoiceDate ?? '').toString().trim();
+    const totalAmount = (
+      invoice.totalAmount ??
+      (parseFloat(invoice.amount || '0') + parseFloat(invoice.vatAmount || '0')).toFixed(2)
+    ).toString().trim();
+    const vatAmount = (invoice.vatAmount ?? '0').toString().trim();
+    const normalizedTotal = parseFloat(totalAmount).toFixed(2);
+    const normalizedVat = parseFloat(vatAmount).toFixed(2);
+
+    const payload =
+      supplierTrn + invoiceNumber + invoiceDate + normalizedTotal + normalizedVat;
+    const hash = crypto.createHash('sha256').update(payload, 'utf8').digest('hex');
+
+    const record = this.invoiceHashesRepository.create({
+      invoice: { id: invoice.id },
+      hash,
+      generatedAt: new Date(),
+    });
+    await this.invoiceHashesRepository.save(record);
+    return record;
+  }
+
+  /**
    * Convert Proforma Invoice to Tax Invoice
    */
   async convertProformaToInvoice(
@@ -1913,6 +2105,9 @@ export class SalesInvoicesService {
     // Update status to TAX_INVOICE_RECEIVABLE
     invoice.status = InvoiceStatus.TAX_INVOICE_RECEIVABLE;
     const updated = await this.invoicesRepository.save(invoice);
+
+    // Integrity hash when finalized
+    await this.computeAndPersistInvoiceHash(invoice);
 
     // Audit log
     await this.auditLogsService.record({

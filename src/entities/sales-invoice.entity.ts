@@ -4,6 +4,7 @@ import {
   JoinColumn,
   ManyToOne,
   OneToMany,
+  OneToOne,
   Index,
   Unique,
 } from 'typeorm';
@@ -16,6 +17,7 @@ import { PaymentStatus } from '../common/enums/payment-status.enum';
 import { InvoicePayment } from './invoice-payment.entity';
 import { InvoiceLineItem } from './invoice-line-item.entity';
 import { CreditNoteApplication } from './credit-note-application.entity';
+import { InvoiceHash } from './invoice-hash.entity';
 
 @Entity({ name: 'sales_invoices' })
 @Unique(['organization', 'invoiceNumber'])
@@ -54,8 +56,20 @@ export class SalesInvoice extends AbstractEntity {
   @Column({ name: 'invoice_date', type: 'date' })
   invoiceDate: string;
 
+  @Column({ name: 'supply_date', type: 'date', nullable: true })
+  supplyDate?: string | null; // Date of supply (UAE VAT: if different from invoice date)
+
   @Column({ name: 'due_date', type: 'date', nullable: true })
   dueDate?: string | null;
+
+  @Column({
+    name: 'discount_amount',
+    type: 'decimal',
+    precision: 12,
+    scale: 2,
+    default: 0,
+  })
+  discountAmount: string; // Discount amount (UAE VAT: if applicable)
 
   @Column({ type: 'decimal', precision: 12, scale: 2 })
   amount: string;
@@ -178,6 +192,11 @@ export class SalesInvoice extends AbstractEntity {
 
   @OneToMany(() => CreditNoteApplication, (application) => application.invoice)
   creditNoteApplications: CreditNoteApplication[];
+
+  @OneToOne(() => InvoiceHash, (hashRecord) => hashRecord.invoice, {
+    nullable: true,
+  })
+  invoiceHash?: InvoiceHash | null;
 
   @Column({ name: 'public_token', length: 64, nullable: true, unique: true })
   publicToken?: string | null; // Token for public invoice viewing

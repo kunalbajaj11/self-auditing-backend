@@ -14,6 +14,7 @@ import { Customer } from '../customers/customer.entity';
 import { Product } from '../products/product.entity';
 import { PurchaseLineItem } from '../../entities/purchase-line-item.entity';
 import { Expense } from '../../entities/expense.entity';
+import { InvoiceHash } from '../../entities/invoice-hash.entity';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { ReportsModule } from '../reports/reports.module';
 import { AuditLogsModule } from '../audit-logs/audit-logs.module';
@@ -34,6 +35,7 @@ import { InventoryModule } from '../inventory/inventory.module';
       Product,
       PurchaseLineItem,
       Expense,
+      InvoiceHash,
     ]),
     ScheduleModule.forRoot(),
     NotificationsModule,

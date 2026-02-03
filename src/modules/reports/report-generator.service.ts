@@ -4,6 +4,7 @@ import * as ExcelJS from 'exceljs';
 import * as fs from 'fs';
 import * as path from 'path';
 import axios from 'axios';
+import * as QRCode from 'qrcode';
 
 export interface ReportData {
   type: string;
@@ -7560,6 +7561,23 @@ export class ReportGeneratorService {
       logoBuffer = await this.fetchImageAsBuffer(logoUrl);
     }
 
+    // Generate QR code for UAE e-invoicing (supplier TRN, invoice#, date, total with VAT)
+    const invoiceForQr = reportData.data;
+    const orgForQr = invoiceForQr?.organization;
+    const qrPayload = [
+      orgForQr?.vatNumber || '',
+      invoiceForQr?.invoiceNumber || '',
+      (invoiceForQr?.invoiceDate || '').replace(/-/g, ''),
+      parseFloat(invoiceForQr?.totalAmount || '0').toFixed(2),
+      parseFloat(invoiceForQr?.vatAmount || '0').toFixed(2),
+    ].join('|');
+    let qrBuffer: Buffer | null = null;
+    try {
+      qrBuffer = await QRCode.toBuffer(qrPayload, { width: 90, margin: 1 });
+    } catch (qrErr) {
+      console.warn('Invoice QR code generation failed:', qrErr);
+    }
+
     return new Promise((resolve, reject) => {
       try {
         const invoice = reportData.data;
@@ -7588,10 +7606,19 @@ export class ReportGeneratorService {
 
         // Get template settings from metadata
         // For proforma invoices, always use "PROFORMA INVOICE" as title
+        // Simplified tax invoice (UAE: < AED 10,000 or non-VAT registered recipient)
+        const invoiceTotal = parseFloat(invoice.totalAmount || '0');
+        const recipientTrn =
+          customer?.customerTrn || invoice.customerTrn || '';
+        const isSimplifiedInvoice =
+          invoice.status?.toLowerCase() !== 'proforma_invoice' &&
+          (invoiceTotal < 10000 || !recipientTrn);
         const defaultInvoiceTitle =
           invoice.status?.toLowerCase() === 'proforma_invoice'
             ? 'PROFORMA INVOICE'
-            : invoiceTemplate.invoiceTitle || 'TAX INVOICE';
+            : isSimplifiedInvoice
+              ? 'SIMPLIFIED TAX INVOICE'
+              : invoiceTemplate.invoiceTitle || 'TAX INVOICE';
 
         const templateSettings = {
           logoUrl: logoUrl,
@@ -8067,6 +8094,18 @@ export class ReportGeneratorService {
         );
         invoiceY += h + lineGap;
 
+        const supplyDate = (invoice as any).supplyDate as string | undefined;
+        if (supplyDate && supplyDate !== invoice.invoiceDate) {
+          h = drawLabelValue(
+            'DATE OF SUPPLY',
+            this.formatDateForInvoice(supplyDate),
+            invoiceX,
+            invoiceY,
+            columnWidth,
+          );
+          invoiceY += h + lineGap;
+        }
+
         if (invoice.dueDate) {
           h = drawLabelValue(
             'DUE DATE',
@@ -8188,23 +8227,21 @@ export class ReportGeneratorService {
         const tableTop = currentY;
         const tableStartX = margin;
 
-        // Column widths for cleaner table: Item, Description, Qty, Unit Price, Total
-        // Use full contentWidth for table
+        // Column widths: Item, Description, Qty, Unit Price, VAT %, Total (UAE VAT compliance)
         const tableWidth = contentWidth;
-        const padding = 14; // Padding inside each cell (left + right = 28 per column)
-        const totalPaddingPerColumn = padding * 2; // Left + right padding per column
-        const totalPaddingForAllColumns = totalPaddingPerColumn * 5; // 5 columns
-
-        // Available width for column content (after subtracting all padding)
+        const padding = 12;
+        const totalPaddingPerColumn = padding * 2;
+        const numColumns = 6;
+        const totalPaddingForAllColumns = totalPaddingPerColumn * numColumns;
         const availableWidth = tableWidth - totalPaddingForAllColumns;
 
-        // Calculate proportional column widths based on available width
         const colWidths = {
-          item: Math.floor(availableWidth * 0.18), // 18% of available width
-          description: Math.floor(availableWidth * 0.35), // 35% of available width
-          quantity: Math.floor(availableWidth * 0.15), // 15% of available width
-          unitPrice: Math.floor(availableWidth * 0.16), // 16% of available width
-          total: Math.floor(availableWidth * 0.16), // 16% of available width
+          item: Math.floor(availableWidth * 0.16),
+          description: Math.floor(availableWidth * 0.30),
+          quantity: Math.floor(availableWidth * 0.10),
+          unitPrice: Math.floor(availableWidth * 0.14),
+          vatRate: Math.floor(availableWidth * 0.12), // UAE VAT: show rate per line
+          total: Math.floor(availableWidth * 0.14),
         };
         const rowHeight = 32; // Increased for better padding
 
@@ -8239,6 +8276,11 @@ export class ReportGeneratorService {
           width: colWidths.unitPrice,
         });
         tableX += colWidths.unitPrice + totalPaddingPerColumn;
+        doc.text('VAT %', tableX + padding, headerY + 12, {
+          align: 'right',
+          width: colWidths.vatRate,
+        });
+        tableX += colWidths.vatRate + totalPaddingPerColumn;
         doc.text('Total', tableX + padding, headerY + 12, {
           align: 'right',
           width: colWidths.total,
@@ -8281,6 +8323,11 @@ export class ReportGeneratorService {
               width: colWidths.unitPrice,
             });
             tableX += colWidths.unitPrice + totalPaddingPerColumn;
+            doc.text('VAT %', tableX + padding, rowY + 12, {
+              align: 'right',
+              width: colWidths.vatRate,
+            });
+            tableX += colWidths.vatRate + totalPaddingPerColumn;
             doc.text('Total', tableX + padding, rowY + 12, {
               align: 'right',
               width: colWidths.total,
@@ -8341,6 +8388,20 @@ export class ReportGeneratorService {
           );
           tableX += colWidths.unitPrice + totalPaddingPerColumn;
 
+          // VAT % (UAE VAT: show rate per line - 5% or 0 for zero-rated/exempt)
+          const vatTaxType = (item.vatTaxType || '').toLowerCase();
+          const displayVatRate =
+            vatTaxType === 'zero_rated' || vatTaxType === 'exempt'
+              ? '0'
+              : (item.vatRate || '5');
+          doc.text(
+            `${displayVatRate}%`,
+            tableX + padding,
+            rowY + 12,
+            { align: 'right', width: colWidths.vatRate },
+          );
+          tableX += colWidths.vatRate + totalPaddingPerColumn;
+
           // Total (item.amount = quantity × unitPrice, before VAT, right-aligned)
           const lineTotal = parseFloat(item.amount || '0');
           doc.text(
@@ -8372,17 +8433,35 @@ export class ReportGeneratorService {
 
         currentY = rowY + 25;
 
+        // Reverse charge statement (UAE VAT: when any line has REVERSE_CHARGE)
+        const hasReverseCharge = lineItems.some(
+          (li: any) =>
+            (li.vatTaxType || '').toLowerCase() === 'reverse_charge',
+        );
+        if (hasReverseCharge) {
+          doc.fontSize(9).font('Helvetica-Oblique').fillColor(colors.textLight);
+          doc.text(
+            'VAT is payable by the recipient under the reverse charge mechanism (UAE VAT Law).',
+            margin,
+            currentY,
+            { width: contentWidth },
+          );
+          currentY += 20;
+        }
+
         // ============================================================================
         // TOTALS SECTION - Premium design matching preview
         // ============================================================================
         const totalsX = margin + contentWidth - 250;
+        const discountAmount = parseFloat((invoice as any).discountAmount || '0');
         const totalVat = parseFloat(invoice.vatAmount || '0');
         const subtotal = parseFloat(invoice.amount || '0');
         const totalAmount = parseFloat(invoice.totalAmount || '0');
 
-        // Totals box background
+        // Totals box - height varies if discount or VAT summary shown
         const totalsBoxY = currentY;
-        const totalsBoxHeight = 110; // Increased for better padding
+        let totalsBoxHeight = 110;
+        if (discountAmount > 0) totalsBoxHeight += 20;
 
         doc
           .fillColor(colors.backgroundLight)
@@ -8409,11 +8488,30 @@ export class ReportGeneratorService {
             align: 'right',
           },
         );
-        totalsY += 20; // Increased spacing
+        totalsY += 20;
 
-        // VAT row - standardize to 10px - use dark text color
+        // Discount row (UAE VAT: if applicable)
+        if (discountAmount > 0) {
+          doc.fontSize(10).font('Helvetica-Bold').fillColor(colors.text);
+          doc.text('Discount:', totalsX, totalsY);
+          doc.font('Helvetica-Bold').fillColor(colors.text);
+          doc.text(
+            `-${formatAmount(discountAmount)} ${currency}`,
+            totalsX + 150,
+            totalsY,
+            { width: 100, align: 'right' },
+          );
+          totalsY += 20;
+        }
+
+        // VAT row - show "VAT @ 5%" or calculated rate (guard against division by zero)
+        const taxBase = subtotal - discountAmount;
+        const effectiveVatRate =
+          taxBase > 0 && totalVat >= 0
+            ? ((totalVat / taxBase) * 100).toFixed(1)
+            : '5';
         doc.fontSize(10).font('Helvetica-Bold').fillColor(colors.text);
-        doc.text('VAT:', totalsX, totalsY);
+        doc.text(`VAT @ ${effectiveVatRate}%:`, totalsX, totalsY);
         doc.font('Helvetica-Bold').fillColor(colors.text);
         doc.text(
           `${formatAmount(totalVat)} ${currency}`,
@@ -8713,9 +8811,30 @@ export class ReportGeneratorService {
           footerY = doc.page.height - footerReservedSpace;
         }
 
+        // Footer separator line across bottom (defined early for QR placement)
+        const footerLineY = doc.page.height - 60;
+
+        // QR Code (UAE e-invoicing) - bottom right
+        const qrSize = 70;
+        if (qrBuffer) {
+          try {
+            doc.image(qrBuffer, margin + contentWidth - qrSize, footerLineY - qrSize - 8, {
+              width: qrSize,
+              height: qrSize,
+            });
+            doc.fontSize(7).font('Helvetica').fillColor(colors.textMuted);
+            doc.text('QR Code for validation', margin + contentWidth - qrSize, footerLineY - 4, {
+              width: qrSize,
+              align: 'center',
+            });
+          } catch (qrImgErr) {
+            console.warn('Failed to embed QR in PDF:', qrImgErr);
+          }
+        }
+
         // Signatory block on the right
         const signatoryBlockWidth = 220;
-        const signatoryX = margin + contentWidth - signatoryBlockWidth;
+        const signatoryX = margin + contentWidth - signatoryBlockWidth - (qrBuffer ? qrSize + 16 : 0);
         const signatoryY = footerY;
 
         doc.fontSize(9).font('Helvetica-Bold').fillColor(colors.text);
@@ -8742,8 +8861,7 @@ export class ReportGeneratorService {
           align: 'right',
         });
 
-        // Footer separator line across bottom
-        const footerLineY = doc.page.height - 60;
+        // Footer separator line
         doc.strokeColor(colors.border).lineWidth(0.5);
         doc
           .moveTo(margin, footerLineY)

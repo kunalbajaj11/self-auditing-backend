@@ -111,6 +111,42 @@ export class SalesInvoicesController {
     );
   }
 
+  @Get(':id/export')
+  @UseGuards(JwtAuthGuard, RolesGuard, TenantGuard)
+  @Roles(UserRole.ADMIN, UserRole.ACCOUNTANT, UserRole.EMPLOYEE)
+  async exportEInvoice(
+    @Param('id') id: string,
+    @Query('format') format: 'xml' | 'json',
+    @CurrentUser() user: AuthenticatedUser,
+    @Res() res: Response,
+  ) {
+    const fmt = (format === 'json' || format === 'xml') ? format : 'xml';
+    const result = await this.salesInvoicesService.exportToEInvoice(
+      id,
+      user?.organizationId as string,
+      fmt,
+    );
+    const invoice = await this.salesInvoicesService.findById(
+      user?.organizationId as string,
+      id,
+    );
+    if (fmt === 'json') {
+      res.setHeader('Content-Type', 'application/json');
+      res.setHeader(
+        'Content-Disposition',
+        `attachment; filename="invoice-${invoice.invoiceNumber}.json"`,
+      );
+      res.send(JSON.stringify(result, null, 2));
+    } else {
+      res.setHeader('Content-Type', 'application/xml');
+      res.setHeader(
+        'Content-Disposition',
+        `attachment; filename="invoice-${invoice.invoiceNumber}.xml"`,
+      );
+      res.send(result);
+    }
+  }
+
   @Get(':id/pdf')
   @UseGuards(JwtAuthGuard, RolesGuard, TenantGuard)
   @Roles(UserRole.ADMIN, UserRole.ACCOUNTANT, UserRole.EMPLOYEE)
