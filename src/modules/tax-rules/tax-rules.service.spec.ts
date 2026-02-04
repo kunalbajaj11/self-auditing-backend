@@ -95,6 +95,31 @@ describe('TaxRulesService', () => {
     categoriesRepository = module.get<Repository<Category>>(
       getRepositoryToken(Category),
     );
+
+    // Default mocks so individual tests can override only what they need.
+    jest.spyOn(taxRulesRepository, 'createQueryBuilder').mockReturnValue({
+      leftJoinAndSelect: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      addOrderBy: jest.fn().mockReturnThis(),
+      getMany: jest.fn().mockResolvedValue([]),
+    } as any);
+
+    jest
+      .spyOn(categoryTaxRulesRepository, 'createQueryBuilder')
+      .mockReturnValue({
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        getOne: jest.fn().mockResolvedValue(null),
+      } as any);
+
+    jest.spyOn(organizationsRepository, 'findOne').mockResolvedValue({
+      id: mockOrganizationId,
+      region: Region.UAE,
+    } as any);
   });
 
   it('should be defined', () => {
@@ -110,7 +135,18 @@ describe('TaxRulesService', () => {
         andWhere: jest.fn().mockReturnThis(),
         orderBy: jest.fn().mockReturnThis(),
         addOrderBy: jest.fn().mockReturnThis(),
-        getMany: jest.fn().mockResolvedValue([]),
+        // Ensure at least one active rule exists; category tax rules are linked to active tax rules.
+        // Otherwise calculateTax() will fall back to default VAT before checking category overrides.
+        getMany: jest.fn().mockResolvedValue([
+          {
+            id: 'rule-default',
+            ruleType: TaxRuleType.CATEGORY,
+            ruleName: 'Category Rule (placeholder)',
+            isActive: true,
+            exemptions: [],
+            brackets: [],
+          } as any,
+        ]),
       } as any);
 
       jest.spyOn(organizationsRepository, 'findOne').mockResolvedValue({
@@ -137,7 +173,18 @@ describe('TaxRulesService', () => {
         andWhere: jest.fn().mockReturnThis(),
         orderBy: jest.fn().mockReturnThis(),
         addOrderBy: jest.fn().mockReturnThis(),
-        getMany: jest.fn().mockResolvedValue([]),
+        // Category tax rules are linked to active tax rules; ensure at least one exists so we
+        // don't fall back to default VAT before checking category overrides.
+        getMany: jest.fn().mockResolvedValue([
+          {
+            id: 'rule-category',
+            ruleType: TaxRuleType.CATEGORY,
+            ruleName: 'Category Rule (placeholder)',
+            isActive: true,
+            exemptions: [],
+            brackets: [],
+          } as any,
+        ]),
       } as any);
 
       jest.spyOn(organizationsRepository, 'findOne').mockResolvedValue({
@@ -189,7 +236,18 @@ describe('TaxRulesService', () => {
         andWhere: jest.fn().mockReturnThis(),
         orderBy: jest.fn().mockReturnThis(),
         addOrderBy: jest.fn().mockReturnThis(),
-        getMany: jest.fn().mockResolvedValue([]),
+        // Ensure at least one active rule exists so calculateTax() doesn't return early
+        // before checking category tax overrides.
+        getMany: jest.fn().mockResolvedValue([
+          {
+            id: 'rule-category',
+            ruleType: TaxRuleType.CATEGORY,
+            ruleName: 'Category Rule (placeholder)',
+            isActive: true,
+            exemptions: [],
+            brackets: [],
+          } as any,
+        ]),
       } as any);
 
       jest.spyOn(organizationsRepository, 'findOne').mockResolvedValue({
@@ -379,7 +437,16 @@ describe('TaxRulesService', () => {
         andWhere: jest.fn().mockReturnThis(),
         orderBy: jest.fn().mockReturnThis(),
         addOrderBy: jest.fn().mockReturnThis(),
-        getMany: jest.fn().mockResolvedValue([]),
+        getMany: jest.fn().mockResolvedValue([
+          {
+            id: 'rule-category',
+            ruleType: TaxRuleType.CATEGORY,
+            ruleName: 'Category Rule (placeholder)',
+            isActive: true,
+            exemptions: [],
+            brackets: [],
+          } as any,
+        ]),
       } as any);
 
       jest.spyOn(organizationsRepository, 'findOne').mockResolvedValue({

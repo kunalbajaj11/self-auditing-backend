@@ -133,6 +133,21 @@ export class TaxRulesService {
       date,
     );
 
+    // Full exemption: VAT is 0, and base amount equals the original amount.
+    // (The transaction still has value, but it is fully exempt from VAT.)
+    if (exemptionResult.fullyExempt) {
+      return {
+        baseAmount: amount,
+        vatAmount: 0,
+        effectiveTaxRate: 0,
+        appliedRules: exemptionResult.appliedRules,
+        isReverseCharge,
+        breakdown: {
+          exemptionAmount: amount,
+        },
+      };
+    }
+
     const taxableAmount = exemptionResult.taxableAmount;
     const appliedRules = exemptionResult.appliedRules;
 
@@ -255,6 +270,7 @@ export class TaxRulesService {
   ): Promise<{
     taxableAmount: number;
     appliedRules: string[];
+    fullyExempt?: boolean;
   }> {
     let taxableAmount = amount;
     const appliedRules: string[] = [];
@@ -304,6 +320,12 @@ export class TaxRulesService {
               shouldApply = true;
             }
             break;
+
+          case ExemptionType.PARTIAL:
+            // Partial exemption that applies generally (not category-specific)
+            // The exempt amount is defined by exemptionPercentage or exemptionAmount.
+            shouldApply = true;
+            break;
         }
 
         if (shouldApply) {
@@ -312,7 +334,7 @@ export class TaxRulesService {
             appliedRules.push(
               `Full exemption: ${rule.ruleName} - ${exemption.description || 'Category exemption'}`,
             );
-            return { taxableAmount, appliedRules }; // Full exemption, no further processing
+            return { taxableAmount, appliedRules, fullyExempt: true }; // Full exemption, no further processing
           } else if (exemption.exemptionPercentage) {
             // Partial exemption by percentage
             const exemptAmount =

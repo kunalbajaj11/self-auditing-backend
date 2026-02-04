@@ -118,6 +118,7 @@ export class SalesInvoicesService {
         'lineItems',
         'payments',
         'creditNoteApplications',
+        'invoiceHash',
       ],
     });
     if (!invoice) {

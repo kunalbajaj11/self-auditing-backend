@@ -36,6 +36,9 @@ class SmartQueryBuilder {
   ) {}
 
   // chainable
+  innerJoin() {
+    return this;
+  }
   leftJoin() {
     return this;
   }

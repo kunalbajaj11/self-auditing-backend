@@ -5,7 +5,21 @@ import { ExpensesService } from './expenses.service';
 import { TaxRulesService } from '../tax-rules/tax-rules.service';
 import { Expense } from '../../entities/expense.entity';
 import { Organization } from '../../entities/organization.entity';
+import { User } from '../../entities/user.entity';
 import { Category } from '../../entities/category.entity';
+import { Attachment } from '../../entities/attachment.entity';
+import { Accrual } from '../../entities/accrual.entity';
+import { PurchaseLineItem } from '../../entities/purchase-line-item.entity';
+import { ExpensePayment } from '../../entities/expense-payment.entity';
+import { NotificationsService } from '../notifications/notifications.service';
+import { FileStorageService } from '../attachments/file-storage.service';
+import { DuplicateDetectionService } from '../duplicates/duplicate-detection.service';
+import { ForexRateService } from '../forex/forex-rate.service';
+import { LicenseKeysService } from '../license-keys/license-keys.service';
+import { SettingsService } from '../settings/settings.service';
+import { InventoryService } from '../inventory/inventory.service';
+import { Vendor } from '../vendors/vendor.entity';
+import { Product } from '../products/product.entity';
 import { Region } from '../../common/enums/region.enum';
 
 describe('ExpensesService - Tax Rules Integration', () => {
@@ -20,8 +34,9 @@ describe('ExpensesService - Tax Rules Integration', () => {
   const mockCategoryId = 'cat-123';
 
   beforeEach(async () => {
-    const mockTaxRulesService = {
-      calculateTax: jest.fn(),
+    const mockTaxRulesService = { calculateTax: jest.fn() };
+    const mockSettingsService = {
+      getTaxSettings: jest.fn().mockResolvedValue({ taxCalculationMethod: 'inclusive' }),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -47,12 +62,46 @@ describe('ExpensesService - Tax Rules Integration', () => {
           },
         },
         {
+          provide: getRepositoryToken(User),
+          useValue: {},
+        },
+        {
           provide: getRepositoryToken(Category),
           useValue: {
             findOne: jest.fn(),
           },
         },
-        // Add other required providers...
+        {
+          provide: getRepositoryToken(Attachment),
+          useValue: {},
+        },
+        {
+          provide: getRepositoryToken(Accrual),
+          useValue: {},
+        },
+        {
+          provide: getRepositoryToken(Vendor),
+          useValue: {},
+        },
+        {
+          provide: getRepositoryToken(Product),
+          useValue: {},
+        },
+        {
+          provide: getRepositoryToken(PurchaseLineItem),
+          useValue: {},
+        },
+        {
+          provide: getRepositoryToken(ExpensePayment),
+          useValue: {},
+        },
+        { provide: NotificationsService, useValue: {} },
+        { provide: FileStorageService, useValue: {} },
+        { provide: DuplicateDetectionService, useValue: {} },
+        { provide: ForexRateService, useValue: {} },
+        { provide: LicenseKeysService, useValue: {} },
+        { provide: SettingsService, useValue: mockSettingsService },
+        { provide: InventoryService, useValue: {} },
       ],
     }).compile();
 
@@ -159,7 +208,35 @@ describe('ExpensesService - Tax Rules Integration', () => {
                 findOne: jest.fn(),
               },
             },
-            // Add other required providers...
+            {
+              provide: getRepositoryToken(Organization),
+              useValue: {
+                findOne: jest.fn().mockResolvedValue({
+                  id: mockOrganizationId,
+                  region: Region.UAE,
+                } as any),
+              },
+            },
+            { provide: getRepositoryToken(User), useValue: {} },
+            { provide: getRepositoryToken(Category), useValue: {} },
+            { provide: getRepositoryToken(Attachment), useValue: {} },
+            { provide: getRepositoryToken(Accrual), useValue: {} },
+            { provide: getRepositoryToken(Vendor), useValue: {} },
+            { provide: getRepositoryToken(Product), useValue: {} },
+            { provide: getRepositoryToken(PurchaseLineItem), useValue: {} },
+            { provide: getRepositoryToken(ExpensePayment), useValue: {} },
+            { provide: NotificationsService, useValue: {} },
+            { provide: FileStorageService, useValue: {} },
+            { provide: DuplicateDetectionService, useValue: {} },
+            { provide: ForexRateService, useValue: {} },
+            { provide: LicenseKeysService, useValue: {} },
+            {
+              provide: SettingsService,
+              useValue: {
+                getTaxSettings: jest.fn().mockResolvedValue({ taxCalculationMethod: 'inclusive' }),
+              },
+            },
+            { provide: InventoryService, useValue: {} },
           ],
         }).compile();
 

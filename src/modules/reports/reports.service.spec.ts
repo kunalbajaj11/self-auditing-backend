@@ -38,6 +38,9 @@ class FakeQueryBuilder {
   }
 
   // Chainable no-ops
+  innerJoin() {
+    return this;
+  }
   leftJoin() {
     return this;
   }
