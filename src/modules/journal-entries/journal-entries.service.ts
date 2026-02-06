@@ -276,7 +276,10 @@ export class JournalEntriesService {
           notes: entryDto.notes,
         });
 
-        const saved = await queryRunner.manager.save(JournalEntry, journalEntry);
+        const saved = await queryRunner.manager.save(
+          JournalEntry,
+          journalEntry,
+        );
         created.push(saved);
 
         await this.auditLogsService.record({

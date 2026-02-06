@@ -151,7 +151,8 @@ export class CreditNotesService {
     );
     const creditNoteTotal = parseFloat(creditNote.totalAmount || '0');
     // Round to 2 decimal places to avoid floating-point precision issues
-    const remainingAmount = Math.round((creditNoteTotal - totalApplied) * 100) / 100;
+    const remainingAmount =
+      Math.round((creditNoteTotal - totalApplied) * 100) / 100;
 
     // Validate applied amount first
     const numericAppliedAmount = Number(appliedAmount);
@@ -178,7 +179,9 @@ export class CreditNotesService {
 
     if (existingApplication) {
       // Calculate remaining amount including the existing application
-      const existingApplied = parseFloat(existingApplication.appliedAmount || '0');
+      const existingApplied = parseFloat(
+        existingApplication.appliedAmount || '0',
+      );
       const remainingIncludingExisting = remainingAmount + existingApplied;
 
       if (numericAppliedAmount > remainingIncludingExisting + tolerance) {
@@ -193,7 +196,8 @@ export class CreditNotesService {
       await this.creditNoteApplicationsRepository.save(existingApplication);
 
       // Recalculate total applied (excluding the old amount, including the new)
-      const newTotalApplied = totalApplied - existingApplied + numericAppliedAmount;
+      const newTotalApplied =
+        totalApplied - existingApplied + numericAppliedAmount;
       const fullyApplied = newTotalApplied >= creditNoteTotal;
 
       await this.creditNotesRepository.update(creditNote.id, {

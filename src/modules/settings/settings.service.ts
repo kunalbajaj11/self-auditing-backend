@@ -597,6 +597,22 @@ export class SettingsService {
         resetPeriod: ResetPeriod.NEVER,
         format: 'QTE-{YYYY}-{NNNNN}',
       },
+      [NumberingSequenceType.SALES_ORDER]: {
+        prefix: 'SO',
+        suffix: '',
+        nextNumber: 1,
+        numberLength: 5,
+        resetPeriod: ResetPeriod.NEVER,
+        format: 'SO-{YYYY}-{NNNNN}',
+      },
+      [NumberingSequenceType.DELIVERY_CHALLAN]: {
+        prefix: 'DC',
+        suffix: '',
+        nextNumber: 1,
+        numberLength: 5,
+        resetPeriod: ResetPeriod.NEVER,
+        format: 'DC-{YYYY}-{NNNNN}',
+      },
       [NumberingSequenceType.PURCHASE_ORDER]: {
         prefix: 'PO',
         suffix: '',

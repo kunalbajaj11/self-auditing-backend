@@ -54,11 +54,17 @@ export class PurchaseOrdersService {
     private readonly dataSource: DataSource,
   ) {}
 
-  /**
-   * Get next PO number
-   */
+  /** Next number for preview only (does not increment). */
   async getNextPONumber(organizationId: string): Promise<string> {
     return this.settingsService.getNextNumber(
+      organizationId,
+      NumberingSequenceType.PURCHASE_ORDER,
+    );
+  }
+
+  /** Generate and consume next PO number (use when creating). */
+  private async generateNextPONumber(organizationId: string): Promise<string> {
+    return this.settingsService.generateNextNumber(
       organizationId,
       NumberingSequenceType.PURCHASE_ORDER,
     );
@@ -84,7 +90,9 @@ export class PurchaseOrdersService {
     }
 
     if (filters.vendorId) {
-      query.andWhere('po.vendor_id = :vendorId', { vendorId: filters.vendorId });
+      query.andWhere('po.vendor_id = :vendorId', {
+        vendorId: filters.vendorId,
+      });
     }
 
     if (filters.vendorName) {
@@ -115,13 +123,21 @@ export class PurchaseOrdersService {
   /**
    * Find purchase order by ID
    */
-  async findById(
-    organizationId: string,
-    poId: string,
-  ): Promise<PurchaseOrder> {
+  async findById(organizationId: string, poId: string): Promise<PurchaseOrder> {
     const po = await this.purchaseOrdersRepository.findOne({
-      where: { id: poId, organization: { id: organizationId }, isDeleted: false },
-      relations: ['vendor', 'lineItems', 'lineItems.product', 'linkedExpenses', 'user', 'organization'],
+      where: {
+        id: poId,
+        organization: { id: organizationId },
+        isDeleted: false,
+      },
+      relations: [
+        'vendor',
+        'lineItems',
+        'lineItems.product',
+        'linkedExpenses',
+        'user',
+        'organization',
+      ],
     });
 
     if (!po) {
@@ -152,8 +168,8 @@ export class PurchaseOrdersService {
       throw new NotFoundException('User not found');
     }
 
-    // Generate PO number
-    const poNumber = await this.getNextPONumber(organizationId);
+    // Generate PO number (increments sequence)
+    const poNumber = await this.generateNextPONumber(organizationId);
 
     // Calculate totals from line items
     let totalAmount = 0;
@@ -164,7 +180,10 @@ export class PurchaseOrdersService {
       const amount = quantity * unitPrice;
       let vatAmount = 0;
 
-      if (item.vatTaxType !== VatTaxType.ZERO_RATED && item.vatTaxType !== VatTaxType.EXEMPT) {
+      if (
+        item.vatTaxType !== VatTaxType.ZERO_RATED &&
+        item.vatTaxType !== VatTaxType.EXEMPT
+      ) {
         vatAmount = (amount * vatRate) / 100;
       }
 
@@ -239,11 +258,17 @@ export class PurchaseOrdersService {
     const po = await this.findById(organizationId, poId);
 
     // Validate status transitions
-    if (po.status === PurchaseOrderStatus.CLOSED && dto.status !== PurchaseOrderStatus.CLOSED) {
+    if (
+      po.status === PurchaseOrderStatus.CLOSED &&
+      dto.status !== PurchaseOrderStatus.CLOSED
+    ) {
       throw new BadRequestException('Cannot modify closed purchase order');
     }
 
-    if (po.status === PurchaseOrderStatus.CANCELLED && dto.status !== PurchaseOrderStatus.CANCELLED) {
+    if (
+      po.status === PurchaseOrderStatus.CANCELLED &&
+      dto.status !== PurchaseOrderStatus.CANCELLED
+    ) {
       throw new BadRequestException('Cannot modify cancelled purchase order');
     }
 
@@ -297,7 +322,10 @@ export class PurchaseOrdersService {
         const amount = quantity * unitPrice;
         let vatAmount = 0;
 
-        if (item.vatTaxType !== VatTaxType.ZERO_RATED && item.vatTaxType !== VatTaxType.EXEMPT) {
+        if (
+          item.vatTaxType !== VatTaxType.ZERO_RATED &&
+          item.vatTaxType !== VatTaxType.EXEMPT
+        ) {
           vatAmount = (amount * vatRate) / 100;
         }
 
@@ -387,12 +415,22 @@ export class PurchaseOrdersService {
     const po = await this.findById(organizationId, poId);
 
     // Validate status transitions
-    if (po.status === PurchaseOrderStatus.CLOSED && status !== PurchaseOrderStatus.CLOSED) {
-      throw new BadRequestException('Cannot change status of closed purchase order');
+    if (
+      po.status === PurchaseOrderStatus.CLOSED &&
+      status !== PurchaseOrderStatus.CLOSED
+    ) {
+      throw new BadRequestException(
+        'Cannot change status of closed purchase order',
+      );
     }
 
-    if (po.status === PurchaseOrderStatus.CANCELLED && status !== PurchaseOrderStatus.CANCELLED) {
-      throw new BadRequestException('Cannot change status of cancelled purchase order');
+    if (
+      po.status === PurchaseOrderStatus.CANCELLED &&
+      status !== PurchaseOrderStatus.CANCELLED
+    ) {
+      throw new BadRequestException(
+        'Cannot change status of cancelled purchase order',
+      );
     }
 
     po.status = status;
@@ -430,18 +468,24 @@ export class PurchaseOrdersService {
     const po = await this.findById(organizationId, poId);
 
     if (po.status === PurchaseOrderStatus.CLOSED) {
-      throw new BadRequestException('Cannot receive items for closed purchase order');
+      throw new BadRequestException(
+        'Cannot receive items for closed purchase order',
+      );
     }
 
     if (po.status === PurchaseOrderStatus.CANCELLED) {
-      throw new BadRequestException('Cannot receive items for cancelled purchase order');
+      throw new BadRequestException(
+        'Cannot receive items for cancelled purchase order',
+      );
     }
 
     let allFullyReceived = true;
     let anyPartiallyReceived = false;
 
     for (const receiveItem of dto.items) {
-      const lineItem = po.lineItems.find((li) => li.id === receiveItem.lineItemId);
+      const lineItem = po.lineItems.find(
+        (li) => li.id === receiveItem.lineItemId,
+      );
       if (!lineItem) {
         throw new NotFoundException(
           `Line item ${receiveItem.lineItemId} not found`,
@@ -554,7 +598,8 @@ export class PurchaseOrdersService {
         unitOfMeasure: poLineItem.unitOfMeasure || 'unit',
         unitPrice: unitPrice,
         vatRate: vatRate,
-        vatTaxType: (poLineItem.vatTaxType as VatTaxType) || VatTaxType.STANDARD,
+        vatTaxType:
+          (poLineItem.vatTaxType as VatTaxType) || VatTaxType.STANDARD,
         amount: lineAmount,
         vatAmount: lineVatAmount,
         description: poLineItem.description,
@@ -587,11 +632,12 @@ export class PurchaseOrdersService {
 
     // Update PO status to INVOICED if all items converted
     const allItemsConverted = po.lineItems.every((li) => {
-      const convertItem = dto.lineItems.find(
-        (ci) => ci.poLineItemId === li.id,
-      );
+      const convertItem = dto.lineItems.find((ci) => ci.poLineItemId === li.id);
       if (!convertItem) return false;
-      return parseFloat(String(convertItem.quantity)) >= parseFloat(li.orderedQuantity);
+      return (
+        parseFloat(String(convertItem.quantity)) >=
+        parseFloat(li.orderedQuantity)
+      );
     });
 
     if (allItemsConverted) {
@@ -627,9 +673,7 @@ export class PurchaseOrdersService {
     const po = await this.findById(organizationId, poId);
 
     if (po.status !== PurchaseOrderStatus.DRAFT) {
-      throw new BadRequestException(
-        'Only draft purchase orders can be sent',
-      );
+      throw new BadRequestException('Only draft purchase orders can be sent');
     }
 
     po.status = PurchaseOrderStatus.SENT;
@@ -648,7 +692,10 @@ export class PurchaseOrdersService {
       entityId: poId,
       action: AuditAction.UPDATE,
       changes: {
-        status: { from: PurchaseOrderStatus.DRAFT, to: PurchaseOrderStatus.SENT },
+        status: {
+          from: PurchaseOrderStatus.DRAFT,
+          to: PurchaseOrderStatus.SENT,
+        },
         sentToEmail: email,
       },
     });
@@ -659,10 +706,7 @@ export class PurchaseOrdersService {
   /**
    * Generate Purchase Order PDF
    */
-  async generatePOPDF(
-    poId: string,
-    organizationId: string,
-  ): Promise<Buffer> {
+  async generatePOPDF(poId: string, organizationId: string): Promise<Buffer> {
     const po = await this.findById(organizationId, poId);
 
     // Get organization settings
@@ -707,12 +751,15 @@ export class PurchaseOrdersService {
           logoBuffer: logoBuffer,
           logoUrl: null,
           headerText:
-            templateSettings.invoiceHeaderText || organization.name || 'Company',
+            templateSettings.invoiceHeaderText ||
+            organization.name ||
+            'Company',
           colorScheme: templateSettings.invoiceColorScheme || 'blue',
           customColor: templateSettings.invoiceCustomColor,
           footerText: templateSettings.invoiceFooterText,
           showFooter: templateSettings.invoiceShowFooter ?? true,
-          showCompanyDetails: templateSettings.invoiceShowCompanyDetails ?? true,
+          showCompanyDetails:
+            templateSettings.invoiceShowCompanyDetails ?? true,
           showBankDetails: templateSettings.invoiceShowBankDetails ?? false,
         },
         currencySettings: {
@@ -771,8 +818,7 @@ export class PurchaseOrdersService {
     const currency = po.currency || 'AED';
 
     let emailSubject =
-      emailData.subject ||
-      `Purchase Order ${po.poNumber} from ${companyName}`;
+      emailData.subject || `Purchase Order ${po.poNumber} from ${companyName}`;
     emailSubject = emailSubject
       .replace(/\{\{poNumber\}\}/g, po.poNumber)
       .replace(/\{\{companyName\}\}/g, companyName)

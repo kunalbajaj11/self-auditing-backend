@@ -68,7 +68,11 @@ export class LicenseKey extends AbstractEntity {
   @Column({ type: 'boolean', default: false })
   enableInventory: boolean;
 
-  @Column({ name: 'enable_bulk_journal_import', type: 'boolean', default: false })
+  @Column({
+    name: 'enable_bulk_journal_import',
+    type: 'boolean',
+    default: false,
+  })
   enableBulkJournalImport: boolean;
 
   @ManyToOne(() => User, { nullable: true })

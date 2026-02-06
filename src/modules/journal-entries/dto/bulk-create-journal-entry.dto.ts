@@ -1,4 +1,9 @@
-import { IsArray, ValidateNested, ArrayMinSize, ArrayMaxSize } from 'class-validator';
+import {
+  IsArray,
+  ValidateNested,
+  ArrayMinSize,
+  ArrayMaxSize,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 import { CreateJournalEntryDto } from './create-journal-entry.dto';
 

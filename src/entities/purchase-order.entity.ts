@@ -21,9 +21,13 @@ import { Expense } from './expense.entity';
 @Index(['organization', 'status'])
 @Index(['vendor'])
 export class PurchaseOrder extends AbstractEntity {
-  @ManyToOne(() => Organization, (organization) => organization.purchaseOrders, {
-    nullable: false,
-  })
+  @ManyToOne(
+    () => Organization,
+    (organization) => organization.purchaseOrders,
+    {
+      nullable: false,
+    },
+  )
   @JoinColumn({ name: 'organization_id' })
   organization: Organization;
 

@@ -1,10 +1,4 @@
-import {
-  Column,
-  Entity,
-  JoinColumn,
-  OneToOne,
-  Unique,
-} from 'typeorm';
+import { Column, Entity, JoinColumn, OneToOne, Unique } from 'typeorm';
 import { AbstractEntity } from './abstract.entity';
 import { SalesInvoice } from './sales-invoice.entity';
 

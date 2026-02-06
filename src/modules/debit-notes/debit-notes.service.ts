@@ -280,9 +280,9 @@ export class DebitNotesService {
     );
     const debitNoteTotal = parseFloat(debitNote.totalAmount || '0');
     // Round to 2 decimal places to avoid floating-point precision issues
-    const remainingAmount = Math.round(
-      (debitNoteTotal - totalApplied - totalExpenseApplied) * 100,
-    ) / 100;
+    const remainingAmount =
+      Math.round((debitNoteTotal - totalApplied - totalExpenseApplied) * 100) /
+      100;
 
     // Check if there's already an application for this specific expense
     // If so, we should update it rather than create a duplicate

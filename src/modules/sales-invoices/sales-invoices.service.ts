@@ -898,9 +898,7 @@ export class SalesInvoicesService {
     const toWords = (n: number): string => {
       if (n < 20) return ones[n];
       if (n < 100)
-        return `${tens[Math.floor(n / 10)]}${
-          n % 10 ? ` ${ones[n % 10]}` : ''
-        }`;
+        return `${tens[Math.floor(n / 10)]}${n % 10 ? ` ${ones[n % 10]}` : ''}`;
       if (n < 1000)
         return `${ones[Math.floor(n / 100)]} Hundred${
           n % 100 ? ` ${toWords(n % 100)}` : ''
@@ -1162,13 +1160,16 @@ export class SalesInvoicesService {
             templateSettings.invoiceHeaderText || invoice.organization?.name,
           colorScheme: templateSettings.invoiceColorScheme || 'blue',
           customColor: templateSettings.invoiceCustomColor,
-          invoiceTitle: invoice.status === 'proforma_invoice' 
-            ? 'PROFORMA INVOICE' 
-            : (templateSettings.invoiceTitle || 'TAX INVOICE'),
-          showCompanyDetails: templateSettings.invoiceShowCompanyDetails ?? true,
+          invoiceTitle:
+            invoice.status === 'proforma_invoice'
+              ? 'PROFORMA INVOICE'
+              : templateSettings.invoiceTitle || 'TAX INVOICE',
+          showCompanyDetails:
+            templateSettings.invoiceShowCompanyDetails ?? true,
           showVatDetails: templateSettings.invoiceShowVatDetails ?? true,
           showPaymentTerms: templateSettings.invoiceShowPaymentTerms ?? true,
-          showPaymentMethods: templateSettings.invoiceShowPaymentMethods ?? true,
+          showPaymentMethods:
+            templateSettings.invoiceShowPaymentMethods ?? true,
           showBankDetails: templateSettings.invoiceShowBankDetails ?? false,
           showTermsAndConditions:
             templateSettings.invoiceShowTermsConditions ?? true,
@@ -1741,7 +1742,11 @@ ${lines}
     // IMPORTANT: load a lean invoice WITHOUT lineItems so TypeORM does not
     // try to auto-manage invoice_line_items when we save the invoice.
     const invoice = await this.invoicesRepository.findOne({
-      where: { id: invoiceId, organization: { id: organizationId }, isDeleted: false },
+      where: {
+        id: invoiceId,
+        organization: { id: organizationId },
+        isDeleted: false,
+      },
       relations: ['organization', 'customer'],
     });
     if (!invoice) {
@@ -2063,20 +2068,33 @@ ${lines}
     });
     if (existing) return existing;
 
-    const supplierTrn = (invoice.organization?.vatNumber ?? '').toString().trim();
+    const supplierTrn = (invoice.organization?.vatNumber ?? '')
+      .toString()
+      .trim();
     const invoiceNumber = (invoice.invoiceNumber ?? '').toString().trim();
     const invoiceDate = (invoice.invoiceDate ?? '').toString().trim();
     const totalAmount = (
       invoice.totalAmount ??
-      (parseFloat(invoice.amount || '0') + parseFloat(invoice.vatAmount || '0')).toFixed(2)
-    ).toString().trim();
+      (
+        parseFloat(invoice.amount || '0') + parseFloat(invoice.vatAmount || '0')
+      ).toFixed(2)
+    )
+      .toString()
+      .trim();
     const vatAmount = (invoice.vatAmount ?? '0').toString().trim();
     const normalizedTotal = parseFloat(totalAmount).toFixed(2);
     const normalizedVat = parseFloat(vatAmount).toFixed(2);
 
     const payload =
-      supplierTrn + invoiceNumber + invoiceDate + normalizedTotal + normalizedVat;
-    const hash = crypto.createHash('sha256').update(payload, 'utf8').digest('hex');
+      supplierTrn +
+      invoiceNumber +
+      invoiceDate +
+      normalizedTotal +
+      normalizedVat;
+    const hash = crypto
+      .createHash('sha256')
+      .update(payload, 'utf8')
+      .digest('hex');
 
     const record = this.invoiceHashesRepository.create({
       invoice: { id: invoice.id },

@@ -7,6 +7,8 @@ export enum NumberingSequenceType {
   CREDIT_NOTE = 'credit_note',
   DEBIT_NOTE = 'debit_note',
   QUOTE = 'quote',
+  SALES_ORDER = 'sales_order',
+  DELIVERY_CHALLAN = 'delivery_challan',
   PURCHASE_ORDER = 'purchase_order',
   PAYMENT_RECEIPT = 'payment_receipt',
   EXPENSE = 'expense',

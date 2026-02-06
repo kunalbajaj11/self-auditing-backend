@@ -120,7 +120,7 @@ export class SalesInvoicesController {
     @CurrentUser() user: AuthenticatedUser,
     @Res() res: Response,
   ) {
-    const fmt = (format === 'json' || format === 'xml') ? format : 'xml';
+    const fmt = format === 'json' || format === 'xml' ? format : 'xml';
     const result = await this.salesInvoicesService.exportToEInvoice(
       id,
       user?.organizationId as string,

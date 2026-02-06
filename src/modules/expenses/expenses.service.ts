@@ -560,9 +560,15 @@ export class ExpensesService {
     // Resolve purchase order if provided
     let purchaseOrder = null;
     if (dto.purchaseOrderId) {
-      purchaseOrder = await this.expensesRepository.manager.findOne(PurchaseOrder, {
-        where: { id: dto.purchaseOrderId, organization: { id: organizationId } },
-      });
+      purchaseOrder = await this.expensesRepository.manager.findOne(
+        PurchaseOrder,
+        {
+          where: {
+            id: dto.purchaseOrderId,
+            organization: { id: organizationId },
+          },
+        },
+      );
       if (!purchaseOrder) {
         throw new NotFoundException('Purchase order not found');
       }

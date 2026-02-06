@@ -2263,9 +2263,8 @@ export class OcrService {
                   // Found companies that don't match organization, pick one
                   // Prefer company with indicator, or first one
                   const selected =
-                    otherCompanies.find(
-                      (cn) => cn.hasCompanyIndicator,
-                    ) || otherCompanies[0];
+                    otherCompanies.find((cn) => cn.hasCompanyIndicator) ||
+                    otherCompanies[0];
                   if (selected) {
                     // Clean up the vendor name
                     let vendorName = selected.name
@@ -2349,13 +2348,8 @@ export class OcrService {
         } else {
           // No organizationId provided, use first company (original behavior)
           const selected = potentialCompanyNames[0];
-          let vendorName = selected.name
-            .replace(/\s+/g, ' ')
-            .substring(0, 100);
-          vendorName = vendorName.replace(
-            /\s+(LLC|LTD|INC|CORP|CO)\.?$/i,
-            '',
-          );
+          let vendorName = selected.name.replace(/\s+/g, ' ').substring(0, 100);
+          vendorName = vendorName.replace(/\s+(LLC|LTD|INC|CORP|CO)\.?$/i, '');
           result.vendorName = vendorName;
         }
       }

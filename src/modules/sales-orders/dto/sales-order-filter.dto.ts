@@ -5,20 +5,20 @@ import {
   IsString,
   IsUUID,
 } from 'class-validator';
-import { PurchaseOrderStatus } from '../../../common/enums/purchase-order-status.enum';
+import { SalesOrderStatus } from '../../../common/enums/sales-order-status.enum';
 
-export class PurchaseOrderFilterDto {
+export class SalesOrderFilterDto {
   @IsOptional()
-  @IsEnum(PurchaseOrderStatus)
-  status?: PurchaseOrderStatus;
+  @IsEnum(SalesOrderStatus)
+  status?: SalesOrderStatus;
 
   @IsOptional()
   @IsUUID()
-  vendorId?: string;
+  customerId?: string;
 
   @IsOptional()
   @IsString()
-  vendorName?: string;
+  customerName?: string;
 
   @IsOptional()
   @IsDateString()
@@ -30,5 +30,5 @@ export class PurchaseOrderFilterDto {
 
   @IsOptional()
   @IsString()
-  poNumber?: string;
+  soNumber?: string;
 }

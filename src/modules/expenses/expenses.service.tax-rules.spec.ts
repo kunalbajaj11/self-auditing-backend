@@ -36,7 +36,9 @@ describe('ExpensesService - Tax Rules Integration', () => {
   beforeEach(async () => {
     const mockTaxRulesService = { calculateTax: jest.fn() };
     const mockSettingsService = {
-      getTaxSettings: jest.fn().mockResolvedValue({ taxCalculationMethod: 'inclusive' }),
+      getTaxSettings: jest
+        .fn()
+        .mockResolvedValue({ taxCalculationMethod: 'inclusive' }),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -233,7 +235,9 @@ describe('ExpensesService - Tax Rules Integration', () => {
             {
               provide: SettingsService,
               useValue: {
-                getTaxSettings: jest.fn().mockResolvedValue({ taxCalculationMethod: 'inclusive' }),
+                getTaxSettings: jest
+                  .fn()
+                  .mockResolvedValue({ taxCalculationMethod: 'inclusive' }),
               },
             },
             { provide: InventoryService, useValue: {} },
