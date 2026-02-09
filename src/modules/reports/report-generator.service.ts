@@ -205,6 +205,35 @@ export class ReportGeneratorService {
     });
   }
 
+  /**
+   * Register Inter font with the PDF document when font files exist in /fonts.
+   * Sets doc._fontRegular and doc._fontBold so all .font() calls can use them.
+   * Fallback: Helvetica / Helvetica-Bold when Inter files are not present.
+   */
+  private setupPdfFonts(doc: PDFKit.PDFDocument): void {
+    const d = doc as PDFKit.PDFDocument & {
+      _fontRegular?: string;
+      _fontBold?: string;
+    };
+    const fontsDir = path.join(process.cwd(), 'fonts');
+    const interPath = path.join(fontsDir, 'Inter-Regular.ttf');
+    const interBoldPath = path.join(fontsDir, 'Inter-Bold.ttf');
+    if (fs.existsSync(interPath) && fs.existsSync(interBoldPath)) {
+      try {
+        doc.registerFont('Inter', interPath);
+        doc.registerFont('Inter-Bold', interBoldPath);
+        d._fontRegular = 'Inter';
+        d._fontBold = 'Inter-Bold';
+      } catch {
+        d._fontRegular = 'Helvetica';
+        d._fontBold = 'Helvetica-Bold';
+      }
+    } else {
+      d._fontRegular = 'Helvetica';
+      d._fontBold = 'Helvetica-Bold';
+    }
+  }
+
   private formatDateForInvoice(dateString: string | Date): string {
     if (!dateString) return '';
     const date =
@@ -372,6 +401,7 @@ export class ReportGeneratorService {
           bufferPages: true, // Enable page buffering for footer insertion
           autoFirstPage: true,
         });
+        this.setupPdfFonts(doc);
         const buffers: Buffer[] = [];
 
         doc.on('data', buffers.push.bind(buffers));
@@ -561,12 +591,12 @@ export class ReportGeneratorService {
 
     if (!logoLoaded) {
       // Fallback: show application name as text
-      doc.fontSize(10).font('Helvetica-Bold').fillColor('#1a1a1a');
+      doc.fontSize(10).font((doc as any)._fontBold).fillColor('#1a1a1a');
       doc.text('SelfAccounting.AI', logoX, logoY, { width: logoSize });
     }
 
     // Company name (to the right of the logo) - Enhanced styling
-    doc.fontSize(20).font('Helvetica-Bold').fillColor('#0077c8'); // Brand color
+    doc.fontSize(20).font((doc as any)._fontBold).fillColor('#0077c8'); // Brand color
     const orgName =
       reportData.metadata?.organizationName || 'SelfAccounting.AI';
     const leftTextX = logoX + logoSize + 15;
@@ -575,7 +605,7 @@ export class ReportGeneratorService {
     });
 
     // Organization details (left side, under organization name)
-    doc.fontSize(9).font('Helvetica').fillColor('#666666');
+    doc.fontSize(9).font((doc as any)._fontRegular).fillColor('#666666');
     let yPos = 65;
     if (reportData.metadata?.vatNumber) {
       doc.text(`TRN/VAT: ${reportData.metadata.vatNumber}`, leftTextX, yPos);
@@ -597,13 +627,13 @@ export class ReportGeneratorService {
 
     // Report title and metadata (right side) - Enhanced styling
     const rightX = pageWidth / 2 + 20;
-    doc.fontSize(18).font('Helvetica-Bold').fillColor('#0077c8'); // Brand color
+    doc.fontSize(18).font((doc as any)._fontBold).fillColor('#0077c8'); // Brand color
     doc.text(this.getReportTitle(reportData.type), rightX, 40, {
       width: pageWidth - rightX - margin,
       align: 'right',
     });
 
-    doc.fontSize(9).font('Helvetica').fillColor('#666666');
+    doc.fontSize(9).font((doc as any)._fontRegular).fillColor('#666666');
     yPos = 60;
     if (
       reportData.metadata?.reportPeriod?.startDate ||
@@ -737,7 +767,7 @@ export class ReportGeneratorService {
       .stroke();
 
     // Summary title with enhanced styling
-    doc.fontSize(15).font('Helvetica-Bold').fillColor('#0077c8');
+    doc.fontSize(15).font((doc as any)._fontBold).fillColor('#0077c8');
     const titleY = summaryStartY + 12;
     doc.text(`Summary (Period: ${period})`, margin + 12, titleY);
 
@@ -756,7 +786,7 @@ export class ReportGeneratorService {
     const leftX = margin + 15;
     const rightX = pageWidth / 2 + 15;
     let yPos = summaryStartY + 40;
-    doc.fontSize(10.5).font('Helvetica').fillColor('#374151');
+    doc.fontSize(10.5).font((doc as any)._fontRegular).fillColor('#374151');
 
     // Left column
     if (summary.totalExpenses !== undefined) {
@@ -784,13 +814,13 @@ export class ReportGeneratorService {
       yPos += 15;
     }
     if (summary.totalAmountAfterVat !== undefined) {
-      doc.font('Helvetica-Bold');
+      doc.font((doc as any)._fontBold);
       doc.text(
         `Total Amount (After VAT): ${this.formatCurrency(summary.totalAmountAfterVat, currency)}`,
         leftX,
         yPos,
       );
-      doc.font('Helvetica');
+      doc.font((doc as any)._fontRegular);
       yPos += 15;
     }
     if (summary.averageExpenseAmount !== undefined) {
@@ -860,7 +890,7 @@ export class ReportGeneratorService {
       .lineWidth(0.5)
       .stroke();
 
-    doc.fontSize(8).font('Helvetica').fillColor('#666666');
+    doc.fontSize(8).font((doc as any)._fontRegular).fillColor('#666666');
 
     // Left side: Disclaimer and branding
     const disclaimer =
@@ -1607,7 +1637,7 @@ export class ReportGeneratorService {
       if (data.length === 0) {
         doc
           .fontSize(12)
-          .font('Helvetica')
+          .font((doc as any)._fontRegular)
           .text('No data available.', { align: 'center' });
         return;
       }
@@ -1644,7 +1674,7 @@ export class ReportGeneratorService {
         .lineWidth(0.5)
         .stroke();
 
-      doc.fontSize(11.5).font('Helvetica-Bold').fillColor('#ffffff'); // White text on colored background
+      doc.fontSize(11.5).font((doc as any)._fontBold).fillColor('#ffffff'); // White text on colored background
       let x = margin + 10;
       headers.forEach((header) => {
         const headerLabel = this.formatHeaderLabel(header);
@@ -1682,7 +1712,7 @@ export class ReportGeneratorService {
             .strokeColor('#0088d9')
             .lineWidth(0.5)
             .stroke();
-          doc.fontSize(11.5).font('Helvetica-Bold').fillColor('#ffffff');
+          doc.fontSize(11.5).font((doc as any)._fontBold).fillColor('#ffffff');
           x = margin + 10;
           headers.forEach((header) => {
             const headerLabel = this.formatHeaderLabel(header);
@@ -1725,7 +1755,7 @@ export class ReportGeneratorService {
           }
         }
 
-        doc.fontSize(10).font('Helvetica').fillColor('#1a1a1a');
+        doc.fontSize(10).font((doc as any)._fontRegular).fillColor('#1a1a1a');
         x = margin + 10;
         headers.forEach((header) => {
           const value = this.formatCellValue(row[header], header, currency);
@@ -1772,7 +1802,7 @@ export class ReportGeneratorService {
           .lineWidth(0.5)
           .stroke();
 
-        doc.fontSize(11.5).font('Helvetica-Bold').fillColor('#005a9a');
+        doc.fontSize(11.5).font((doc as any)._fontBold).fillColor('#005a9a');
         x = margin + 10;
         headers.forEach((header) => {
           const value = totalRow[header] || '';
@@ -1791,7 +1821,7 @@ export class ReportGeneratorService {
       // Handle structured reports (VAT, Bank Reconciliation, etc.)
       this.addPDFStructuredContent(doc, reportData, data, currency);
     } else {
-      doc.fontSize(12).font('Helvetica').text(String(data));
+      doc.fontSize(12).font((doc as any)._fontRegular).text(String(data));
     }
   }
 
@@ -2035,10 +2065,10 @@ export class ReportGeneratorService {
     if (reportData.type === 'vat_report') {
       doc
         .fontSize(14)
-        .font('Helvetica-Bold')
+        .font((doc as any)._fontBold)
         .text('VAT Summary', { underline: true });
       doc.moveDown(0.3);
-      doc.fontSize(11).font('Helvetica');
+      doc.fontSize(11).font((doc as any)._fontRegular);
 
       if (data.taxableSupplies !== undefined) {
         doc.text(
@@ -2054,11 +2084,11 @@ export class ReportGeneratorService {
         );
       }
       if (data.netVatPayable !== undefined) {
-        doc.font('Helvetica-Bold');
+        doc.font((doc as any)._fontBold);
         doc.text(
           `Net VAT Payable: ${this.formatCurrency(data.netVatPayable, currency)}`,
         );
-        doc.font('Helvetica');
+        doc.font((doc as any)._fontRegular);
       }
       if (data.status) {
         doc.text(`Status: ${data.status}`);
@@ -2072,7 +2102,7 @@ export class ReportGeneratorService {
         doc.moveDown(0.5);
         doc
           .fontSize(12)
-          .font('Helvetica-Bold')
+          .font((doc as any)._fontBold)
           .text('Category Breakdown', { underline: true });
         doc.moveDown(0.3);
         // Add category breakdown table
@@ -2088,10 +2118,10 @@ export class ReportGeneratorService {
     else if (reportData.type === 'bank_reconciliation') {
       doc
         .fontSize(14)
-        .font('Helvetica-Bold')
+        .font((doc as any)._fontBold)
         .text('Reconciliation Summary', { underline: true });
       doc.moveDown(0.3);
-      doc.fontSize(11).font('Helvetica');
+      doc.fontSize(11).font((doc as any)._fontRegular);
       doc.text(`Reconciliation ID: ${data.reconciliationId || 'N/A'}`);
       doc.text(
         `Date Range: ${this.formatDate(data.dateRange?.startDate || '')} to ${this.formatDate(data.dateRange?.endDate || '')}`,
@@ -2099,11 +2129,11 @@ export class ReportGeneratorService {
       doc.text(`Total Transactions: ${data.totalTransactions || 0}`);
       doc.text(`Matched: ${data.matched || 0}`);
       doc.text(`Unmatched: ${data.unmatched || 0}`);
-      doc.font('Helvetica-Bold');
+      doc.font((doc as any)._fontBold);
       doc.text(
         `Variance: ${this.formatCurrency(data.variance || 0, currency)}`,
       );
-      doc.font('Helvetica');
+      doc.font((doc as any)._fontRegular);
 
       if (
         data.transactions &&
@@ -2113,7 +2143,7 @@ export class ReportGeneratorService {
         doc.moveDown(0.5);
         doc
           .fontSize(12)
-          .font('Helvetica-Bold')
+          .font((doc as any)._fontBold)
           .text('Transactions', { underline: true });
         doc.moveDown(0.3);
         this.addPDFTable(
@@ -2140,10 +2170,10 @@ export class ReportGeneratorService {
 
       // Summary section with compact spacing
       doc.y = 175;
-      doc.fontSize(10).font('Helvetica-Bold').fillColor('#1a1a1a');
+      doc.fontSize(10).font((doc as any)._fontBold).fillColor('#1a1a1a');
       doc.text('Summary', margin, doc.y);
       doc.y += 12;
-      doc.fontSize(8).font('Helvetica').fillColor('#1a1a1a');
+      doc.fontSize(8).font((doc as any)._fontRegular).fillColor('#1a1a1a');
       if (data.summary) {
         doc.text('Opening Balances:', margin);
         doc.y += 10;
@@ -2157,13 +2187,13 @@ export class ReportGeneratorService {
           margin + 8,
         );
         doc.y += 9;
-        doc.font('Helvetica-Bold').fontSize(9);
+        doc.font((doc as any)._fontBold).fontSize(9);
         doc.text(
           `Opening Balance: ${this.formatCurrency(data.summary.openingBalance || 0, currency)}`,
           margin + 8,
         );
         doc.y += 12;
-        doc.font('Helvetica').fontSize(8);
+        doc.font((doc as any)._fontRegular).fontSize(8);
         doc.text('Period Transactions:', margin);
         doc.y += 10;
         doc.text(
@@ -2193,16 +2223,16 @@ export class ReportGeneratorService {
           margin + 8,
         );
         doc.y += 9;
-        doc.font('Helvetica-Bold').fontSize(9);
+        doc.font((doc as any)._fontBold).fontSize(9);
         doc.text(
           `Closing Balance: ${this.formatCurrency(data.summary.closingBalance || 0, currency)}`,
           margin + 8,
         );
         doc.y += 12;
-        doc.font('Helvetica').fontSize(8);
+        doc.font((doc as any)._fontRegular).fontSize(8);
         doc.text('Total Summary:', margin);
         doc.y += 10;
-        doc.font('Helvetica-Bold').fontSize(9);
+        doc.font((doc as any)._fontBold).fontSize(9);
         doc.text(
           `Total Debit: ${this.formatCurrency(data.summary.closingDebit || data.summary.totalDebit || 0, currency)}`,
           margin + 8,
@@ -2227,7 +2257,7 @@ export class ReportGeneratorService {
         Array.isArray(data.accounts) &&
         data.accounts.length > 0
       ) {
-        doc.fontSize(10).font('Helvetica-Bold').fillColor('#1a1a1a');
+        doc.fontSize(10).font((doc as any)._fontBold).fillColor('#1a1a1a');
         doc.text('Accounts', margin, doc.y);
         doc.y += 12;
 
@@ -2270,7 +2300,7 @@ export class ReportGeneratorService {
       } else {
         doc
           .fontSize(8)
-          .font('Helvetica')
+          .font((doc as any)._fontRegular)
           .text('No accounts data available.', margin);
       }
     }
@@ -2302,8 +2332,8 @@ export class ReportGeneratorService {
           value !== null &&
           !Array.isArray(value)
         ) {
-          doc.fontSize(12).font('Helvetica-Bold').text(key);
-          doc.font('Helvetica').fontSize(10);
+          doc.fontSize(12).font((doc as any)._fontBold).text(key);
+          doc.font((doc as any)._fontRegular).fontSize(10);
           Object.entries(value).forEach(([subKey, subValue]) => {
             doc.text(`  ${subKey}: ${String(subValue)}`);
           });
@@ -2418,7 +2448,7 @@ export class ReportGeneratorService {
     // Opening Balances
     doc
       .fontSize(10)
-      .font('Helvetica-Bold')
+      .font((doc as any)._fontBold)
       .fillColor(textDark)
       .text('Opening Balances', margin, doc.y);
     doc.y += 15;
@@ -2440,7 +2470,7 @@ export class ReportGeneratorService {
       // Label
       doc
         .fontSize(8)
-        .font('Helvetica')
+        .font((doc as any)._fontRegular)
         .fillColor(textMuted)
         .text(item.label.toUpperCase(), cardX + 8, doc.y + 12, {
           width: cardWidth - 16,
@@ -2450,7 +2480,7 @@ export class ReportGeneratorService {
       // Value
       doc
         .fontSize(14)
-        .font('Helvetica-Bold')
+        .font((doc as any)._fontBold)
         .fillColor(textDark)
         .text(
           this.formatCurrency(item.value, currency),
@@ -2468,7 +2498,7 @@ export class ReportGeneratorService {
     // Period Transactions
     doc
       .fontSize(10)
-      .font('Helvetica-Bold')
+      .font((doc as any)._fontBold)
       .fillColor(textDark)
       .text('Period Transactions', margin, doc.y);
     doc.y += 15;
@@ -2487,7 +2517,7 @@ export class ReportGeneratorService {
 
       doc
         .fontSize(8)
-        .font('Helvetica')
+        .font((doc as any)._fontRegular)
         .fillColor(textMuted)
         .text(item.label.toUpperCase(), cardX + 8, doc.y + 12, {
           width: cardWidth - 16,
@@ -2496,7 +2526,7 @@ export class ReportGeneratorService {
 
       doc
         .fontSize(14)
-        .font('Helvetica-Bold')
+        .font((doc as any)._fontBold)
         .fillColor(textDark)
         .text(
           this.formatCurrency(item.value, currency),
@@ -2514,7 +2544,7 @@ export class ReportGeneratorService {
     // Closing Balances
     doc
       .fontSize(10)
-      .font('Helvetica-Bold')
+      .font((doc as any)._fontBold)
       .fillColor(textDark)
       .text('Closing Balances', margin, doc.y);
     doc.y += 15;
@@ -2534,7 +2564,7 @@ export class ReportGeneratorService {
 
       doc
         .fontSize(8)
-        .font('Helvetica')
+        .font((doc as any)._fontRegular)
         .fillColor(textMuted)
         .text(item.label.toUpperCase(), cardX + 8, doc.y + 12, {
           width: cardWidth - 16,
@@ -2543,7 +2573,7 @@ export class ReportGeneratorService {
 
       doc
         .fontSize(14)
-        .font('Helvetica-Bold')
+        .font((doc as any)._fontBold)
         .fillColor(textDark)
         .text(
           this.formatCurrency(item.value, currency),
@@ -2647,13 +2677,13 @@ export class ReportGeneratorService {
       .fillColor(accentColor)
       .fill();
 
-    doc.fontSize(14).font('Helvetica-Bold').fillColor(textDark);
+    doc.fontSize(14).font((doc as any)._fontBold).fillColor(textDark);
     const titleWidth = doc.widthOfString(title);
     doc.text(title, margin + 15, sectionHeaderY + 10, { lineBreak: false });
 
     doc
       .fontSize(9)
-      .font('Helvetica')
+      .font((doc as any)._fontRegular)
       .fillColor('#6b7280')
       .text(subtitle, margin + 15 + titleWidth + 10, sectionHeaderY + 13, {
         lineBreak: false,
@@ -2681,7 +2711,7 @@ export class ReportGeneratorService {
       .fill();
 
     let x = margin + 15;
-    doc.fontSize(9).font('Helvetica-Bold').fillColor('#ffffff');
+    doc.fontSize(9).font((doc as any)._fontBold).fillColor('#ffffff');
     headers.forEach((header, i) => {
       const isNumeric = columns[i] === 'amount';
       doc.text(header, x, headerY + 9, {
@@ -2709,7 +2739,7 @@ export class ReportGeneratorService {
           .fillColor(accentColor)
           .fill();
         let headerX = margin + 15;
-        doc.fontSize(9).font('Helvetica-Bold').fillColor('#ffffff');
+        doc.fontSize(9).font((doc as any)._fontBold).fillColor('#ffffff');
         headers.forEach((header, i) => {
           const isNumeric = columns[i] === 'amount';
           doc.text(header, headerX, newHeaderY + 9, {
@@ -2740,7 +2770,7 @@ export class ReportGeneratorService {
         .stroke();
 
       x = margin + 15;
-      doc.fontSize(9).font('Helvetica').fillColor(textDark);
+      doc.fontSize(9).font((doc as any)._fontRegular).fillColor(textDark);
       columns.forEach((col, i) => {
         const isNumeric = col === 'amount';
         let value = item[col];
@@ -2778,7 +2808,7 @@ export class ReportGeneratorService {
       .lineTo(margin + contentWidth - 5, totalY)
       .stroke();
 
-    doc.fontSize(10).font('Helvetica-Bold').fillColor(textDark);
+    doc.fontSize(10).font((doc as any)._fontBold).fillColor(textDark);
     doc.text('Total', margin + 15, totalY + 10, { lineBreak: false });
     doc.text(this.formatCurrency(total, currency), margin + 15, totalY + 10, {
       width: contentWidth - 40,
@@ -2815,13 +2845,13 @@ export class ReportGeneratorService {
       .fillColor(accentColor)
       .fill();
 
-    doc.fontSize(14).font('Helvetica-Bold').fillColor(textDark);
+    doc.fontSize(14).font((doc as any)._fontBold).fillColor(textDark);
     const titleWidth = doc.widthOfString('Equity');
     doc.text('Equity', margin + 15, sectionHeaderY + 10, { lineBreak: false });
 
     doc
       .fontSize(9)
-      .font('Helvetica')
+      .font((doc as any)._fontRegular)
       .fillColor('#6b7280')
       .text(
         'Revenue minus Expenses',
@@ -2875,14 +2905,14 @@ export class ReportGeneratorService {
       // Label
       doc
         .fontSize(9)
-        .font('Helvetica')
+        .font((doc as any)._fontRegular)
         .fillColor('#6b7280')
         .text(item.label, cardX + 12, equityY + 12, {
           width: cardWidth - 24,
         });
 
       // Value
-      const fontStyle = item.bold ? 'Helvetica-Bold' : 'Helvetica';
+      const fontStyle = item.bold ? (doc as any)._fontBold : (doc as any)._fontRegular;
       const fontSize = item.bold ? 16 : 14;
       doc
         .fontSize(fontSize)
@@ -2959,13 +2989,13 @@ export class ReportGeneratorService {
     // Opening Retained Earnings
     doc
       .fontSize(10)
-      .font('Helvetica-Bold')
+      .font((doc as any)._fontBold)
       .fillColor(textDark)
       .text('Opening Retained Earnings', margin, doc.y);
     doc.moveDown(0.2);
     doc
       .fontSize(12)
-      .font('Helvetica-Bold')
+      .font((doc as any)._fontBold)
       .fillColor(primaryColor)
       .text(
         this.formatCurrency(
@@ -3002,7 +3032,7 @@ export class ReportGeneratorService {
 
     doc
       .fontSize(10)
-      .font('Helvetica-Bold')
+      .font((doc as any)._fontBold)
       .fillColor(textDark)
       .text('Period Transactions', margin, doc.y);
     doc.moveDown(0.2);
@@ -3021,7 +3051,7 @@ export class ReportGeneratorService {
 
       doc
         .fontSize(8)
-        .font('Helvetica')
+        .font((doc as any)._fontRegular)
         .fillColor(textMuted)
         .text(item.label.toUpperCase(), cardX + 8, doc.y + 12, {
           width: cardWidth - 16,
@@ -3032,7 +3062,7 @@ export class ReportGeneratorService {
         : this.formatCurrency(item.value as number, currency);
       doc
         .fontSize(14)
-        .font('Helvetica-Bold')
+        .font((doc as any)._fontBold)
         .fillColor(textDark)
         .text(displayValue, cardX + 8, doc.y + 28, { width: cardWidth - 16 });
     });
@@ -3042,13 +3072,13 @@ export class ReportGeneratorService {
     // Closing Retained Earnings
     doc
       .fontSize(10)
-      .font('Helvetica-Bold')
+      .font((doc as any)._fontBold)
       .fillColor(textDark)
       .text('Closing Retained Earnings', margin, doc.y);
     doc.moveDown(0.2);
     doc
       .fontSize(12)
-      .font('Helvetica-Bold')
+      .font((doc as any)._fontBold)
       .fillColor(primaryColor)
       .text(
         this.formatCurrency(
@@ -3062,11 +3092,11 @@ export class ReportGeneratorService {
     // Revenue Section
     doc
       .fontSize(14)
-      .font('Helvetica-Bold')
+      .font((doc as any)._fontBold)
       .fillColor(primaryColor)
       .text('Revenue', margin);
     doc.moveDown(0.3);
-    doc.fontSize(10).font('Helvetica').fillColor(textDark);
+    doc.fontSize(10).font((doc as any)._fontRegular).fillColor(textDark);
     doc.text(
       `Amount: ${this.formatCurrency(data.revenue?.netAmount || data.revenue?.amount || 0, currency)}`,
       margin,
@@ -3077,7 +3107,7 @@ export class ReportGeneratorService {
     // Expenses Section
     doc
       .fontSize(14)
-      .font('Helvetica-Bold')
+      .font((doc as any)._fontBold)
       .fillColor('#dc2626')
       .text('Expenses', margin);
     doc.moveDown(0.3);
@@ -3096,7 +3126,7 @@ export class ReportGeneratorService {
     }
 
     doc.moveDown(0.3);
-    doc.fontSize(10).font('Helvetica-Bold').fillColor(textDark);
+    doc.fontSize(10).font((doc as any)._fontBold).fillColor(textDark);
     doc.text(
       `Total Expenses: ${this.formatCurrency(data.expenses?.total || 0, currency)}`,
       margin,
@@ -3127,13 +3157,13 @@ export class ReportGeneratorService {
     // Opening/Closing Balances
     doc
       .fontSize(10)
-      .font('Helvetica-Bold')
+      .font((doc as any)._fontBold)
       .fillColor(textDark)
       .text('Opening Balance', margin, doc.y);
     doc.moveDown(0.2);
     doc
       .fontSize(12)
-      .font('Helvetica-Bold')
+      .font((doc as any)._fontBold)
       .fillColor(primaryColor)
       .text(
         this.formatCurrency(data.summary?.openingBalance || 0, currency),
@@ -3142,13 +3172,13 @@ export class ReportGeneratorService {
     doc.moveDown(0.3);
     doc
       .fontSize(10)
-      .font('Helvetica-Bold')
+      .font((doc as any)._fontBold)
       .fillColor(textDark)
       .text('Period Outstanding', margin, doc.y);
     doc.moveDown(0.2);
     doc
       .fontSize(12)
-      .font('Helvetica-Bold')
+      .font((doc as any)._fontBold)
       .fillColor(primaryColor)
       .text(
         this.formatCurrency(
@@ -3160,13 +3190,13 @@ export class ReportGeneratorService {
     doc.moveDown(0.3);
     doc
       .fontSize(10)
-      .font('Helvetica-Bold')
+      .font((doc as any)._fontBold)
       .fillColor(textDark)
       .text('Closing Balance', margin, doc.y);
     doc.moveDown(0.2);
     doc
       .fontSize(12)
-      .font('Helvetica-Bold')
+      .font((doc as any)._fontBold)
       .fillColor(primaryColor)
       .text(
         this.formatCurrency(data.summary?.closingBalance || 0, currency),
@@ -3208,7 +3238,7 @@ export class ReportGeneratorService {
 
       doc
         .fontSize(8)
-        .font('Helvetica')
+        .font((doc as any)._fontRegular)
         .fillColor(textMuted)
         .text(item.label.toUpperCase(), cardX + 8, doc.y + 12, {
           width: cardWidth - 16,
@@ -3219,7 +3249,7 @@ export class ReportGeneratorService {
         : this.formatCurrency(item.value as number, currency);
       doc
         .fontSize(14)
-        .font('Helvetica-Bold')
+        .font((doc as any)._fontBold)
         .fillColor(textDark)
         .text(displayValue, cardX + 8, doc.y + 28, { width: cardWidth - 16 });
     });
@@ -3229,11 +3259,11 @@ export class ReportGeneratorService {
     // Summary Stats
     doc
       .fontSize(12)
-      .font('Helvetica-Bold')
+      .font((doc as any)._fontBold)
       .fillColor(primaryColor)
       .text('Invoice Status Summary', margin);
     doc.moveDown(0.3);
-    doc.fontSize(10).font('Helvetica').fillColor(textDark);
+    doc.fontSize(10).font((doc as any)._fontRegular).fillColor(textDark);
     doc.text(`Paid Invoices: ${data.summary?.paidInvoices || 0}`, margin);
     doc.text(`Unpaid Invoices: ${data.summary?.unpaidInvoices || 0}`, margin);
     doc.text(`Partial Invoices: ${data.summary?.partialInvoices || 0}`, margin);
@@ -3244,7 +3274,7 @@ export class ReportGeneratorService {
     if (data.items && Array.isArray(data.items) && data.items.length > 0) {
       doc
         .fontSize(12)
-        .font('Helvetica-Bold')
+        .font((doc as any)._fontBold)
         .fillColor(primaryColor)
         .text('Outstanding Invoices', margin);
       doc.moveDown(0.3);
@@ -3288,13 +3318,13 @@ export class ReportGeneratorService {
     // Opening/Closing Balances
     doc
       .fontSize(10)
-      .font('Helvetica-Bold')
+      .font((doc as any)._fontBold)
       .fillColor(textDark)
       .text('Opening Balance', margin, doc.y);
     doc.moveDown(0.2);
     doc
       .fontSize(12)
-      .font('Helvetica-Bold')
+      .font((doc as any)._fontBold)
       .fillColor(primaryColor)
       .text(
         this.formatCurrency(data.summary?.openingBalance || 0, currency),
@@ -3303,13 +3333,13 @@ export class ReportGeneratorService {
     doc.moveDown(0.3);
     doc
       .fontSize(10)
-      .font('Helvetica-Bold')
+      .font((doc as any)._fontBold)
       .fillColor(textDark)
       .text('Period Amount', margin, doc.y);
     doc.moveDown(0.2);
     doc
       .fontSize(12)
-      .font('Helvetica-Bold')
+      .font((doc as any)._fontBold)
       .fillColor(primaryColor)
       .text(
         this.formatCurrency(data.summary?.periodAmount || 0, currency),
@@ -3318,13 +3348,13 @@ export class ReportGeneratorService {
     doc.moveDown(0.3);
     doc
       .fontSize(10)
-      .font('Helvetica-Bold')
+      .font((doc as any)._fontBold)
       .fillColor(textDark)
       .text('Closing Balance', margin, doc.y);
     doc.moveDown(0.2);
     doc
       .fontSize(12)
-      .font('Helvetica-Bold')
+      .font((doc as any)._fontBold)
       .fillColor(primaryColor)
       .text(
         this.formatCurrency(data.summary?.closingBalance || 0, currency),
@@ -3366,7 +3396,7 @@ export class ReportGeneratorService {
 
       doc
         .fontSize(8)
-        .font('Helvetica')
+        .font((doc as any)._fontRegular)
         .fillColor(textMuted)
         .text(item.label.toUpperCase(), cardX + 8, doc.y + 12, {
           width: cardWidth - 16,
@@ -3377,7 +3407,7 @@ export class ReportGeneratorService {
         : this.formatCurrency(item.value as number, currency);
       doc
         .fontSize(14)
-        .font('Helvetica-Bold')
+        .font((doc as any)._fontBold)
         .fillColor(textDark)
         .text(displayValue, cardX + 8, doc.y + 28, { width: cardWidth - 16 });
     });
@@ -3387,11 +3417,11 @@ export class ReportGeneratorService {
     // Summary Stats
     doc
       .fontSize(12)
-      .font('Helvetica-Bold')
+      .font((doc as any)._fontBold)
       .fillColor(primaryColor)
       .text('Payables Summary', margin);
     doc.moveDown(0.3);
-    doc.fontSize(10).font('Helvetica').fillColor(textDark);
+    doc.fontSize(10).font((doc as any)._fontRegular).fillColor(textDark);
     doc.text(`As of Date: ${data.asOfDate || 'N/A'}`, margin);
     doc.text(`Pending Items: ${data.summary?.pendingItems || 0}`, margin);
     doc.text(`Overdue Items: ${data.summary?.overdueItems || 0}`, margin);
@@ -3401,7 +3431,7 @@ export class ReportGeneratorService {
     if (data.items && Array.isArray(data.items) && data.items.length > 0) {
       doc
         .fontSize(12)
-        .font('Helvetica-Bold')
+        .font((doc as any)._fontBold)
         .fillColor(primaryColor)
         .text('Pending Payables', margin);
       doc.moveDown(0.3);
@@ -3422,7 +3452,7 @@ export class ReportGeneratorService {
       doc.moveDown(0.5);
       doc
         .fontSize(12)
-        .font('Helvetica-Bold')
+        .font((doc as any)._fontBold)
         .fillColor(primaryColor)
         .text('Supplier Summary (Pending Balances)', margin);
       doc.moveDown(0.3);
@@ -3532,7 +3562,7 @@ export class ReportGeneratorService {
       // Label
       doc
         .fontSize(8)
-        .font('Helvetica')
+        .font((doc as any)._fontRegular)
         .fillColor(textMuted)
         .text(item.label.toUpperCase(), cardX + 8, cardY + 12, {
           width: cardWidth - 16,
@@ -3545,7 +3575,7 @@ export class ReportGeneratorService {
         : this.formatCurrency(item.value as number, currency);
       doc
         .fontSize(item.bold ? 16 : 14)
-        .font(item.bold ? 'Helvetica-Bold' : 'Helvetica-Bold')
+        .font(item.bold ? (doc as any)._fontBold : (doc as any)._fontRegular)
         .fillColor(textDark)
         .text(displayValue, cardX + 8, cardY + 28, {
           width: cardWidth - 16,
@@ -3556,7 +3586,7 @@ export class ReportGeneratorService {
       if (item.description) {
         doc
           .fontSize(7)
-          .font('Helvetica')
+          .font((doc as any)._fontRegular)
           .fillColor(textMuted)
           .text(item.description, cardX + 8, cardY + 50, {
             width: cardWidth - 16,
@@ -3571,7 +3601,7 @@ export class ReportGeneratorService {
     if (data.startDate || data.endDate) {
       doc
         .fontSize(10)
-        .font('Helvetica')
+        .font((doc as any)._fontRegular)
         .fillColor(textMuted)
         .text(
           `Report Period: ${data.startDate || 'N/A'} to ${data.endDate || 'N/A'}`,
@@ -3602,7 +3632,7 @@ export class ReportGeneratorService {
 
       doc
         .fontSize(14)
-        .font('Helvetica-Bold')
+        .font((doc as any)._fontBold)
         .fillColor(textDark)
         .text(
           'VAT Input (Purchases/Expenses)',
@@ -3612,7 +3642,7 @@ export class ReportGeneratorService {
 
       doc
         .fontSize(9)
-        .font('Helvetica')
+        .font((doc as any)._fontRegular)
         .fillColor(textMuted)
         .text(
           `Total: ${this.formatCurrency(summary.vatInput || 0, currency)} | ${data.vatInputItems.length} transactions`,
@@ -3667,13 +3697,13 @@ export class ReportGeneratorService {
 
       doc
         .fontSize(14)
-        .font('Helvetica-Bold')
+        .font((doc as any)._fontBold)
         .fillColor(textDark)
         .text('VAT Output (Sales/Invoices)', margin + 15, sectionHeaderY + 10);
 
       doc
         .fontSize(9)
-        .font('Helvetica')
+        .font((doc as any)._fontRegular)
         .fillColor(textMuted)
         .text(
           `Total: ${this.formatCurrency(summary.vatOutput || 0, currency)} | ${data.vatOutputItems.length} transactions`,
@@ -3752,7 +3782,7 @@ export class ReportGeneratorService {
       .fillColor(accentColor)
       .fill();
 
-    doc.fontSize(9.5).font('Helvetica-Bold').fillColor('#ffffff');
+    doc.fontSize(9.5).font((doc as any)._fontBold).fillColor('#ffffff');
 
     const headers = [
       'Date',
@@ -3788,7 +3818,7 @@ export class ReportGeneratorService {
           .rect(margin, rowY, contentWidth, headerHeight)
           .fillColor(accentColor)
           .fill();
-        doc.fontSize(9.5).font('Helvetica-Bold').fillColor('#ffffff');
+        doc.fontSize(9.5).font((doc as any)._fontBold).fillColor('#ffffff');
         x = margin + 8;
         headers.forEach((header, i) => {
           doc.text(header, x, rowY + 8, {
@@ -3818,7 +3848,7 @@ export class ReportGeneratorService {
         .lineTo(margin + contentWidth, rowY)
         .stroke();
 
-      doc.fontSize(9).font('Helvetica');
+      doc.fontSize(9).font((doc as any)._fontRegular);
       x = margin + 8;
 
       // Date
@@ -3860,7 +3890,7 @@ export class ReportGeneratorService {
       x += colWidths[3];
 
       // VAT Amount
-      doc.font('Helvetica-Bold');
+      doc.font((doc as any)._fontBold);
       doc.text(
         this.formatCurrency(item.vatAmount || 0, currency),
         x,
@@ -3870,7 +3900,7 @@ export class ReportGeneratorService {
           align: 'right',
         },
       );
-      doc.font('Helvetica');
+      doc.font((doc as any)._fontRegular);
       x += colWidths[4];
 
       // TRN
@@ -3908,7 +3938,7 @@ export class ReportGeneratorService {
       0,
     );
 
-    doc.fontSize(10).font('Helvetica-Bold').fillColor(textDark);
+    doc.fontSize(10).font((doc as any)._fontBold).fillColor(textDark);
 
     x = margin + 8;
     doc.text('Total', x, totalY + 9, {
@@ -3962,7 +3992,7 @@ export class ReportGeneratorService {
 
     // Period information
     if (data.period) {
-      doc.fontSize(9).font('Helvetica').fillColor(textMuted);
+      doc.fontSize(9).font((doc as any)._fontRegular).fillColor(textMuted);
       if (data.period.startDate) {
         doc.text(
           `From: ${new Date(data.period.startDate).toLocaleDateString('en-GB')}`,
@@ -4040,7 +4070,7 @@ export class ReportGeneratorService {
       // Label
       doc
         .fontSize(7)
-        .font('Helvetica')
+        .font((doc as any)._fontRegular)
         .fillColor(textMuted)
         .text(item.label.toUpperCase(), cardX + 6, cardY + 10, {
           width: cardWidth - 12,
@@ -4053,7 +4083,7 @@ export class ReportGeneratorService {
         : (item.value as number).toFixed(2);
       doc
         .fontSize(item.bold ? 12 : 10)
-        .font(item.bold ? 'Helvetica-Bold' : 'Helvetica-Bold')
+        .font(item.bold ? (doc as any)._fontBold : (doc as any)._fontRegular)
         .fillColor(textDark)
         .text(displayValue, cardX + 6, cardY + 24, {
           width: cardWidth - 12,
@@ -4069,7 +4099,7 @@ export class ReportGeneratorService {
       Array.isArray(data.products) &&
       data.products.length > 0
     ) {
-      doc.fontSize(11).font('Helvetica-Bold').fillColor(textDark);
+      doc.fontSize(11).font((doc as any)._fontBold).fillColor(textDark);
       doc.text('Product Stock Details', margin, doc.y);
       doc.y += 15;
 
@@ -4103,7 +4133,7 @@ export class ReportGeneratorService {
         .fillColor(accentColor)
         .fill();
 
-      doc.fontSize(9).font('Helvetica-Bold').fillColor('#ffffff');
+      doc.fontSize(9).font((doc as any)._fontBold).fillColor('#ffffff');
 
       const headers = [
         'Product',
@@ -4142,7 +4172,7 @@ export class ReportGeneratorService {
             .rect(margin, rowY, contentWidth, headerHeight)
             .fillColor(accentColor)
             .fill();
-          doc.fontSize(9).font('Helvetica-Bold').fillColor('#ffffff');
+          doc.fontSize(9).font((doc as any)._fontBold).fillColor('#ffffff');
           x = margin + 6;
           headers.forEach((header, i) => {
             doc.text(header, x, rowY + 9, {
@@ -4172,7 +4202,7 @@ export class ReportGeneratorService {
           .lineTo(margin + contentWidth, rowY)
           .stroke();
 
-        doc.fontSize(8.5).font('Helvetica');
+        doc.fontSize(8.5).font((doc as any)._fontRegular);
         x = margin + 6;
 
         // Product Name
@@ -4226,7 +4256,7 @@ export class ReportGeneratorService {
         x += colWidths[5];
 
         // Closing Stock
-        doc.font('Helvetica-Bold').fillColor(textDark);
+        doc.font((doc as any)._fontBold).fillColor(textDark);
         doc.text((product.closingStock || 0).toFixed(2), x, rowY + 7, {
           width: colWidths[6] - 12,
           align: 'right',
@@ -4234,7 +4264,7 @@ export class ReportGeneratorService {
         x += colWidths[6];
 
         // Average Cost
-        doc.font('Helvetica').fillColor(textMuted);
+        doc.font((doc as any)._fontRegular).fillColor(textMuted);
         doc.text(
           this.formatCurrency(product.averageCost || 0, currency),
           x,
@@ -4247,7 +4277,7 @@ export class ReportGeneratorService {
         x += colWidths[7];
 
         // Stock Value
-        doc.font('Helvetica-Bold').fillColor(textDark);
+        doc.font((doc as any)._fontBold).fillColor(textDark);
         doc.text(
           this.formatCurrency(product.stockValue || 0, currency),
           x,
@@ -4258,7 +4288,7 @@ export class ReportGeneratorService {
           },
         );
 
-        doc.font('Helvetica');
+        doc.font((doc as any)._fontRegular);
         rowY += rowHeight;
       });
 
@@ -4277,7 +4307,7 @@ export class ReportGeneratorService {
         .lineTo(margin + contentWidth, totalY)
         .stroke();
 
-      doc.fontSize(9.5).font('Helvetica-Bold').fillColor(textDark);
+      doc.fontSize(9.5).font((doc as any)._fontBold).fillColor(textDark);
 
       x = margin + 6;
       doc.text('TOTAL', x, totalY + 9, {
@@ -4339,7 +4369,7 @@ export class ReportGeneratorService {
 
       doc.y = totalY + totalRowHeight + 10;
     } else {
-      doc.fontSize(10).font('Helvetica').fillColor(textMuted);
+      doc.fontSize(10).font((doc as any)._fontRegular).fillColor(textMuted);
       doc.text(
         'No stock movements found for the selected period.',
         margin,
@@ -4351,7 +4381,7 @@ export class ReportGeneratorService {
     // Validation note
     if (summary.totalStockValue > 0) {
       doc.y += 10;
-      doc.fontSize(8).font('Helvetica').fillColor(textMuted);
+      doc.fontSize(8).font((doc as any)._fontRegular).fillColor(textMuted);
       doc.text(
         `Note: Total stock value (${this.formatCurrency(summary.totalStockValue, currency)}) should match the "Closing Stock (Inventory)" amount in the Balance Sheet report for the same date.`,
         margin,
@@ -4392,7 +4422,7 @@ export class ReportGeneratorService {
       .lineWidth(0.5)
       .stroke();
 
-    doc.fontSize(10).font('Helvetica-Bold').fillColor('#1a1a1a');
+    doc.fontSize(10).font((doc as any)._fontBold).fillColor('#1a1a1a');
     let x = margin + 5;
     columns.forEach((col) => {
       doc.text(this.formatHeaderLabel(col), x, headerY + 8, {
@@ -4420,7 +4450,7 @@ export class ReportGeneratorService {
           .strokeColor('#e0e0e0')
           .lineWidth(0.5)
           .stroke();
-        doc.fontSize(10).font('Helvetica-Bold').fillColor('#1a1a1a');
+        doc.fontSize(10).font((doc as any)._fontBold).fillColor('#1a1a1a');
         x = margin + 5;
         columns.forEach((col) => {
           doc.text(this.formatHeaderLabel(col), x, rowY + 8, {
@@ -4443,7 +4473,7 @@ export class ReportGeneratorService {
       }
 
       // Reset fill color to black for text
-      doc.fillColor('#1a1a1a').fontSize(9).font('Helvetica');
+      doc.fillColor('#1a1a1a').fontSize(9).font((doc as any)._fontRegular);
       x = margin + 5;
       columns.forEach((col) => {
         const value = this.formatCellValue(row[col], col, currency);
@@ -4474,7 +4504,7 @@ export class ReportGeneratorService {
     const contentWidth = pageWidth - 2 * margin;
 
     doc.y = 175;
-    doc.fontSize(10).font('Helvetica-Bold').fillColor('#1a1a1a');
+    doc.fontSize(10).font((doc as any)._fontBold).fillColor('#1a1a1a');
 
     if (data.period) {
       doc.text(
@@ -4494,11 +4524,11 @@ export class ReportGeneratorService {
         }
 
         // Account header
-        doc.fontSize(12).font('Helvetica-Bold').fillColor('#1a1a1a');
+        doc.fontSize(12).font((doc as any)._fontBold).fillColor('#1a1a1a');
         doc.text(account.accountName || account.accountCode, margin, doc.y);
         doc.y += 12;
 
-        doc.fontSize(9).font('Helvetica').fillColor('#666666');
+        doc.fontSize(9).font((doc as any)._fontRegular).fillColor('#666666');
         doc.text(
           `Category: ${account.accountCategory || 'N/A'}`,
           margin,
@@ -4506,7 +4536,7 @@ export class ReportGeneratorService {
         );
         doc.y += 10;
 
-        doc.fontSize(9).font('Helvetica-Bold');
+        doc.fontSize(9).font((doc as any)._fontBold);
         doc.text(
           `Opening Balance: ${this.formatCurrency(account.openingBalance || 0, currency)}`,
           margin,
@@ -4532,7 +4562,7 @@ export class ReportGeneratorService {
             .lineWidth(0.5)
             .stroke();
 
-          doc.fontSize(7).font('Helvetica-Bold').fillColor('#ffffff');
+          doc.fontSize(7).font((doc as any)._fontBold).fillColor('#ffffff');
           const colWidths = [
             contentWidth * 0.12, // Date
             contentWidth * 0.3, // Description
@@ -4579,7 +4609,7 @@ export class ReportGeneratorService {
                 .lineWidth(0.5)
                 .stroke();
 
-              doc.fontSize(7).font('Helvetica-Bold').fillColor('#ffffff');
+              doc.fontSize(7).font((doc as any)._fontBold).fillColor('#ffffff');
               x = margin + 3;
               headers.forEach((header, index) => {
                 doc.text(header, x, newHeaderY + 6, {
@@ -4592,7 +4622,7 @@ export class ReportGeneratorService {
             }
 
             const rowY = doc.y;
-            doc.fontSize(7).font('Helvetica').fillColor('#1a1a1a');
+            doc.fontSize(7).font((doc as any)._fontRegular).fillColor('#1a1a1a');
 
             // Date
             x = margin + 3;
@@ -4648,7 +4678,7 @@ export class ReportGeneratorService {
             x += colWidths[5];
 
             // Balance
-            doc.font('Helvetica-Bold');
+            doc.font((doc as any)._fontBold);
             doc.text(
               this.formatCurrency(transaction.runningBalance || 0, currency),
               x,
@@ -4658,7 +4688,7 @@ export class ReportGeneratorService {
                 align: 'right',
               },
             );
-            doc.font('Helvetica');
+            doc.font((doc as any)._fontRegular);
 
             // Row border
             doc
@@ -4671,7 +4701,7 @@ export class ReportGeneratorService {
             doc.y += 14;
           });
         } else {
-          doc.fontSize(8).font('Helvetica').fillColor('#666666');
+          doc.fontSize(8).font((doc as any)._fontRegular).fillColor('#666666');
           doc.text('No transactions in this period', margin, doc.y);
           doc.y += 10;
         }
@@ -4729,7 +4759,7 @@ export class ReportGeneratorService {
       .lineWidth(0.5)
       .stroke();
 
-    doc.fontSize(7).font('Helvetica-Bold').fillColor('#ffffff');
+    doc.fontSize(7).font((doc as any)._fontBold).fillColor('#ffffff');
     let x = margin + 3;
     columns.forEach((col, index) => {
       const label = this.formatHeaderLabel(col);
@@ -4760,7 +4790,7 @@ export class ReportGeneratorService {
           .lineWidth(0.5)
           .stroke();
 
-        doc.fontSize(7).font('Helvetica-Bold').fillColor('#ffffff');
+        doc.fontSize(7).font((doc as any)._fontBold).fillColor('#ffffff');
         x = margin + 3;
         columns.forEach((col, colIndex) => {
           const label = this.formatHeaderLabel(col);
@@ -4789,7 +4819,7 @@ export class ReportGeneratorService {
       doc.rect(margin, rowY, contentWidth, rowHeight).stroke();
 
       // Row content - Very small font to prevent collisions
-      doc.fillColor('#1a1a1a').fontSize(7).font('Helvetica');
+      doc.fillColor('#1a1a1a').fontSize(7).font((doc as any)._fontRegular);
       x = margin + 3;
       columns.forEach((col, colIndex) => {
         const value = this.formatCellValue(row[col], col, currency);
@@ -7600,11 +7630,11 @@ export class ReportGeneratorService {
         const currency = metadata.currency || invoice.currency || 'AED';
 
         const doc = new PDFDocument({
-          margin: 56, // Increased from 50 to match premium preview (48px = ~56pt)
+          margin: 28, // Increased from 50 to match premium preview (48px = ~56pt)
           size: 'A4',
           layout: 'portrait',
         });
-
+        this.setupPdfFonts(doc);
         const buffers: Buffer[] = [];
         doc.on('data', buffers.push.bind(buffers));
         doc.on('end', () => {
@@ -7614,8 +7644,8 @@ export class ReportGeneratorService {
         doc.on('error', reject);
 
         const pageWidth = doc.page.width;
-        const margin = 36; // Increased from 50 to match premium preview
-        const rightMarginExtra = 24; // Extra space on right so invoice isn't flush to edge
+        const margin = 28; // Increased from 50 to match premium preview
+        const rightMarginExtra = 7; // Extra space on right so invoice isn't flush to edge
         const contentWidth = pageWidth - 2 * margin - rightMarginExtra;
 
         // Get template settings from metadata
@@ -7708,7 +7738,7 @@ export class ReportGeneratorService {
         // ============================================================================
         // HEADER: Logo on left, Title on right (Premium layout matching preview)
         // ============================================================================
-        let currentY = 40;
+        let currentY = 32;
         let logoHeight = 0;
 
         // Add logo on the left if available
@@ -7795,7 +7825,7 @@ export class ReportGeneratorService {
         }
         // Decreased heading font size, standardize to match rest of content
         // Position title at same Y as logo start to avoid overlap
-        doc.fontSize(14).font('Helvetica-Bold').fillColor(colors.primary);
+        doc.fontSize(14).font((doc as any)._fontBold).fillColor(colors.primary);
         doc.text(invoiceTitle.toUpperCase(), margin, currentY, {
           width: contentWidth,
           align: 'right',
@@ -7804,7 +7834,7 @@ export class ReportGeneratorService {
         // Header text if available - position below title
         let titleHeight = 18; // Approximate height for 14px font
         if (templateSettings.headerText) {
-          doc.fontSize(10).font('Helvetica').fillColor(colors.text); // Use dark text color
+          doc.fontSize(10).font((doc as any)._fontRegular).fillColor(colors.text); // Use dark text color
           doc.text(
             templateSettings.headerText,
             margin,
@@ -7820,7 +7850,7 @@ export class ReportGeneratorService {
         // Set currentY to the bottom of logo or title, whichever is lower - reduce spacing
         const logoBottom = currentY + logoHeight;
         const titleBottom = currentY + titleHeight;
-        currentY = Math.max(logoBottom, titleBottom) + 10; // Reduced from 20 to 10
+        currentY = Math.max(logoBottom, titleBottom) - currentY - 25; // Reduced from 20 to 10
 
         // ============================================================================
         // SEPARATOR LINE (Premium 2px border with accent)
@@ -7835,10 +7865,10 @@ export class ReportGeneratorService {
         doc.strokeColor(colors.primary).lineWidth(1);
         doc
           .moveTo(margin, currentY + 2)
-          .lineTo(margin + 120, currentY + 2)
+          .lineTo(margin + 240, currentY + 2)
           .stroke();
 
-        currentY += 20; // Reduced from 32 to 20
+        currentY += 10; // Reduced from 32 to 20
 
         // ============================================================================
         // COMPANY DETAILS SECTION (Premium styled with background)
@@ -7846,38 +7876,31 @@ export class ReportGeneratorService {
         if (templateSettings.showCompanyDetails) {
           const companyBoxY = currentY;
           const contentStartY = companyBoxY + 12;
-          let tempY = contentStartY;
+          const leftX = margin + 20;
+          const rightColumnWidth = contentWidth / 2 - 30;
+          const rightX = margin + contentWidth / 2 + 10;
 
-          // Calculate content first to determine box height
           const orgName = organization?.name || metadata.organizationName || '';
-          if (orgName) {
-            tempY += 16; // Company name
-          }
-
           const orgAddress = organization?.address || metadata.address || '';
-          if (orgAddress) {
-            tempY += 14;
-          }
-
           const orgPhone = organization?.phone || metadata.phone || '';
-          if (orgPhone) {
-            tempY += 14;
-          }
-
           const orgEmail = organization?.contactEmail || metadata.email || '';
-          if (orgEmail) {
-            tempY += 14;
-          }
+          const orgTrn = templateSettings.showVatDetails
+            ? organization?.vatNumber || metadata.vatNumber || ''
+            : '';
 
-          if (templateSettings.showVatDetails) {
-            const orgTrn = organization?.vatNumber || metadata.vatNumber || '';
-            if (orgTrn) {
-              tempY += 14;
-            }
-          }
-
-          // Calculate box height based on content
-          const companyBoxHeight = Math.max(tempY - companyBoxY + 12, 60);
+          // Left column height: name + address
+          let leftHeight = 0;
+          if (orgName) leftHeight += 16;
+          if (orgAddress) leftHeight += 14;
+          // Right column height: phone, email, TRN
+          let rightHeight = 0;
+          if (orgPhone) rightHeight += 14;
+          if (orgEmail) rightHeight += 14;
+          if (orgTrn) rightHeight += 14;
+          const companyBoxHeight = Math.max(
+            Math.max(leftHeight, rightHeight) + 20,
+            50,
+          );
 
           // Draw background box with left border accent FIRST
           doc
@@ -7896,53 +7919,56 @@ export class ReportGeneratorService {
             .rect(margin, companyBoxY, 4, companyBoxHeight)
             .fill();
 
-          // Now write the text content on top of the box
-          currentY = contentStartY;
-
+          // Left column: name & address
+          let leftY = contentStartY;
           if (orgName) {
-            // Standardize font size to 10px
-            doc.fontSize(10).font('Helvetica-Bold').fillColor(colors.text);
-            doc.text(orgName, margin + 20, currentY);
-            currentY += 16;
+            doc.fontSize(10).font((doc as any)._fontBold).fillColor(colors.text);
+            doc.text(orgName, leftX, leftY);
+            leftY += 16;
           }
-
-          // Standardize font size to 10px - use dark text color for visibility
-          doc.fontSize(10).font('Helvetica').fillColor(colors.text);
-
+          doc.fontSize(10).font((doc as any)._fontRegular).fillColor(colors.text);
           if (orgAddress) {
-            doc.text(orgAddress, margin + 20, currentY);
-            currentY += 14;
+            doc.text(orgAddress, leftX, leftY);
+            leftY += 14;
           }
 
+          // Right column: phone, email, TRN (right-aligned)
+          let rightY = contentStartY;
           if (orgPhone) {
-            doc.text(`Phone: ${orgPhone}`, margin + 20, currentY);
-            currentY += 14;
+            doc.fontSize(10).font((doc as any)._fontRegular).fillColor(colors.text);
+            doc.text(`Phone: ${orgPhone}`, rightX, rightY, {
+              width: rightColumnWidth,
+              align: 'right',
+            });
+            rightY += 14;
           }
-
           if (orgEmail) {
-            doc.text(`Email: ${orgEmail}`, margin + 20, currentY);
-            currentY += 14;
+            doc.fontSize(10).font((doc as any)._fontRegular).fillColor(colors.text);
+            doc.text(`Email: ${orgEmail}`, rightX, rightY, {
+              width: rightColumnWidth,
+              align: 'right',
+            });
+            rightY += 14;
+          }
+          if (orgTrn) {
+            doc.fontSize(10).font((doc as any)._fontRegular).fillColor(colors.text);
+            doc.text(`TRN: ${orgTrn}`, rightX, rightY, {
+              width: rightColumnWidth,
+              align: 'right',
+            });
+            rightY += 14;
           }
 
-          if (templateSettings.showVatDetails) {
-            const orgTrn = organization?.vatNumber || metadata.vatNumber || '';
-            if (orgTrn) {
-              doc.fontSize(10).font('Helvetica').fillColor(colors.text);
-              doc.text(`TRN: ${orgTrn}`, margin + 20, currentY);
-              currentY += 14;
-            }
-          }
-
-          currentY = companyBoxY + companyBoxHeight + 12;
+          currentY = companyBoxY + companyBoxHeight + 8;
         } else {
-          currentY += 20;
+          currentY += 12;
         }
 
         // ============================================================================
         // INVOICE DETAILS BOX (3-column layout: Bill To / Invoice Details / Commercial)
         // ============================================================================
         const boxY = currentY;
-        const headerHeight = 160; // Increased height for better spacing
+        const headerHeight = 116; // Tight height for single-page fit
 
         // Three equal-width columns inside the box with better spacing
         const innerX = margin + 24; // Increased padding
@@ -7991,11 +8017,11 @@ export class ReportGeneratorService {
           width: number,
         ): number => {
           const labelText = `${label}: `;
-          doc.fontSize(9).font('Helvetica-Bold').fillColor(colors.text);
+          doc.fontSize(8).font((doc as any)._fontBold).fillColor(colors.text);
           doc.text(labelText, x, y, { width });
           const labelWidth = doc.widthOfString(labelText);
 
-          doc.fontSize(9).font('Helvetica').fillColor(colors.text);
+          doc.fontSize(8).font((doc as any)._fontRegular).fillColor(colors.text);
           // Use word wrap to prevent awkward splits
           doc.text(value, x + labelWidth, y, {
             width: width - labelWidth,
@@ -8020,13 +8046,13 @@ export class ReportGeneratorService {
             ? customer?.customerTrn || invoice.customerTrn
             : '';
 
-        doc.fontSize(10).font('Helvetica-Bold').fillColor(colors.text);
+        doc.fontSize(8).font((doc as any)._fontBold).fillColor(colors.text);
         doc.text('BILL TO:', billToX, billToY, { width: columnWidth });
         billToY += colHeaderGap;
 
         if (customerName) {
           const h = doc.heightOfString(customerName, { width: columnWidth });
-          doc.fontSize(10).font('Helvetica-Bold').fillColor(colors.text);
+          doc.fontSize(8).font((doc as any)._fontBold).fillColor(colors.text);
           doc.text(customerName, billToX, billToY, { width: columnWidth });
           billToY += h + lineGap;
         }
@@ -8034,7 +8060,7 @@ export class ReportGeneratorService {
         if (customerAddress) {
           const line = customerAddress;
           const h = doc.heightOfString(line, { width: columnWidth });
-          doc.fontSize(9).font('Helvetica').fillColor(colors.text);
+          doc.fontSize(8).font((doc as any)._fontRegular).fillColor(colors.text);
           doc.text(line, billToX, billToY, { width: columnWidth });
           billToY += h + lineGap;
         }
@@ -8075,7 +8101,7 @@ export class ReportGeneratorService {
 
         // Column 2 - INVOICE DETAILS (improved spacing and formatting)
         let invoiceY = boxY + 18; // Slightly more top padding
-        doc.fontSize(10).font('Helvetica-Bold').fillColor(colors.text);
+        doc.fontSize(8).font((doc as any)._fontBold).fillColor(colors.text);
         doc.text('INVOICE DETAILS', invoiceX, invoiceY, { width: columnWidth });
         invoiceY += colHeaderGap;
 
@@ -8148,7 +8174,7 @@ export class ReportGeneratorService {
 
         // Column 3 - COMMERCIAL DETAILS (improved spacing)
         let commercialY = boxY + 18; // Slightly more top padding
-        doc.fontSize(10).font('Helvetica-Bold').fillColor(colors.text);
+        doc.fontSize(8).font((doc as any)._fontBold).fillColor(colors.text);
         doc.text('COMMERCIAL DETAILS', commercialX, commercialY, {
           width: columnWidth,
         });
@@ -8231,32 +8257,33 @@ export class ReportGeneratorService {
         // Position next section below the tallest column or the fixed box height
         // Add extra spacing for better visual separation
         const headerBottomY = Math.max(billToY, invoiceY, commercialY);
-        currentY = Math.max(headerBottomY + 20, boxY + headerHeight + 20);
+        currentY = Math.max(headerBottomY + 6, boxY + headerHeight + 6);
 
         // ============================================================================
-        // LINE ITEMS TABLE - Clean modern design matching preview
+        // LINE ITEMS TABLE - Columns: Item, VAT Rate, Quantity, Rate, Amount, VAT, Total
         // ============================================================================
         const lineItems = invoice.lineItems || [];
         const tableTop = currentY;
         const tableStartX = margin;
 
-        // Column widths: Item, Description, Qty, Unit Price, VAT %, Total (UAE VAT compliance)
+        // Column widths: Item (with SKU), VAT Rate, Quantity, Rate, Amount, VAT, Total
         const tableWidth = contentWidth;
-        const padding = 12;
+        const padding = 6;
         const totalPaddingPerColumn = padding * 2;
-        const numColumns = 6;
+        const numColumns = 7;
         const totalPaddingForAllColumns = totalPaddingPerColumn * numColumns;
         const availableWidth = tableWidth - totalPaddingForAllColumns;
 
         const colWidths = {
-          item: Math.floor(availableWidth * 0.16),
-          description: Math.floor(availableWidth * 0.3),
-          quantity: Math.floor(availableWidth * 0.1),
-          unitPrice: Math.floor(availableWidth * 0.14),
-          vatRate: Math.floor(availableWidth * 0.12), // UAE VAT: show rate per line
-          total: Math.floor(availableWidth * 0.14),
+          item: Math.floor(availableWidth * 0.2),
+          vatRate: Math.floor(availableWidth * 0.1),
+          quantity: Math.floor(availableWidth * 0.12),
+          rate: Math.floor(availableWidth * 0.14),
+          amount: Math.floor(availableWidth * 0.15),
+          vat: Math.floor(availableWidth * 0.14),
+          total: Math.floor(availableWidth * 0.15),
         };
-        const rowHeight = 32; // Increased for better padding
+        const rowHeight = 36; // Room for Item + SKU
 
         // Table Header row - Premium dark background with white text
         let tableX = tableStartX;
@@ -8268,32 +8295,37 @@ export class ReportGeneratorService {
           .rect(tableStartX, headerY, tableWidth, rowHeight)
           .fill();
 
-        // Draw header text in white with right-aligned numeric columns
-        doc.fontSize(10).font('Helvetica-Bold').fillColor('#ffffff');
+        doc.fontSize(9).font((doc as any)._fontBold).fillColor('#ffffff');
 
         doc.text('Item', tableX + padding, headerY + 12, {
           width: colWidths.item,
         });
         tableX += colWidths.item + totalPaddingPerColumn;
-        doc.text('Description', tableX + padding, headerY + 12, {
-          width: colWidths.description,
-        });
-        tableX += colWidths.description + totalPaddingPerColumn;
-        doc.text('Qty', tableX + padding, headerY + 12, {
-          align: 'right',
-          width: colWidths.quantity,
-        });
-        tableX += colWidths.quantity + totalPaddingPerColumn;
-        doc.text('Unit Price', tableX + padding, headerY + 12, {
-          align: 'right',
-          width: colWidths.unitPrice,
-        });
-        tableX += colWidths.unitPrice + totalPaddingPerColumn;
-        doc.text('VAT %', tableX + padding, headerY + 12, {
+        doc.text('VAT Rate', tableX + padding, headerY + 12, {
           align: 'right',
           width: colWidths.vatRate,
         });
         tableX += colWidths.vatRate + totalPaddingPerColumn;
+        doc.text('Quantity', tableX + padding, headerY + 12, {
+          align: 'right',
+          width: colWidths.quantity,
+        });
+        tableX += colWidths.quantity + totalPaddingPerColumn;
+        doc.text('Rate', tableX + padding, headerY + 12, {
+          align: 'right',
+          width: colWidths.rate,
+        });
+        tableX += colWidths.rate + totalPaddingPerColumn;
+        doc.text('Amount', tableX + padding, headerY + 12, {
+          align: 'right',
+          width: colWidths.amount,
+        });
+        tableX += colWidths.amount + totalPaddingPerColumn;
+        doc.text('VAT', tableX + padding, headerY + 12, {
+          align: 'right',
+          width: colWidths.vat,
+        });
+        tableX += colWidths.vat + totalPaddingPerColumn;
         doc.text('Total', tableX + padding, headerY + 12, {
           align: 'right',
           width: colWidths.total,
@@ -8301,54 +8333,60 @@ export class ReportGeneratorService {
 
         let rowY = headerY + rowHeight;
 
-        // Table Rows - Clean design matching preview with alternating row colors
+        const drawLineItemsTableHeader = (y: number) => {
+          let x = tableStartX;
+          doc.fontSize(9).font((doc as any)._fontBold).fillColor('#ffffff');
+          doc.text('Item', x + padding, y + 12, { width: colWidths.item });
+          x += colWidths.item + totalPaddingPerColumn;
+          doc.text('VAT Rate', x + padding, y + 12, {
+            align: 'right',
+            width: colWidths.vatRate,
+          });
+          x += colWidths.vatRate + totalPaddingPerColumn;
+          doc.text('Quantity', x + padding, y + 12, {
+            align: 'right',
+            width: colWidths.quantity,
+          });
+          x += colWidths.quantity + totalPaddingPerColumn;
+          doc.text('Rate', x + padding, y + 12, {
+            align: 'right',
+            width: colWidths.rate,
+          });
+          x += colWidths.rate + totalPaddingPerColumn;
+          doc.text('Amount', x + padding, y + 12, {
+            align: 'right',
+            width: colWidths.amount,
+          });
+          x += colWidths.amount + totalPaddingPerColumn;
+          doc.text('VAT', x + padding, y + 12, {
+            align: 'right',
+            width: colWidths.vat,
+          });
+          x += colWidths.vat + totalPaddingPerColumn;
+          doc.text('Total', x + padding, y + 12, {
+            align: 'right',
+            width: colWidths.total,
+          });
+        };
+
+        // Running totals for summary row
+        let sumQuantity = 0;
+        let sumAmount = 0;
+        let sumTotal = 0;
+
+        // Table Rows - Item, VAT Rate, Quantity, Rate, Amount, VAT, Total
         lineItems.forEach((item: any, index: number) => {
-          // Check if we need a new page
           if (rowY + rowHeight > doc.page.height - 150) {
             doc.addPage();
             rowY = margin + 40;
-
-            // Redraw table header on new page with dark background
-            tableX = tableStartX;
-
-            // Draw dark header background
             doc
               .fillColor(colors.backgroundDark)
               .rect(tableStartX, rowY, tableWidth, rowHeight)
               .fill();
-
-            doc.fontSize(10).font('Helvetica-Bold').fillColor('#ffffff');
-            doc.text('Item', tableX + padding, rowY + 12, {
-              width: colWidths.item,
-            });
-            tableX += colWidths.item + totalPaddingPerColumn;
-            doc.text('Description', tableX + padding, rowY + 12, {
-              width: colWidths.description,
-            });
-            tableX += colWidths.description + totalPaddingPerColumn;
-            doc.text('Qty', tableX + padding, rowY + 12, {
-              align: 'right',
-              width: colWidths.quantity,
-            });
-            tableX += colWidths.quantity + totalPaddingPerColumn;
-            doc.text('Unit Price', tableX + padding, rowY + 12, {
-              align: 'right',
-              width: colWidths.unitPrice,
-            });
-            tableX += colWidths.unitPrice + totalPaddingPerColumn;
-            doc.text('VAT %', tableX + padding, rowY + 12, {
-              align: 'right',
-              width: colWidths.vatRate,
-            });
-            tableX += colWidths.vatRate + totalPaddingPerColumn;
-            doc.text('Total', tableX + padding, rowY + 12, {
-              align: 'right',
-              width: colWidths.total,
-            });
+            drawLineItemsTableHeader(rowY);
             rowY += rowHeight;
           }
 
-          // Draw alternating row background for better readability
           if (index % 2 === 0) {
             doc
               .fillColor(colors.backgroundLight)
@@ -8356,52 +8394,34 @@ export class ReportGeneratorService {
               .fill();
           }
 
-          // Draw row content
           tableX = tableStartX;
+          doc.fontSize(9).font((doc as any)._fontRegular).fillColor(colors.text);
 
-          // Reset font color for row content - standardize to 10px
-          doc.fontSize(10).font('Helvetica').fillColor(colors.text);
+          const amount = parseFloat(item.amount || '0');
+          const vatAmount = parseFloat(item.vatAmount || '0');
+          const lineTotalAmount = parseFloat(
+            item.totalAmount || String(amount + vatAmount),
+          );
+          sumQuantity += parseFloat(item.quantity || '0');
+          sumAmount += amount;
+          sumTotal += lineTotalAmount;
 
-          // Item name
-          doc.text(item.itemName || '', tableX + padding, rowY + 12, {
+          // Item name + SKU (smaller)
+          const itemName = item.itemName || '';
+          const sku =
+            item.product?.sku || (item as any).sku || (item as any).productSku || '';
+          doc.text(itemName, tableX + padding, rowY + 8, {
             width: colWidths.item,
           });
+          if (sku) {
+            doc.fontSize(8).fillColor(colors.textLight);
+            doc.text(sku, tableX + padding, rowY + 20, {
+              width: colWidths.item,
+            });
+            doc.fontSize(10).fillColor(colors.text);
+          }
           tableX += colWidths.item + totalPaddingPerColumn;
 
-          // Description
-          doc.text(item.description || '', tableX + padding, rowY + 12, {
-            width: colWidths.description,
-          });
-          tableX += colWidths.description + totalPaddingPerColumn;
-
-          // Quantity with unit (right-aligned)
-          const qty = parseFloat(item.quantity || '0');
-          const unit = item.unitOfMeasure || 'unit';
-          doc.text(
-            `${formatAmount(qty).replace(/,/g, '')} ${unit}`,
-            tableX + padding,
-            rowY + 12,
-            {
-              align: 'right',
-              width: colWidths.quantity,
-            },
-          );
-          tableX += colWidths.quantity + totalPaddingPerColumn;
-
-          // Unit Price (right-aligned)
-          const unitPrice = parseFloat(item.unitPrice || '0');
-          doc.text(
-            `${formatAmount(unitPrice)} ${currency}`,
-            tableX + padding,
-            rowY + 12,
-            {
-              align: 'right',
-              width: colWidths.unitPrice,
-            },
-          );
-          tableX += colWidths.unitPrice + totalPaddingPerColumn;
-
-          // VAT % (UAE VAT: show rate per line - 5% or 0 for zero-rated/exempt)
           const vatTaxType = (item.vatTaxType || '').toLowerCase();
           const displayVatRate =
             vatTaxType === 'zero_rated' || vatTaxType === 'exempt'
@@ -8413,19 +8433,48 @@ export class ReportGeneratorService {
           });
           tableX += colWidths.vatRate + totalPaddingPerColumn;
 
-          // Total (item.amount = quantity × unitPrice, before VAT, right-aligned)
-          const lineTotal = parseFloat(item.amount || '0');
+          const qty = parseFloat(item.quantity || '0');
+          const unit = item.unitOfMeasure || 'unit';
           doc.text(
-            `${formatAmount(lineTotal)} ${currency}`,
+            `${formatAmount(qty).replace(/,/g, '')} ${unit}`,
             tableX + padding,
             rowY + 12,
-            {
-              align: 'right',
-              width: colWidths.total,
-            },
+            { align: 'right', width: colWidths.quantity },
+          );
+          tableX += colWidths.quantity + totalPaddingPerColumn;
+
+          const unitPrice = parseFloat(item.unitPrice || '0');
+          doc.text(
+            `${formatAmount(unitPrice)} ${currency}`,
+            tableX + padding,
+            rowY + 12,
+            { align: 'right', width: colWidths.rate },
+          );
+          tableX += colWidths.rate + totalPaddingPerColumn;
+
+          doc.text(
+            `${formatAmount(amount)} ${currency}`,
+            tableX + padding,
+            rowY + 12,
+            { align: 'right', width: colWidths.amount },
+          );
+          tableX += colWidths.amount + totalPaddingPerColumn;
+
+          doc.text(
+            `${formatAmount(vatAmount)} ${currency}`,
+            tableX + padding,
+            rowY + 12,
+            { align: 'right', width: colWidths.vat },
+          );
+          tableX += colWidths.vat + totalPaddingPerColumn;
+
+          doc.text(
+            `${formatAmount(lineTotalAmount)} ${currency}`,
+            tableX + padding,
+            rowY + 12,
+            { align: 'right', width: colWidths.total },
           );
 
-          // Subtle row separator
           doc.strokeColor(colors.borderLight).lineWidth(0.5);
           doc
             .moveTo(tableStartX, rowY + rowHeight)
@@ -8435,14 +8484,64 @@ export class ReportGeneratorService {
           rowY += rowHeight;
         });
 
-        // Table bottom border
+        // Total summary row
+        doc
+          .fillColor(colors.backgroundLight)
+          .rect(tableStartX, rowY, tableWidth, rowHeight)
+          .fill();
+        doc.fontSize(10).font((doc as any)._fontBold).fillColor(colors.text);
+
+        tableX = tableStartX;
+        doc.text('Total', tableX + padding, rowY + 12, {
+          width: colWidths.item,
+        });
+        tableX += colWidths.item + totalPaddingPerColumn;
+        doc.text('', tableX + padding, rowY + 12, {
+          align: 'right',
+          width: colWidths.vatRate,
+        });
+        tableX += colWidths.vatRate + totalPaddingPerColumn;
+        doc.text(
+          formatAmount(sumQuantity).replace(/,/g, ''),
+          tableX + padding,
+          rowY + 12,
+          { align: 'right', width: colWidths.quantity },
+        );
+        tableX += colWidths.quantity + totalPaddingPerColumn;
+        doc.text('', tableX + padding, rowY + 12, {
+          align: 'right',
+          width: colWidths.rate,
+        });
+        tableX += colWidths.rate + totalPaddingPerColumn;
+        doc.text(
+          `${formatAmount(sumAmount)} ${currency}`,
+          tableX + padding,
+          rowY + 12,
+          { align: 'right', width: colWidths.amount },
+        );
+        tableX += colWidths.amount + totalPaddingPerColumn;
+        doc.text('', tableX + padding, rowY + 12, {
+          align: 'right',
+          width: colWidths.vat,
+        });
+        tableX += colWidths.vat + totalPaddingPerColumn;
+        doc.text(
+          `${formatAmount(sumTotal)} ${currency}`,
+          tableX + padding,
+          rowY + 12,
+          { align: 'right', width: colWidths.total },
+        );
+
+        rowY += rowHeight;
+
         doc.strokeColor(colors.border).lineWidth(0.5);
         doc
           .moveTo(tableStartX, rowY)
           .lineTo(tableStartX + tableWidth, rowY)
           .stroke();
 
-        currentY = rowY + 25;
+        const sectionGap = 10; // Consistent gap: item table → totals, totals → bank/notes
+        currentY = rowY + sectionGap;
 
         // Reverse charge statement (UAE VAT: when any line has REVERSE_CHARGE)
         const hasReverseCharge = lineItems.some(
@@ -8460,9 +8559,17 @@ export class ReportGeneratorService {
         }
 
         // ============================================================================
-        // TOTALS SECTION - Premium design matching preview
+        // TOTALS SECTION - Amount in words (left) + Totals box (right), same width & height, aligned with items table
         // ============================================================================
-        const totalsX = margin + contentWidth - 250;
+        const gapBetweenAmountWordsAndTotals = 10;
+        // Use full content width (same as items table): two equal boxes + gap; right box ends at margin + contentWidth
+        const sharedBoxWidth = Math.floor(
+          (contentWidth - gapBetweenAmountWordsAndTotals) / 2,
+        );
+        const totalsBoxWidth = sharedBoxWidth;
+        const amountWordsBoxWidth = sharedBoxWidth;
+        const totalsBoxLeft =
+          margin + amountWordsBoxWidth + gapBetweenAmountWordsAndTotals;
         const discountAmount = parseFloat(
           (invoice as any).discountAmount || '0',
         );
@@ -8470,400 +8577,384 @@ export class ReportGeneratorService {
         const subtotal = parseFloat(invoice.amount || '0');
         const totalAmount = parseFloat(invoice.totalAmount || '0');
 
-        // Totals box - height varies if discount or VAT summary shown
+        // Both boxes use the same width and height
         const totalsBoxY = currentY;
-        let totalsBoxHeight = 110;
-        if (discountAmount > 0) totalsBoxHeight += 20;
+        const boxInternalPadding = 12; // Padding from text to box border (tight for single-page)
+        let totalsBoxHeight = 98;
+        if (discountAmount > 0) totalsBoxHeight += 16;
 
-        doc
-          .fillColor(colors.backgroundLight)
-          .rect(totalsX - 20, totalsBoxY, 270, totalsBoxHeight)
-          .fill();
-        doc
-          .strokeColor(colors.border)
-          .lineWidth(1)
-          .rect(totalsX - 20, totalsBoxY, 270, totalsBoxHeight)
-          .stroke();
-
-        let totalsY = totalsBoxY + 24; // Increased padding
-
-        // Subtotal row - standardize to 10px - use dark text color
-        doc.fontSize(10).font('Helvetica-Bold').fillColor(colors.text);
-        doc.text('Subtotal:', totalsX, totalsY);
-        doc.font('Helvetica-Bold').fillColor(colors.text);
-        doc.text(
-          `${formatAmount(subtotal)} ${currency}`,
-          totalsX + 150,
-          totalsY,
-          {
-            width: 100,
-            align: 'right',
-          },
-        );
-        totalsY += 20;
-
-        // Discount row (UAE VAT: if applicable)
-        if (discountAmount > 0) {
-          doc.fontSize(10).font('Helvetica-Bold').fillColor(colors.text);
-          doc.text('Discount:', totalsX, totalsY);
-          doc.font('Helvetica-Bold').fillColor(colors.text);
-          doc.text(
-            `-${formatAmount(discountAmount)} ${currency}`,
-            totalsX + 150,
-            totalsY,
-            { width: 100, align: 'right' },
-          );
-          totalsY += 20;
-        }
-
-        // VAT row - show "VAT @ 5%" or calculated rate (guard against division by zero)
-        const taxBase = subtotal - discountAmount;
-        const effectiveVatRate =
-          taxBase > 0 && totalVat >= 0
-            ? ((totalVat / taxBase) * 100).toFixed(1)
-            : '5';
-        doc.fontSize(10).font('Helvetica-Bold').fillColor(colors.text);
-        doc.text(`VAT @ ${effectiveVatRate}%:`, totalsX, totalsY);
-        doc.font('Helvetica-Bold').fillColor(colors.text);
-        doc.text(
-          `${formatAmount(totalVat)} ${currency}`,
-          totalsX + 150,
-          totalsY,
-          {
-            width: 100,
-            align: 'right',
-          },
-        );
-        totalsY += 24; // Increased spacing
-
-        // Separator line before total
-        doc.strokeColor(colors.border).lineWidth(1);
-        doc
-          .moveTo(totalsX - 10, totalsY)
-          .lineTo(totalsX + 250, totalsY)
-          .stroke();
-        totalsY += 18; // Increased spacing
-
-        // Total Amount row - standardize to 10px (keep bold and primary color for value)
-        doc.fontSize(10).font('Helvetica-Bold').fillColor(colors.text);
-        doc.text('Total Amount:', totalsX, totalsY);
-        doc.fontSize(10).fillColor(colors.primary);
-        doc.text(
-          `${formatAmount(totalAmount)} ${currency}`,
-          totalsX + 150,
-          totalsY,
-          { width: 100, align: 'right' },
-        );
-
-        currentY = totalsBoxY + totalsBoxHeight + 30;
-
-        // ============================================================================
-        // AMOUNT IN WORDS - below totals, above bank details (with box styling)
-        // ============================================================================
+        // Amount chargeable in words - box on the left (same width & height as totals box)
         const totalNumeric =
           typeof totalAmount === 'string'
             ? parseFloat(totalAmount || '0')
             : totalAmount || 0;
         const amountInWords = this.numberToWords(Math.floor(totalNumeric));
-
-        if (!isNaN(totalNumeric)) {
-          if (currentY > doc.page.height - 200) {
-            doc.addPage();
-            currentY = margin + 40;
-          }
-
-          // Box background and border (matching preview style)
-          const amountBoxY = currentY;
-          const amountBoxHeight = 40;
-
+        if (!isNaN(totalNumeric) && amountWordsBoxWidth > 60) {
           doc
             .fillColor(colors.backgroundLight)
-            .rect(margin, amountBoxY, contentWidth, amountBoxHeight)
+            .rect(margin, totalsBoxY, amountWordsBoxWidth, totalsBoxHeight)
             .fill();
           doc
             .strokeColor(colors.border)
             .lineWidth(1)
-            .rect(margin, amountBoxY, contentWidth, amountBoxHeight)
+            .rect(margin, totalsBoxY, amountWordsBoxWidth, totalsBoxHeight)
             .stroke();
           doc
             .fillColor(colors.primary)
-            .rect(margin, amountBoxY, 4, amountBoxHeight)
-            .fill(); // Left accent border
-
-          // Content inside box
-          const contentStartY = amountBoxY + 12;
-          doc.fontSize(9).font('Helvetica-Bold').fillColor(colors.textLight);
-          doc.text('Amount Chargeable (in words):', margin + 12, contentStartY);
-
-          doc.fontSize(9).font('Helvetica-Bold').fillColor(colors.text);
+            .rect(margin, totalsBoxY, 4, totalsBoxHeight)
+            .fill();
+          const wordsContentY = totalsBoxY + boxInternalPadding;
+          const wordsTextWidth = amountWordsBoxWidth - boxInternalPadding * 2;
+          doc.fontSize(9).font((doc as any)._fontBold).fillColor(colors.textLight);
+          doc.text(
+            'Amount Chargeable (in words):',
+            margin + boxInternalPadding,
+            wordsContentY,
+            { width: wordsTextWidth },
+          );
+          doc.fontSize(9).font((doc as any)._fontBold).fillColor(colors.text);
           const currencyLabel = (metadata.currency || 'AED').toUpperCase();
           const wordsLine = `${currencyLabel} ${amountInWords} Only`;
-          doc.text(wordsLine, margin + 12, contentStartY + 14, {
-            width: contentWidth - 24,
+          doc.text(wordsLine, margin + boxInternalPadding, wordsContentY + 14, {
+            width: wordsTextWidth,
           });
-
-          currentY = amountBoxY + amountBoxHeight + 20;
         }
 
-        // ============================================================================
-        // DEFAULT NOTES - Display default notes if provided (with box styling)
-        // ============================================================================
-        if (
-          templateSettings.defaultNotes &&
-          templateSettings.defaultNotes.trim().length > 0
-        ) {
-          // Check if we need a new page for notes (reserve 120pt for notes + spacing)
-          if (currentY > doc.page.height - 200) {
-            doc.addPage();
-            currentY = margin + 40;
-          }
+        // Totals box on the right (same width & height, with internal padding)
+        const totalsBoxRight = totalsBoxLeft + totalsBoxWidth;
+        const totalsLabelX = totalsBoxLeft + boxInternalPadding;
+        const totalsValueWidth = 100;
+        const totalsValueX =
+          totalsBoxRight - boxInternalPadding - totalsValueWidth;
 
-          currentY += 20;
+        doc
+          .fillColor(colors.backgroundLight)
+          .rect(totalsBoxLeft, totalsBoxY, totalsBoxWidth, totalsBoxHeight)
+          .fill();
+        doc
+          .strokeColor(colors.border)
+          .lineWidth(1)
+          .rect(totalsBoxLeft, totalsBoxY, totalsBoxWidth, totalsBoxHeight)
+          .stroke();
 
-          // Calculate box height based on content
-          const notesLines = Math.ceil(
-            templateSettings.defaultNotes.length / 80,
-          );
-          const notesBoxY = currentY;
-          const notesBoxHeight = Math.max(notesLines * 12 + 40, 50);
+        let totalsY = totalsBoxY + boxInternalPadding;
 
-          // Box background and border (matching preview style)
-          doc
-            .fillColor(colors.backgroundLight)
-            .rect(margin, notesBoxY, contentWidth, notesBoxHeight)
-            .fill();
-          doc
-            .strokeColor(colors.border)
-            .lineWidth(1)
-            .rect(margin, notesBoxY, contentWidth, notesBoxHeight)
-            .stroke();
-          doc
-            .fillColor(colors.primary)
-            .rect(margin, notesBoxY, 4, notesBoxHeight)
-            .fill(); // Left accent border
+        // Subtotal row
+        doc.fontSize(10).font((doc as any)._fontBold).fillColor(colors.text);
+        doc.text('Subtotal:', totalsLabelX, totalsY);
+        doc.font((doc as any)._fontBold).fillColor(colors.text);
+        doc.text(
+          `${formatAmount(subtotal)} ${currency}`,
+          totalsValueX,
+          totalsY,
+          { width: totalsValueWidth, align: 'right' },
+        );
+        totalsY += 20;
 
-          // Content inside box
-          const contentStartY = notesBoxY + 12;
-          doc.fontSize(10).font('Helvetica-Bold').fillColor(colors.text);
-          doc.text('Notes:', margin + 12, contentStartY);
-
-          doc.fontSize(10).font('Helvetica').fillColor(colors.text);
+        // Discount row (UAE VAT: if applicable)
+        if (discountAmount > 0) {
+          doc.fontSize(10).font((doc as any)._fontBold).fillColor(colors.text);
+          doc.text('Discount:', totalsLabelX, totalsY);
+          doc.font((doc as any)._fontBold).fillColor(colors.text);
           doc.text(
-            templateSettings.defaultNotes,
-            margin + 12,
-            contentStartY + 16,
-            {
-              width: contentWidth - 24,
-            },
+            `-${formatAmount(discountAmount)} ${currency}`,
+            totalsValueX,
+            totalsY,
+            { width: totalsValueWidth, align: 'right' },
           );
-
-          currentY = notesBoxY + notesBoxHeight + 20;
+          totalsY += 20;
         }
 
-        // ============================================================================
-        // TERMS & CONDITIONS - Display terms if provided (with box styling)
-        // ============================================================================
-        if (
-          templateSettings.showTermsAndConditions &&
-          templateSettings.termsAndConditions &&
-          templateSettings.termsAndConditions.trim().length > 0
-        ) {
-          // Check if we need a new page for terms (reserve 120pt for terms + spacing)
-          if (currentY > doc.page.height - 200) {
-            doc.addPage();
-            currentY = margin + 40;
-          }
+        // VAT row
+        const taxBase = subtotal - discountAmount;
+        const effectiveVatRate =
+          taxBase > 0 && totalVat >= 0
+            ? ((totalVat / taxBase) * 100).toFixed(1)
+            : '5';
+        doc.fontSize(10).font((doc as any)._fontBold).fillColor(colors.text);
+        doc.text(`VAT @ ${effectiveVatRate}%:`, totalsLabelX, totalsY);
+        doc.font((doc as any)._fontBold).fillColor(colors.text);
+        doc.text(
+          `${formatAmount(totalVat)} ${currency}`,
+          totalsValueX,
+          totalsY,
+          { width: totalsValueWidth, align: 'right' },
+        );
+        totalsY += 24;
 
-          currentY += 10;
+        // Separator line before total (inside padded area)
+        doc.strokeColor(colors.border).lineWidth(1);
+        doc
+          .moveTo(totalsLabelX, totalsY)
+          .lineTo(totalsBoxRight - boxInternalPadding, totalsY)
+          .stroke();
+        totalsY += 18;
 
-          // Calculate box height based on content
-          const termsLines = Math.ceil(
-            templateSettings.termsAndConditions.length / 80,
-          );
-          const termsBoxY = currentY;
-          const termsBoxHeight = Math.max(termsLines * 12 + 40, 50);
+        // Total Amount row
+        doc.fontSize(10).font((doc as any)._fontBold).fillColor(colors.text);
+        doc.text('Total Amount:', totalsLabelX, totalsY);
+        doc.fontSize(10).fillColor(colors.primary);
+        doc.text(
+          `${formatAmount(totalAmount)} ${currency}`,
+          totalsValueX,
+          totalsY,
+          { width: totalsValueWidth, align: 'right' },
+        );
 
-          // Box background and border (matching preview style)
-          doc
-            .fillColor(colors.backgroundLight)
-            .rect(margin, termsBoxY, contentWidth, termsBoxHeight)
-            .fill();
-          doc
-            .strokeColor(colors.border)
-            .lineWidth(1)
-            .rect(margin, termsBoxY, contentWidth, termsBoxHeight)
-            .stroke();
-          doc
-            .fillColor(colors.primary)
-            .rect(margin, termsBoxY, 4, termsBoxHeight)
-            .fill(); // Left accent border
-
-          // Content inside box
-          const contentStartY = termsBoxY + 12;
-          doc.fontSize(10).font('Helvetica-Bold').fillColor(colors.text);
-          doc.text('Terms & Conditions:', margin + 12, contentStartY);
-
-          doc.fontSize(10).font('Helvetica').fillColor(colors.text);
-          doc.text(
-            templateSettings.termsAndConditions,
-            margin + 12,
-            contentStartY + 16,
-            {
-              width: contentWidth - 24,
-            },
-          );
-
-          currentY = termsBoxY + termsBoxHeight + 20;
-        }
+        currentY = totalsBoxY + totalsBoxHeight + sectionGap;
 
         // ============================================================================
-        // BANK DETAILS - Move below terms & conditions (and notes) (with box styling)
+        // BANK DETAILS (40% left) + NOTES & T&C (60% right, stacked)
         // ============================================================================
-        if (
+        const hasBankDetails =
           templateSettings.showBankDetails &&
           organization &&
           (organization.bankAccountNumber ||
             organization.bankIban ||
             organization.bankName ||
-            organization.bankAccountHolder)
-        ) {
+            organization.bankAccountHolder);
+        const invoiceNotes = ((invoice as any).notes || '') as string;
+        const effectiveNotes =
+          invoiceNotes && invoiceNotes.trim().length > 0
+            ? invoiceNotes
+            : (templateSettings.defaultNotes || '');
+        const hasNotes =
+          effectiveNotes && effectiveNotes.trim().length > 0;
+        const hasTerms =
+          templateSettings.showTermsAndConditions &&
+          templateSettings.termsAndConditions &&
+          templateSettings.termsAndConditions.trim().length > 0;
+
+        if (hasBankDetails || hasNotes || hasTerms) {
           if (currentY > doc.page.height - 200) {
             doc.addPage();
             currentY = margin + 40;
           }
-          currentY += 20;
 
-          // Calculate box height based on number of bank detail fields
-          let bankDetailCount = 0;
-          if (organization.bankAccountHolder) bankDetailCount++;
-          if (organization.bankName) bankDetailCount++;
-          if (organization.bankAccountNumber) bankDetailCount++;
-          if (organization.bankIban) bankDetailCount++;
-          if (organization.bankBranch) bankDetailCount++;
-          if (organization.bankSwiftCode) bankDetailCount++;
+          const bankBoxWidth = Math.floor(contentWidth * 0.4);
+          const gapBetweenColumns = 20;
+          const rightColumnLeft = margin + bankBoxWidth + gapBetweenColumns;
+          const rightColumnWidth = contentWidth - bankBoxWidth - gapBetweenColumns;
+          const sectionStartY = currentY;
 
-          const bankBoxY = currentY;
-          const bankBoxHeight = Math.max(bankDetailCount * 14 + 40, 50);
+          // Bank box height (left 40%)
+          let bankBoxHeight = 0;
+          if (hasBankDetails) {
+            let bankDetailCount = 0;
+            if (organization.bankAccountHolder) bankDetailCount++;
+            if (organization.bankName) bankDetailCount++;
+            if (organization.bankAccountNumber) bankDetailCount++;
+            if (organization.bankIban) bankDetailCount++;
+            if (organization.bankBranch) bankDetailCount++;
+            if (organization.bankSwiftCode) bankDetailCount++;
+            bankBoxHeight = Math.max(bankDetailCount * 13 + 28, 44);
+          }
 
-          // Box background and border (matching preview style)
-          doc
-            .fillColor(colors.backgroundLight)
-            .rect(margin, bankBoxY, contentWidth, bankBoxHeight)
-            .fill();
-          doc
-            .strokeColor(colors.border)
-            .lineWidth(1)
-            .rect(margin, bankBoxY, contentWidth, bankBoxHeight)
-            .stroke();
-          doc
-            .fillColor(colors.primary)
-            .rect(margin, bankBoxY, 4, bankBoxHeight)
-            .fill(); // Left accent border
-
-          // Content inside box
-          const contentStartY = bankBoxY + 12;
-          doc.fontSize(10).font('Helvetica-Bold').fillColor(colors.text);
-          doc.text('Bank Details:', margin + 12, contentStartY);
-
-          let bankY = contentStartY + 16;
-          doc.fontSize(10).font('Helvetica').fillColor(colors.text);
-          if (organization.bankAccountHolder) {
-            doc.text(
-              `Account Holder: ${organization.bankAccountHolder}`,
-              margin + 12,
-              bankY,
+          // Notes box height (right 60% top) - use invoice notes when present, otherwise default notes
+          let notesBoxHeight = 0;
+          if (hasNotes) {
+            const notesLines = Math.ceil(
+              effectiveNotes.length / 60,
             );
-            bankY += 14;
-          }
-          if (organization.bankName) {
-            doc.text(`Bank: ${organization.bankName}`, margin + 12, bankY);
-            bankY += 14;
-          }
-          if (organization.bankAccountNumber) {
-            doc.text(
-              `Account Number: ${organization.bankAccountNumber}`,
-              margin + 12,
-              bankY,
-            );
-            bankY += 14;
-          }
-          if (organization.bankIban) {
-            doc.text(`IBAN: ${organization.bankIban}`, margin + 12, bankY);
-            bankY += 14;
-          }
-          if (organization.bankBranch) {
-            doc.text(`Branch: ${organization.bankBranch}`, margin + 12, bankY);
-            bankY += 14;
-          }
-          if (organization.bankSwiftCode) {
-            doc.text(
-              `SWIFT Code: ${organization.bankSwiftCode}`,
-              margin + 12,
-              bankY,
-            );
-            bankY += 14;
+            notesBoxHeight = Math.max(notesLines * 11 + 28, 44);
           }
 
-          currentY = bankBoxY + bankBoxHeight + 20;
+          // Terms box height (right 60% below notes) - fit actual content
+          let termsBoxHeight = 0;
+          if (hasTerms) {
+            doc.fontSize(10).font((doc as any)._fontRegular);
+            const termsTextHeight = doc.heightOfString(
+              templateSettings.termsAndConditions,
+              { width: rightColumnWidth - 24 },
+            );
+            termsBoxHeight = Math.ceil(12 + 14 + termsTextHeight + 12); // top pad + title + content + bottom
+            termsBoxHeight = Math.max(termsBoxHeight, 44);
+          }
+
+          const gapBetweenNotesAndTerms = 6;
+          const rightColumnHeight =
+            notesBoxHeight +
+            (hasNotes && hasTerms ? gapBetweenNotesAndTerms : 0) +
+            termsBoxHeight;
+          const rowHeight = Math.max(bankBoxHeight, rightColumnHeight);
+
+          // --- Bank Details box: 40% width, left-aligned
+          if (hasBankDetails) {
+            const bankBoxY = sectionStartY;
+            doc
+              .fillColor(colors.backgroundLight)
+              .rect(margin, bankBoxY, bankBoxWidth, bankBoxHeight)
+              .fill();
+            doc
+              .strokeColor(colors.border)
+              .lineWidth(1)
+              .rect(margin, bankBoxY, bankBoxWidth, bankBoxHeight)
+              .stroke();
+            doc
+              .fillColor(colors.primary)
+              .rect(margin, bankBoxY, 4, bankBoxHeight)
+              .fill();
+            const bankContentStartY = bankBoxY + 10;
+            doc.fontSize(10).font((doc as any)._fontBold).fillColor(colors.text);
+            doc.text('Bank Details:', margin + 12, bankContentStartY);
+            let bankY = bankContentStartY + 12;
+            doc.fontSize(10).font((doc as any)._fontRegular).fillColor(colors.text);
+            if (organization.bankAccountHolder) {
+              doc.text(
+                `Account Holder: ${organization.bankAccountHolder}`,
+                margin + 12,
+                bankY,
+                { width: bankBoxWidth - 24 },
+              );
+              bankY += 13;
+            }
+            if (organization.bankName) {
+              doc.text(`Bank: ${organization.bankName}`, margin + 12, bankY, {
+                width: bankBoxWidth - 24,
+              });
+              bankY += 13;
+            }
+            if (organization.bankAccountNumber) {
+              doc.text(
+                `Account Number: ${organization.bankAccountNumber}`,
+                margin + 12,
+                bankY,
+                { width: bankBoxWidth - 24 },
+              );
+              bankY += 13;
+            }
+            if (organization.bankIban) {
+              doc.text(`IBAN: ${organization.bankIban}`, margin + 12, bankY, {
+                width: bankBoxWidth - 24,
+              });
+              bankY += 13;
+            }
+            if (organization.bankBranch) {
+              doc.text(`Branch: ${organization.bankBranch}`, margin + 12, bankY, {
+                width: bankBoxWidth - 24,
+              });
+              bankY += 13;
+            }
+            if (organization.bankSwiftCode) {
+              doc.text(
+                `SWIFT Code: ${organization.bankSwiftCode}`,
+                margin + 12,
+                bankY,
+                { width: bankBoxWidth - 24 },
+              );
+              bankY += 13;
+            }
+          }
+
+          // --- Notes box: right 60%, top
+          if (hasNotes) {
+            const notesBoxY = sectionStartY;
+            doc
+              .fillColor(colors.backgroundLight)
+              .rect(rightColumnLeft, notesBoxY, rightColumnWidth, notesBoxHeight)
+              .fill();
+            doc
+              .strokeColor(colors.border)
+              .lineWidth(1)
+              .rect(rightColumnLeft, notesBoxY, rightColumnWidth, notesBoxHeight)
+              .stroke();
+            doc
+              .fillColor(colors.primary)
+              .rect(rightColumnLeft, notesBoxY, 4, notesBoxHeight)
+              .fill();
+            const notesContentStartY = notesBoxY + 12;
+            doc.fontSize(10).font((doc as any)._fontBold).fillColor(colors.text);
+            doc.text('Notes:', rightColumnLeft + 12, notesContentStartY);
+            doc.fontSize(10).font((doc as any)._fontRegular).fillColor(colors.text);
+            doc.text(
+              effectiveNotes,
+              rightColumnLeft + 12,
+              notesContentStartY + 16,
+              { width: rightColumnWidth - 24 },
+            );
+          }
+
+          // --- Terms & Conditions box: right 60%, below notes
+          if (hasTerms) {
+            const termsBoxY =
+              sectionStartY +
+              notesBoxHeight +
+              (hasNotes ? gapBetweenNotesAndTerms : 0);
+            doc
+              .fillColor(colors.backgroundLight)
+              .rect(rightColumnLeft, termsBoxY, rightColumnWidth, termsBoxHeight)
+              .fill();
+            doc
+              .strokeColor(colors.border)
+              .lineWidth(1)
+              .rect(rightColumnLeft, termsBoxY, rightColumnWidth, termsBoxHeight)
+              .stroke();
+            doc
+              .fillColor(colors.primary)
+              .rect(rightColumnLeft, termsBoxY, 4, termsBoxHeight)
+              .fill();
+            const termsContentStartY = termsBoxY + 12;
+            doc.fontSize(10).font((doc as any)._fontBold).fillColor(colors.text);
+            doc.text(
+              'Terms & Conditions:',
+              rightColumnLeft + 12,
+              termsContentStartY,
+            );
+            doc.fontSize(10).font((doc as any)._fontRegular).fillColor(colors.text);
+            doc.text(
+              templateSettings.termsAndConditions,
+              rightColumnLeft + 12,
+              termsContentStartY + 16,
+              { width: rightColumnWidth - 24 },
+            );
+          }
+
+          currentY = sectionStartY + rowHeight + 12;
         }
 
         // ============================================================================
-        // AUTHORISED SIGNATORY + FOOTER - bottom of page
+        // AUTHORISED SIGNATORY + FOOTER - flow directly after content (no large gap)
         // ============================================================================
-        // Reserve space for signatory + footer (at least 120pt from bottom)
-        const footerReservedSpace = 120;
-        let footerY = Math.max(
-          currentY + 40,
-          doc.page.height - footerReservedSpace,
-        );
+        const footerReservedSpace = 100;
+        const gapBeforeSignatory = 18; // Tight gap so QR/signatory stay on first page
+        let footerY = currentY + gapBeforeSignatory;
 
-        // If footer would be too close to content, add a new page
-        if (currentY > doc.page.height - footerReservedSpace - 20) {
+        // If signatory + footer would run off the page, add a new page
+        if (footerY > doc.page.height - footerReservedSpace - 12) {
           doc.addPage();
-          footerY = doc.page.height - footerReservedSpace;
+          currentY = margin + 40;
+          footerY = currentY;
         }
 
-        // Footer separator line across bottom (defined early for QR placement)
-        const footerLineY = doc.page.height - 60;
+        // QR + Signatory footer row (QR left, signatory right, vertically aligned) - compact for single-page
+        const qrSizePx = 62;
+        const signatoryBlockHeight = 46;
 
-        // QR Code (UAE e-invoicing) - bottom right
-        const qrSize = 70;
+        // Signatory block on the right edge
+        const signatoryBlockWidth = 220;
+        const signatoryX = margin + contentWidth - signatoryBlockWidth;
+        const signatoryY = footerY;
+
+        // QR Code (UAE e-invoicing) - aligned vertically with signatory, at left edge
+        const qrX = margin;
+        const qrY = signatoryY;
         if (qrBuffer) {
           try {
-            doc.image(
-              qrBuffer,
-              margin + contentWidth - qrSize,
-              footerLineY - qrSize - 8,
-              {
-                width: qrSize,
-                height: qrSize,
-              },
-            );
-            doc.fontSize(7).font('Helvetica').fillColor(colors.textMuted);
-            doc.text(
-              'QR Code for validation',
-              margin + contentWidth - qrSize,
-              footerLineY - 4,
-              {
-                width: qrSize,
-                align: 'center',
-              },
-            );
+            doc.image(qrBuffer, qrX, qrY, {
+              width: qrSizePx,
+              height: qrSizePx,
+            });
+            doc.fontSize(7).font((doc as any)._fontRegular).fillColor(colors.textMuted);
+            doc.text('QR Code for validation', qrX, qrY + qrSizePx + 4, {
+              width: qrSizePx,
+              align: 'center',
+            });
           } catch (qrImgErr) {
             console.warn('Failed to embed QR in PDF:', qrImgErr);
           }
         }
 
-        // Signatory block on the right
-        const signatoryBlockWidth = 220;
-        const signatoryX =
-          margin +
-          contentWidth -
-          signatoryBlockWidth -
-          (qrBuffer ? qrSize + 16 : 0);
-        const signatoryY = footerY;
-
-        doc.fontSize(9).font('Helvetica-Bold').fillColor(colors.text);
+        doc.fontSize(9).font((doc as any)._fontBold).fillColor(colors.text);
         doc.text(
           `For ${organization?.name || 'the Company'}`,
           signatoryX,
@@ -8872,7 +8963,7 @@ export class ReportGeneratorService {
         );
 
         // Signature line
-        const lineY = signatoryY + 28;
+        const lineY = signatoryY + 24;
         doc
           .moveTo(signatoryX, lineY)
           .lineTo(signatoryX + signatoryBlockWidth, lineY)
@@ -8881,24 +8972,30 @@ export class ReportGeneratorService {
           .stroke();
 
         // Label
-        doc.fontSize(8).font('Helvetica-Bold').fillColor(colors.textMuted);
+        doc.fontSize(8).font((doc as any)._fontBold).fillColor(colors.textMuted);
         doc.text('Authorised Signatory', signatoryX, lineY + 4, {
           width: signatoryBlockWidth,
           align: 'right',
         });
 
-        // Footer separator line
+        // Footer separator line (placed below whichever is lower: QR or signatory)
+        const footerContentBottom = Math.max(
+          signatoryY + signatoryBlockHeight,
+          qrY + (qrBuffer ? qrSizePx + 16 : 0),
+        );
+        const footerLineY = footerContentBottom + 4;
+
         doc.strokeColor(colors.border).lineWidth(0.5);
         doc
           .moveTo(margin, footerLineY)
           .lineTo(margin + contentWidth, footerLineY)
           .stroke();
 
-        let footerTextY = footerLineY + 8;
+        let footerTextY = footerLineY + 6;
 
         // Payment methods if enabled - use dark text color
         if (templateSettings.showPaymentMethods) {
-          doc.fontSize(9).font('Helvetica').fillColor(colors.text);
+          doc.fontSize(9).font((doc as any)._fontRegular).fillColor(colors.text);
           const paymentMethodsText =
             'Payment Methods: Bank Transfer, Cash, Credit Card';
           doc.text(paymentMethodsText, margin, footerTextY, {
@@ -8915,7 +9012,7 @@ export class ReportGeneratorService {
             templateSettings.footerText.trim().length > 0
               ? templateSettings.footerText
               : 'This is a Computer Generated Invoice';
-          doc.fontSize(8).font('Helvetica').fillColor(colors.textMuted);
+          doc.fontSize(8).font((doc as any)._fontRegular).fillColor(colors.textMuted);
           doc.text(footerText, margin, footerTextY, {
             align: 'center',
             width: contentWidth,
@@ -8970,7 +9067,7 @@ export class ReportGeneratorService {
           size: 'A4',
           layout: 'portrait',
         });
-
+        this.setupPdfFonts(doc);
         const buffers: Buffer[] = [];
         doc.on('data', buffers.push.bind(buffers));
         doc.on('end', () => {
@@ -9048,14 +9145,14 @@ export class ReportGeneratorService {
         }
 
         // Purchase Order Title - Right aligned
-        doc.fontSize(32).font('Helvetica-Bold').fillColor(colors.primary);
+        doc.fontSize(32).font((doc as any)._fontBold).fillColor(colors.primary);
         const titleText = 'PURCHASE ORDER';
         const titleWidth = doc.widthOfString(titleText);
         doc.text(titleText, pageWidth - margin - titleWidth, currentY);
 
         // Header text (like invoice header text) below title
         if (headerText && headerText.trim().length > 0) {
-          doc.fontSize(12).font('Helvetica').fillColor(colors.textLight);
+          doc.fontSize(12).font((doc as any)._fontRegular).fillColor(colors.textLight);
           const headerTextWidth = doc.widthOfString(headerText);
           doc.text(
             headerText,
@@ -9080,13 +9177,13 @@ export class ReportGeneratorService {
         if (showCompanyDetails && organization) {
           let leftY = sectionStartY;
 
-          doc.fontSize(10).font('Helvetica-Bold').fillColor(colors.text);
+          doc.fontSize(10).font((doc as any)._fontBold).fillColor(colors.text);
           doc.text(organization.name || 'Company Name', margin, leftY, {
             width: leftColumnWidth,
           });
           leftY += 16;
 
-          doc.fontSize(9).font('Helvetica').fillColor(colors.textLight);
+          doc.fontSize(9).font((doc as any)._fontRegular).fillColor(colors.textLight);
           if (organization.address) {
             doc.text(organization.address, margin, leftY, {
               width: leftColumnWidth,
@@ -9121,21 +9218,21 @@ export class ReportGeneratorService {
           const rightValueX = rightColumnX + rightLabelWidth;
           const rightValueWidth = rightColumnWidth - rightLabelWidth;
 
-          doc.fontSize(9).font('Helvetica').fillColor(colors.textLight);
+          doc.fontSize(9).font((doc as any)._fontRegular).fillColor(colors.textLight);
           doc.text('PO Number:', rightColumnX, rightY, {
             width: rightLabelWidth,
           });
-          doc.font('Helvetica-Bold').fillColor(colors.text);
+          doc.font((doc as any)._fontBold).fillColor(colors.text);
           doc.text(po.poNumber || 'N/A', rightValueX, rightY, {
             width: rightValueWidth,
           });
           rightY += 16;
 
-          doc.font('Helvetica').fillColor(colors.textLight);
+          doc.font((doc as any)._fontRegular).fillColor(colors.textLight);
           doc.text('PO Date:', rightColumnX, rightY, {
             width: rightLabelWidth,
           });
-          doc.font('Helvetica-Bold').fillColor(colors.text);
+          doc.font((doc as any)._fontBold).fillColor(colors.text);
           const poDate = po.poDate
             ? new Date(po.poDate).toLocaleDateString()
             : 'N/A';
@@ -9143,11 +9240,11 @@ export class ReportGeneratorService {
           rightY += 16;
 
           if (po.expectedDeliveryDate) {
-            doc.font('Helvetica').fillColor(colors.textLight);
+            doc.font((doc as any)._fontRegular).fillColor(colors.textLight);
             doc.text('Expected Delivery:', rightColumnX, rightY, {
               width: rightLabelWidth,
             });
-            doc.font('Helvetica-Bold').fillColor(colors.text);
+            doc.font((doc as any)._fontBold).fillColor(colors.text);
             const deliveryDate = new Date(
               po.expectedDeliveryDate,
             ).toLocaleDateString();
@@ -9157,9 +9254,9 @@ export class ReportGeneratorService {
             rightY += 16;
           }
 
-          doc.font('Helvetica').fillColor(colors.textLight);
+          doc.font((doc as any)._fontRegular).fillColor(colors.textLight);
           doc.text('Status:', rightColumnX, rightY, { width: rightLabelWidth });
-          doc.font('Helvetica-Bold').fillColor(colors.text);
+          doc.font((doc as any)._fontBold).fillColor(colors.text);
           const statusMap: Record<string, string> = {
             draft: 'Draft',
             sent: 'Sent',
@@ -9207,7 +9304,7 @@ export class ReportGeneratorService {
           .rect(margin, vendorBoxY, 4, vendorBoxHeight)
           .fill(); // Left accent border
 
-        doc.fontSize(11).font('Helvetica-Bold').fillColor(colors.text);
+        doc.fontSize(11).font((doc as any)._fontBold).fillColor(colors.text);
         doc.text('Vendor Details', margin + 12, vendorContentY);
         vendorContentY += 20;
 
@@ -9218,11 +9315,11 @@ export class ReportGeneratorService {
           y: number,
         ): number => {
           const labelText = `${label}: `;
-          doc.fontSize(9).font('Helvetica-Bold').fillColor(colors.text);
+          doc.fontSize(9).font((doc as any)._fontBold).fillColor(colors.text);
           doc.text(labelText, margin + 12, y, { width: 100 });
           const labelWidth = doc.widthOfString(labelText);
 
-          doc.fontSize(9).font('Helvetica').fillColor(colors.text);
+          doc.fontSize(9).font((doc as any)._fontRegular).fillColor(colors.text);
           doc.text(value, margin + 12 + labelWidth, y, {
             width: contentWidth - 24 - labelWidth,
           });
@@ -9230,14 +9327,14 @@ export class ReportGeneratorService {
         };
 
         const vendorName = vendor?.name || po.vendorName || 'N/A';
-        doc.fontSize(10).font('Helvetica-Bold').fillColor(colors.text);
+        doc.fontSize(10).font((doc as any)._fontBold).fillColor(colors.text);
         doc.text(vendorName, margin + 12, vendorContentY, {
           width: contentWidth - 24,
         });
         vendorContentY += 16;
 
         if (vendor?.address || po.vendor?.address) {
-          doc.fontSize(9).font('Helvetica').fillColor(colors.text);
+          doc.fontSize(9).font((doc as any)._fontRegular).fillColor(colors.text);
           doc.text(
             vendor?.address || po.vendor?.address || '',
             margin + 12,
@@ -9303,7 +9400,7 @@ export class ReportGeneratorService {
           .fillColor(colors.backgroundDark)
           .rect(margin, currentY, tableWidth, headerHeight)
           .fill();
-        doc.fontSize(9).font('Helvetica-Bold').fillColor('#ffffff');
+        doc.fontSize(9).font((doc as any)._fontBold).fillColor('#ffffff');
 
         let headerX = margin + padding;
         doc.text('Item', headerX, currentY + 12, { width: col.item });
@@ -9340,7 +9437,7 @@ export class ReportGeneratorService {
         currentY += headerHeight;
 
         // Table Rows
-        doc.fontSize(9).font('Helvetica').fillColor(colors.text);
+        doc.fontSize(9).font((doc as any)._fontRegular).fillColor(colors.text);
         const lineItems = po.lineItems || [];
 
         lineItems.forEach((item: any, index: number) => {
@@ -9353,7 +9450,7 @@ export class ReportGeneratorService {
               .fillColor(colors.backgroundDark)
               .rect(margin, currentY, tableWidth, headerHeight)
               .fill();
-            doc.fontSize(9).font('Helvetica-Bold').fillColor('#ffffff');
+            doc.fontSize(9).font((doc as any)._fontBold).fillColor('#ffffff');
 
             let newHeaderX = margin + padding;
             doc.text('Item', newHeaderX, currentY + 12, { width: col.item });
@@ -9428,12 +9525,12 @@ export class ReportGeneratorService {
             width: col.vat,
           });
           cellX += col.vat + totalPaddingPerColumn;
-          doc.font('Helvetica-Bold');
+          doc.font((doc as any)._fontBold);
           doc.text(formatAmount(item.totalAmount || 0), cellX, currentY + 10, {
             align: 'right',
             width: col.total,
           });
-          doc.font('Helvetica');
+          doc.font((doc as any)._fontRegular);
 
           // Subtle row separator
           doc.strokeColor(colors.borderLight).lineWidth(0.5);
@@ -9494,9 +9591,9 @@ export class ReportGeneratorService {
         const labelW = 110;
         const valueW = totalsBoxWidth - 32 - labelW;
 
-        doc.fontSize(9).font('Helvetica').fillColor(colors.textLight);
+        doc.fontSize(9).font((doc as any)._fontRegular).fillColor(colors.textLight);
         doc.text('Subtotal', totalsX, totalsY, { width: labelW });
-        doc.font('Helvetica-Bold').fillColor(colors.text);
+        doc.font((doc as any)._fontBold).fillColor(colors.text);
         doc.text(
           `${formatAmount(subtotal)} ${currency}`,
           totalsX + labelW,
@@ -9508,9 +9605,9 @@ export class ReportGeneratorService {
         );
         totalsY += 18;
 
-        doc.font('Helvetica').fillColor(colors.textLight);
+        doc.font((doc as any)._fontRegular).fillColor(colors.textLight);
         doc.text('VAT', totalsX, totalsY, { width: labelW });
-        doc.font('Helvetica-Bold').fillColor(colors.text);
+        doc.font((doc as any)._fontBold).fillColor(colors.text);
         doc.text(
           `${formatAmount(totalVat)} ${currency}`,
           totalsX + labelW,
@@ -9522,9 +9619,9 @@ export class ReportGeneratorService {
         );
         totalsY += 20;
 
-        doc.fontSize(10).font('Helvetica-Bold').fillColor(colors.primary);
+        doc.fontSize(10).font((doc as any)._fontBold).fillColor(colors.primary);
         doc.text('Total', totalsX, totalsY, { width: labelW });
-        doc.fontSize(12).font('Helvetica-Bold').fillColor(colors.primary);
+        doc.fontSize(12).font((doc as any)._fontBold).fillColor(colors.primary);
         doc.text(
           `${formatAmount(totalAmount)} ${currency}`,
           totalsX + labelW,
@@ -9580,11 +9677,11 @@ export class ReportGeneratorService {
 
           // Content inside box
           const contentStartY = bankBoxY + 12;
-          doc.fontSize(10).font('Helvetica-Bold').fillColor(colors.text);
+          doc.fontSize(10).font((doc as any)._fontBold).fillColor(colors.text);
           doc.text('Bank Details:', margin + 12, contentStartY);
 
           let bankY = contentStartY + 16;
-          doc.fontSize(10).font('Helvetica').fillColor(colors.text);
+          doc.fontSize(10).font((doc as any)._fontRegular).fillColor(colors.text);
           if (organization.bankAccountHolder) {
             doc.text(
               `Account Holder: ${organization.bankAccountHolder}`,
@@ -9647,10 +9744,10 @@ export class ReportGeneratorService {
 
           // Content inside box
           const contentStartY = notesBoxY + 12;
-          doc.fontSize(10).font('Helvetica-Bold').fillColor(colors.text);
+          doc.fontSize(10).font((doc as any)._fontBold).fillColor(colors.text);
           doc.text('Notes:', margin + 12, contentStartY);
 
-          doc.fontSize(10).font('Helvetica').fillColor(colors.text);
+          doc.fontSize(10).font((doc as any)._fontRegular).fillColor(colors.text);
           doc.text(po.notes, margin + 12, contentStartY + 16, {
             width: contentWidth - 24,
           });
@@ -9661,7 +9758,7 @@ export class ReportGeneratorService {
         // Footer
         if (showFooter) {
           const footerY = doc.page.height - 40;
-          doc.fontSize(8).font('Helvetica').fillColor(colors.textMuted);
+          doc.fontSize(8).font((doc as any)._fontRegular).fillColor(colors.textMuted);
           const effectiveFooter =
             footerText && footerText.trim().length > 0
               ? footerText
@@ -9717,7 +9814,7 @@ export class ReportGeneratorService {
           size: 'A4',
           layout: 'portrait',
         });
-
+        this.setupPdfFonts(doc);
         const buffers: Buffer[] = [];
         doc.on('data', buffers.push.bind(buffers));
         doc.on('end', () => resolve(Buffer.concat(buffers)));
@@ -9783,7 +9880,7 @@ export class ReportGeneratorService {
         }
 
         doc
-          .font('Helvetica-Bold')
+          .font((doc as any)._fontBold)
           .fontSize(22)
           .fillColor(colors.primary)
           .text('SALES ORDER', margin, currentY, {
@@ -9792,7 +9889,7 @@ export class ReportGeneratorService {
           });
 
         doc
-          .font('Helvetica')
+          .font((doc as any)._fontRegular)
           .fontSize(10)
           .fillColor(colors.textLight)
           .text(
@@ -9809,9 +9906,9 @@ export class ReportGeneratorService {
 
         // Company details + SO details
         if (showCompanyDetails && organization) {
-          doc.font('Helvetica-Bold').fontSize(10).fillColor(colors.text);
+          doc.font((doc as any)._fontBold).fontSize(10).fillColor(colors.text);
           doc.text(organization.name || 'Company', margin, currentY);
-          doc.font('Helvetica').fontSize(9).fillColor(colors.textLight);
+          doc.font((doc as any)._fontRegular).fontSize(9).fillColor(colors.textLight);
           const addressLines = [
             organization.address,
             organization.phone ? `Phone: ${organization.phone}` : null,
@@ -9831,9 +9928,9 @@ export class ReportGeneratorService {
         }
 
         const detailsX = margin + contentWidth / 2;
-        doc.font('Helvetica-Bold').fontSize(10).fillColor(colors.text);
+        doc.font((doc as any)._fontBold).fontSize(10).fillColor(colors.text);
         doc.text('Sales Order Details', detailsX, currentY);
-        doc.font('Helvetica').fontSize(9).fillColor(colors.textLight);
+        doc.font((doc as any)._fontRegular).fontSize(9).fillColor(colors.textLight);
         const details = [
           { label: 'SO No', value: so.soNumber },
           { label: 'Date', value: so.orderDate },
@@ -9843,11 +9940,11 @@ export class ReportGeneratorService {
         let detailsY = currentY + 14;
         for (const row of details) {
           doc
-            .font('Helvetica-Bold')
+            .font((doc as any)._fontBold)
             .fillColor(colors.text)
             .text(`${row.label}:`, detailsX, detailsY, { continued: true });
           doc
-            .font('Helvetica')
+            .font((doc as any)._fontRegular)
             .fillColor(colors.textLight)
             .text(` ${row.value}`);
           detailsY += 12;
@@ -9871,9 +9968,9 @@ export class ReportGeneratorService {
           .rect(margin, customerBoxY, 4, boxHeight)
           .fill();
 
-        doc.font('Helvetica-Bold').fontSize(10).fillColor(colors.text);
+        doc.font((doc as any)._fontBold).fontSize(9).fillColor(colors.text);
         doc.text('Bill To:', margin + 12, customerBoxY + 10);
-        doc.font('Helvetica').fontSize(9).fillColor(colors.textLight);
+        doc.font((doc as any)._fontRegular).fontSize(9).fillColor(colors.textLight);
         const customerName = so.customerName || customer?.name || '-';
         const customerTrn = so.customerTrn || customer?.customerTrn || null;
         doc.text(customerName, margin + 12, customerBoxY + 26);
@@ -9889,7 +9986,7 @@ export class ReportGeneratorService {
         currentY = customerBoxY + boxHeight + 20;
 
         // Line items table
-        doc.font('Helvetica-Bold').fontSize(10).fillColor(colors.text);
+        doc.font((doc as any)._fontBold).fontSize(10).fillColor(colors.text);
         doc.text('Items', margin, currentY);
         currentY += 12;
 
@@ -9908,7 +10005,7 @@ export class ReportGeneratorService {
           .fillColor(colors.primary)
           .rect(tableX, currentY, tableW, rowH)
           .fill();
-        doc.font('Helvetica-Bold').fontSize(9).fillColor('#ffffff');
+        doc.font((doc as any)._fontBold).fontSize(9).fillColor('#ffffff');
         doc.text('#', tableX + 8, currentY + 6, { width: col.sn - 10 });
         doc.text('Item', tableX + col.sn + 8, currentY + 6, {
           width: col.item - 10,
@@ -9931,7 +10028,7 @@ export class ReportGeneratorService {
         );
         currentY += rowH;
 
-        doc.font('Helvetica').fontSize(9).fillColor(colors.text);
+        doc.font((doc as any)._fontRegular).fontSize(9).fillColor(colors.text);
         const items = (so.lineItems || []) as any[];
         for (let i = 0; i < items.length; i++) {
           const it = items[i];
@@ -10003,9 +10100,9 @@ export class ReportGeneratorService {
         const labelW = 100;
         const valueW = totalsBoxW - 16 - 12 - labelW;
         let tY = currentY + 10;
-        doc.font('Helvetica').fontSize(9).fillColor(colors.textLight);
+        doc.font((doc as any)._fontRegular).fontSize(9).fillColor(colors.textLight);
         doc.text('Subtotal', totalsX + 12, tY, { width: labelW });
-        doc.font('Helvetica-Bold').fillColor(colors.text);
+        doc.font((doc as any)._fontBold).fillColor(colors.text);
         doc.text(
           `${formatAmount(subtotal)} ${currency}`,
           totalsX + 12 + labelW,
@@ -10013,9 +10110,9 @@ export class ReportGeneratorService {
           { width: valueW, align: 'right' },
         );
         tY += 18;
-        doc.font('Helvetica').fillColor(colors.textLight);
+        doc.font((doc as any)._fontRegular).fillColor(colors.textLight);
         doc.text('VAT', totalsX + 12, tY, { width: labelW });
-        doc.font('Helvetica-Bold').fillColor(colors.text);
+        doc.font((doc as any)._fontBold).fillColor(colors.text);
         doc.text(
           `${formatAmount(vat)} ${currency}`,
           totalsX + 12 + labelW,
@@ -10023,9 +10120,9 @@ export class ReportGeneratorService {
           { width: valueW, align: 'right' },
         );
         tY += 20;
-        doc.font('Helvetica-Bold').fontSize(10).fillColor(colors.primary);
+        doc.font((doc as any)._fontBold).fontSize(10).fillColor(colors.primary);
         doc.text('Total', totalsX + 12, tY, { width: labelW });
-        doc.font('Helvetica-Bold').fontSize(12).fillColor(colors.primary);
+        doc.font((doc as any)._fontBold).fontSize(12).fillColor(colors.primary);
         doc.text(
           `${formatAmount(total)} ${currency}`,
           totalsX + 12 + labelW,
@@ -10062,9 +10159,9 @@ export class ReportGeneratorService {
             .fillColor(colors.primary)
             .rect(margin, currentY, 4, bankBoxH)
             .fill();
-          doc.font('Helvetica-Bold').fontSize(10).fillColor(colors.text);
+          doc.font((doc as any)._fontBold).fontSize(10).fillColor(colors.text);
           doc.text('Bank Details:', margin + 12, currentY + 10);
-          doc.font('Helvetica').fontSize(9).fillColor(colors.textLight);
+          doc.font((doc as any)._fontRegular).fontSize(9).fillColor(colors.textLight);
           let bankY = currentY + 26;
           const bankLines = [
             organization.bankAccountHolder
@@ -10103,9 +10200,9 @@ export class ReportGeneratorService {
             .fillColor(colors.primary)
             .rect(margin, currentY, 4, notesH)
             .fill();
-          doc.font('Helvetica-Bold').fontSize(10).fillColor(colors.text);
+          doc.font((doc as any)._fontBold).fontSize(10).fillColor(colors.text);
           doc.text('Notes:', margin + 12, currentY + 10);
-          doc.font('Helvetica').fontSize(9).fillColor(colors.textLight);
+          doc.font((doc as any)._fontRegular).fontSize(9).fillColor(colors.textLight);
           doc.text(String(so.notes), margin + 12, currentY + 26, {
             width: contentWidth - 24,
           });
@@ -10115,7 +10212,7 @@ export class ReportGeneratorService {
         // Footer
         if (showFooter) {
           const footerY = doc.page.height - 40;
-          doc.fontSize(8).font('Helvetica').fillColor(colors.textMuted);
+          doc.fontSize(8).font((doc as any)._fontRegular).fillColor(colors.textMuted);
           const effectiveFooter =
             footerText && footerText.trim().length > 0
               ? footerText
@@ -10171,7 +10268,7 @@ export class ReportGeneratorService {
           size: 'A4',
           layout: 'portrait',
         });
-
+        this.setupPdfFonts(doc);
         const buffers: Buffer[] = [];
         doc.on('data', buffers.push.bind(buffers));
         doc.on('end', () => resolve(Buffer.concat(buffers)));
@@ -10229,7 +10326,7 @@ export class ReportGeneratorService {
         }
 
         doc
-          .font('Helvetica-Bold')
+          .font((doc as any)._fontBold)
           .fontSize(22)
           .fillColor(colors.primary)
           .text('DELIVERY CHALLAN', margin, currentY, {
@@ -10238,7 +10335,7 @@ export class ReportGeneratorService {
           });
 
         doc
-          .font('Helvetica')
+          .font((doc as any)._fontRegular)
           .fontSize(10)
           .fillColor(colors.textLight)
           .text(
@@ -10255,9 +10352,9 @@ export class ReportGeneratorService {
 
         // Company details
         if (showCompanyDetails && organization) {
-          doc.font('Helvetica-Bold').fontSize(10).fillColor(colors.text);
+          doc.font((doc as any)._fontBold).fontSize(10).fillColor(colors.text);
           doc.text(organization.name || 'Company', margin, currentY);
-          doc.font('Helvetica').fontSize(9).fillColor(colors.textLight);
+          doc.font((doc as any)._fontRegular).fontSize(9).fillColor(colors.textLight);
           const lines = [
             organization.address,
             organization.phone ? `Phone: ${organization.phone}` : null,
@@ -10278,9 +10375,9 @@ export class ReportGeneratorService {
 
         // DC details
         const detailsX = margin + contentWidth / 2;
-        doc.font('Helvetica-Bold').fontSize(10).fillColor(colors.text);
+        doc.font((doc as any)._fontBold).fontSize(10).fillColor(colors.text);
         doc.text('Challan Details', detailsX, currentY);
-        doc.font('Helvetica').fontSize(9).fillColor(colors.textLight);
+        doc.font((doc as any)._fontRegular).fontSize(9).fillColor(colors.textLight);
         const details = [
           { label: 'DC No', value: dc.challanNumber },
           { label: 'Date', value: dc.challanDate },
@@ -10290,11 +10387,11 @@ export class ReportGeneratorService {
         let detailsY = currentY + 14;
         for (const row of details) {
           doc
-            .font('Helvetica-Bold')
+            .font((doc as any)._fontBold)
             .fillColor(colors.text)
             .text(`${row.label}:`, detailsX, detailsY, { continued: true });
           doc
-            .font('Helvetica')
+            .font((doc as any)._fontRegular)
             .fillColor(colors.textLight)
             .text(` ${row.value}`);
           detailsY += 12;
@@ -10315,9 +10412,9 @@ export class ReportGeneratorService {
           .stroke();
         doc.fillColor(colors.primary).rect(margin, boxY, 4, boxH).fill();
 
-        doc.font('Helvetica-Bold').fontSize(10).fillColor(colors.text);
+        doc.font((doc as any)._fontBold).fontSize(10).fillColor(colors.text);
         doc.text('Deliver To:', margin + 12, boxY + 10);
-        doc.font('Helvetica').fontSize(9).fillColor(colors.textLight);
+        doc.font((doc as any)._fontRegular).fontSize(9).fillColor(colors.textLight);
         const customerName = dc.customerName || customer?.name || '-';
         const customerTrn = dc.customerTrn || customer?.customerTrn || null;
         doc.text(customerName, margin + 12, boxY + 26);
@@ -10349,7 +10446,7 @@ export class ReportGeneratorService {
         currentY = boxY + boxH + 20;
 
         // Items table (no pricing)
-        doc.font('Helvetica-Bold').fontSize(10).fillColor(colors.text);
+        doc.font((doc as any)._fontBold).fontSize(10).fillColor(colors.text);
         doc.text('Items', margin, currentY);
         currentY += 12;
 
@@ -10367,7 +10464,7 @@ export class ReportGeneratorService {
           .fillColor(colors.primary)
           .rect(tableX, currentY, tableW, rowH)
           .fill();
-        doc.font('Helvetica-Bold').fontSize(9).fillColor('#ffffff');
+        doc.font((doc as any)._fontBold).fontSize(9).fillColor('#ffffff');
         doc.text('#', tableX + 8, currentY + 6, { width: col.sn - 10 });
         doc.text('Item', tableX + col.sn + 8, currentY + 6, {
           width: col.item - 10,
@@ -10384,7 +10481,7 @@ export class ReportGeneratorService {
         );
         currentY += rowH;
 
-        doc.font('Helvetica').fontSize(9).fillColor(colors.text);
+        doc.font((doc as any)._fontRegular).fontSize(9).fillColor(colors.text);
         const items = (dc.lineItems || []) as any[];
         for (let i = 0; i < items.length; i++) {
           const it = items[i];
@@ -10443,9 +10540,9 @@ export class ReportGeneratorService {
             .fillColor(colors.primary)
             .rect(margin, currentY, 4, notesH)
             .fill();
-          doc.font('Helvetica-Bold').fontSize(10).fillColor(colors.text);
+          doc.font((doc as any)._fontBold).fontSize(10).fillColor(colors.text);
           doc.text('Notes:', margin + 12, currentY + 10);
-          doc.font('Helvetica').fontSize(9).fillColor(colors.textLight);
+          doc.font((doc as any)._fontRegular).fontSize(9).fillColor(colors.textLight);
           doc.text(String(dc.notes), margin + 12, currentY + 26, {
             width: contentWidth - 24,
           });
@@ -10455,7 +10552,7 @@ export class ReportGeneratorService {
         // Footer
         if (showFooter) {
           const footerY = doc.page.height - 40;
-          doc.fontSize(8).font('Helvetica').fillColor(colors.textMuted);
+          doc.fontSize(8).font((doc as any)._fontRegular).fillColor(colors.textMuted);
           const effectiveFooter =
             footerText && footerText.trim().length > 0
               ? footerText

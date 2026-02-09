@@ -106,7 +106,16 @@ export class SalesInvoicesService {
     }
 
     query.orderBy('invoice.invoice_date', 'DESC');
-    return query.getMany();
+    const list = await query.getMany();
+    // Ensure totalAmount is set for each invoice (DB column may be generated or missing)
+    list.forEach((inv) => {
+      if (inv.totalAmount == null || inv.totalAmount === '') {
+        const amount = parseFloat(inv.amount || '0');
+        const vatAmount = parseFloat(inv.vatAmount || '0');
+        inv.totalAmount = (amount + vatAmount).toFixed(2);
+      }
+    });
+    return list;
   }
 
   async findById(organizationId: string, id: string): Promise<SalesInvoice> {
@@ -123,6 +132,12 @@ export class SalesInvoicesService {
     });
     if (!invoice) {
       throw new NotFoundException('Invoice not found');
+    }
+    // Ensure totalAmount is always set (DB column may be generated or missing)
+    if (invoice.totalAmount == null || invoice.totalAmount === '') {
+      const amount = parseFloat(invoice.amount || '0');
+      const vatAmount = parseFloat(invoice.vatAmount || '0');
+      invoice.totalAmount = (amount + vatAmount).toFixed(2);
     }
     return invoice;
   }
@@ -276,6 +291,11 @@ export class SalesInvoicesService {
     });
     if (!invoice) {
       throw new NotFoundException('Invoice not found');
+    }
+    if (invoice.totalAmount == null || invoice.totalAmount === '') {
+      const amount = parseFloat(invoice.amount || '0');
+      const vatAmount = parseFloat(invoice.vatAmount || '0');
+      invoice.totalAmount = (amount + vatAmount).toFixed(2);
     }
     return invoice;
   }
