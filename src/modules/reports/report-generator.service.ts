@@ -7649,23 +7649,23 @@ export class ReportGeneratorService {
         const contentWidth = pageWidth - 2 * margin - rightMarginExtra;
 
         // Get template settings from metadata
-        // For proforma invoices, always use "PROFORMA INVOICE" as title
-        // Simplified tax invoice (UAE: < AED 10,000 or non-VAT registered recipient)
-        const invoiceTotal = parseFloat(invoice.totalAmount || '0');
-        const recipientTrn = customer?.customerTrn || invoice.customerTrn || '';
-        const isSimplifiedInvoice =
-          invoice.status?.toLowerCase() !== 'proforma_invoice' &&
-          (invoiceTotal < 10000 || !recipientTrn);
+        // Heading: Proforma → "PROFORMA INVOICE"; if org has VAT number → "Tax Invoice"; else "Invoice". No status appended.
+        const hasVatNumber = Boolean(
+          (organization?.vatNumber ?? metadata.vatNumber ?? '').toString().trim(),
+        );
         const defaultInvoiceTitle =
           invoice.status?.toLowerCase() === 'proforma_invoice'
             ? 'PROFORMA INVOICE'
-            : isSimplifiedInvoice
-              ? 'SIMPLIFIED TAX INVOICE'
-              : invoiceTemplate.invoiceTitle || 'TAX INVOICE';
+            : hasVatNumber
+              ? 'Tax Invoice'
+              : 'Invoice';
 
         const templateSettings = {
           logoUrl: logoUrl,
           logoBuffer: logoBuffer, // Pre-fetched logo buffer for remote URLs
+          signatureBuffer: (metadata as any).invoiceTemplate?.signatureBuffer as
+            | Buffer
+            | undefined,
           headerText: invoiceTemplate.headerText,
           colorScheme: invoiceTemplate.colorScheme || 'blue',
           customColor: invoiceTemplate.customColor,
@@ -7801,28 +7801,9 @@ export class ReportGeneratorService {
         }
         // No placeholder text - if no logo is configured, just skip it
 
-        // Invoice Title - Right aligned (matching premium preview)
-        // Position title to align with top of logo or at currentY if no logo
-        const invoiceStatus = invoice.status;
-        let invoiceTitle: string;
-
-        // For proforma invoices, always show "PROFORMA INVOICE"
-        if (invoiceStatus?.toLowerCase() === 'proforma_invoice') {
-          invoiceTitle = 'PROFORMA INVOICE';
-        } else {
-          invoiceTitle = templateSettings.invoiceTitle || 'TAX INVOICE';
-          if (invoiceStatus) {
-            const statusMap: Record<string, string> = {
-              tax_invoice_receivable: 'RECEIVABLE',
-              tax_invoice_bank_received: 'BANK RECEIVED',
-              tax_invoice_cash_received: 'CASH RECEIVED',
-            };
-            const statusDisplay = statusMap[invoiceStatus.toLowerCase()];
-            if (statusDisplay) {
-              invoiceTitle = `${invoiceTitle} - ${statusDisplay}`;
-            }
-          }
-        }
+        // Invoice Title - Right aligned (matching premium preview). No status appended.
+        const invoiceTitle =
+          templateSettings.invoiceTitle || 'Invoice';
         // Decreased heading font size, standardize to match rest of content
         // Position title at same Y as logo start to avoid overlap
         doc.fontSize(14).font((doc as any)._fontBold).fillColor(colors.primary);
@@ -8406,19 +8387,34 @@ export class ReportGeneratorService {
           sumAmount += amount;
           sumTotal += lineTotalAmount;
 
-          // Item name + SKU (smaller)
+          // Item name + SKU (smaller) + notes (muted, under item name)
           const itemName = item.itemName || '';
           const sku =
             item.product?.sku || (item as any).sku || (item as any).productSku || '';
-          doc.text(itemName, tableX + padding, rowY + 8, {
+          const rawNotes = (item as any).notes;
+          const lineNotes =
+            rawNotes != null && String(rawNotes).trim() !== ''
+              ? String(rawNotes).trim()
+              : '';
+          let itemTextY = rowY + 8;
+          doc.text(itemName, tableX + padding, itemTextY, {
             width: colWidths.item,
           });
+          itemTextY += 12;
           if (sku) {
             doc.fontSize(8).fillColor(colors.textLight);
-            doc.text(sku, tableX + padding, rowY + 20, {
+            doc.text(sku, tableX + padding, itemTextY, {
               width: colWidths.item,
             });
-            doc.fontSize(10).fillColor(colors.text);
+            itemTextY += 10;
+            doc.fontSize(9).fillColor(colors.text);
+          }
+          if (lineNotes) {
+            doc.fontSize(8).fillColor(colors.textLight);
+            doc.text(lineNotes, tableX + padding, itemTextY, {
+              width: colWidths.item,
+            });
+            doc.fontSize(9).fillColor(colors.text);
           }
           tableX += colWidths.item + totalPaddingPerColumn;
 
@@ -8928,7 +8924,10 @@ export class ReportGeneratorService {
 
         // QR + Signatory footer row (QR left, signatory right, vertically aligned) - compact for single-page
         const qrSizePx = 62;
-        const signatoryBlockHeight = 46;
+        const hasSignature = Boolean(
+          (templateSettings as any).signatureBuffer,
+        );
+        const signatoryBlockHeight = hasSignature ? 72 : 46;
 
         // Signatory block on the right edge
         const signatoryBlockWidth = 220;
@@ -8962,13 +8961,32 @@ export class ReportGeneratorService {
           { width: signatoryBlockWidth, align: 'right' },
         );
 
+        const signatureBuffer = templateSettings.signatureBuffer as
+          | Buffer
+          | undefined;
+        const signatureHeight = 28;
+        const lineY = signatureBuffer
+          ? signatoryY + 10 + signatureHeight + 4
+          : signatoryY + 24;
+
+        if (signatureBuffer) {
+          try {
+            doc.image(signatureBuffer, signatoryX, signatoryY + 10, {
+              width: signatoryBlockWidth,
+              height: signatureHeight,
+              fit: [signatoryBlockWidth, signatureHeight],
+            });
+          } catch (sigErr) {
+            console.warn('Failed to embed signature in PDF:', sigErr);
+          }
+        }
+
         // Signature line
-        const lineY = signatoryY + 24;
         doc
-          .moveTo(signatoryX, lineY)
-          .lineTo(signatoryX + signatoryBlockWidth, lineY)
           .strokeColor(colors.border)
           .lineWidth(0.8)
+          .moveTo(signatoryX, lineY)
+          .lineTo(signatoryX + signatoryBlockWidth, lineY)
           .stroke();
 
         // Label

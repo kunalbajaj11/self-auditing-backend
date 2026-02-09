@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -47,11 +48,14 @@ export class SettingsController {
       user?.organizationId as string,
     );
 
-    // Return proxy URL for logo if configured (to serve from private bucket)
+    // Return proxy URLs for logo and signature if configured (to serve from private bucket)
     return {
       ...settings,
       invoiceLogoUrl: settings.invoiceLogoUrl
         ? '/api/settings/invoice-template/logo'
+        : null,
+      invoiceSignatureUrl: settings.invoiceSignatureUrl
+        ? '/api/settings/invoice-template/signature'
         : null,
     };
   }
@@ -73,7 +77,25 @@ export class SettingsController {
     @CurrentUser() user: AuthenticatedUser,
     @UploadedFile() file: Express.Multer.File,
   ) {
+    if (!file) {
+      throw new BadRequestException('No file provided');
+    }
     return this.settingsService.uploadInvoiceLogo(
+      user?.organizationId as string,
+      file,
+    );
+  }
+
+  @Post('invoice-template/upload-signature')
+  @UseInterceptors(FileInterceptor('file'))
+  async uploadSignature(
+    @CurrentUser() user: AuthenticatedUser,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    if (!file) {
+      throw new BadRequestException('No file provided');
+    }
+    return this.settingsService.uploadInvoiceSignature(
       user?.organizationId as string,
       file,
     );
@@ -98,6 +120,31 @@ export class SettingsController {
 
     res.setHeader('Content-Type', result.contentType || 'image/png');
     res.setHeader('Cache-Control', 'public, max-age=3600'); // Cache for 1 hour
+    if (result.contentLength) {
+      res.setHeader('Content-Length', result.contentLength);
+    }
+
+    result.stream.pipe(res);
+  }
+
+  /**
+   * Proxy endpoint to serve the invoice signature image
+   */
+  @Get('invoice-template/signature')
+  async getInvoiceSignature(
+    @CurrentUser() user: AuthenticatedUser,
+    @Res() res: Response,
+  ) {
+    const result = await this.settingsService.getInvoiceSignatureStream(
+      user?.organizationId as string,
+    );
+
+    if (!result) {
+      throw new NotFoundException('Signature not found');
+    }
+
+    res.setHeader('Content-Type', result.contentType || 'image/png');
+    res.setHeader('Cache-Control', 'public, max-age=3600');
     if (result.contentLength) {
       res.setHeader('Content-Length', result.contentLength);
     }

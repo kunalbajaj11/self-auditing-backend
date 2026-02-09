@@ -399,6 +399,26 @@ export class SalesInvoicesService {
   }
 
   /**
+   * Get payment terms display label for invoice/PDF/preview:
+   * - "Receivable" when unpaid or partially paid
+   * - "Cash Received" when fully paid and all payments are cash
+   * - "Bank Received" when fully paid and any payment is bank/other
+   */
+  getPaymentTermsDisplayLabel(invoice: SalesInvoice): string {
+    if (invoice.paymentStatus !== PaymentStatus.PAID) {
+      return 'Receivable';
+    }
+    const payments = invoice.payments ?? [];
+    if (payments.length === 0) {
+      return 'Receivable';
+    }
+    const allCash = payments.every(
+      (p) => p.paymentMethod === PaymentMethod.CASH,
+    );
+    return allCash ? 'Cash Received' : 'Bank Received';
+  }
+
+  /**
    * Update payment status based on outstanding balance
    */
   async updatePaymentStatus(
@@ -714,6 +734,7 @@ export class SalesInvoicesService {
           organization,
           itemName: item.itemName,
           description: item.description,
+          notes: item.notes ?? null,
           quantity: item.quantity.toString(),
           unitPrice: item.unitPrice.toString(),
           unitOfMeasure: item.unitOfMeasure || 'unit',
@@ -822,16 +843,24 @@ export class SalesInvoicesService {
     const templateSettings =
       await this.settingsService.getInvoiceTemplate(organizationId);
 
-    // Use proxy URL for logo if logo is configured (to serve from private bucket)
+    // Use proxy URLs for logo and signature if configured (to serve from private bucket)
     const logoUrl = templateSettings.invoiceLogoUrl
       ? '/api/settings/invoice-template/logo'
       : null;
+    const signatureUrl = templateSettings.invoiceSignatureUrl
+      ? '/api/settings/invoice-template/signature'
+      : null;
 
-    // For proforma invoices, always use "PROFORMA INVOICE" as title
+    // Heading: Proforma → "PROFORMA INVOICE"; if org has VAT number → "Tax Invoice"; else "Invoice". No status appended.
+    const hasVatNumber = Boolean(
+      (invoice.organization?.vatNumber ?? '').toString().trim(),
+    );
     const invoiceTitle =
       invoice.status === 'proforma_invoice'
         ? 'PROFORMA INVOICE'
-        : templateSettings.invoiceTitle || 'TAX INVOICE';
+        : hasVatNumber
+          ? 'Tax Invoice'
+          : 'Invoice';
 
     // Amount in words for preview (based on totalAmount)
     const totalNumeric = parseFloat(invoice.totalAmount || '0');
@@ -848,6 +877,7 @@ export class SalesInvoicesService {
       appliedCreditNotes: invoice.creditNoteApplications || [],
       templateSettings: {
         logoUrl,
+        signatureUrl,
         headerText: templateSettings.invoiceHeaderText,
         colorScheme: templateSettings.invoiceColorScheme,
         customColor: templateSettings.invoiceCustomColor,
@@ -860,6 +890,7 @@ export class SalesInvoicesService {
         showTermsAndConditions: templateSettings.invoiceShowTermsConditions,
         defaultPaymentTerms: templateSettings.invoiceDefaultPaymentTerms,
         customPaymentTerms: templateSettings.invoiceCustomPaymentTerms,
+        paymentTermsDisplay: this.getPaymentTermsDisplayLabel(invoice),
         defaultNotes: templateSettings.invoiceDefaultNotes,
         termsAndConditions: templateSettings.invoiceTermsConditions,
         footerText: templateSettings.invoiceFooterText,
@@ -1096,14 +1127,7 @@ export class SalesInvoicesService {
     invoiceId: string,
     organizationId: string,
   ): Promise<Buffer> {
-    const invoice = await this.invoicesRepository.findOne({
-      where: { id: invoiceId, organization: { id: organizationId } },
-      relations: ['organization', 'customer', 'lineItems', 'user'],
-    });
-
-    if (!invoice) {
-      throw new NotFoundException('Invoice not found');
-    }
+    const invoice = await this.findById(organizationId, invoiceId);
 
     // Get invoice template settings
     const templateSettings =
@@ -1117,9 +1141,11 @@ export class SalesInvoicesService {
     const taxSettings =
       await this.settingsService.getTaxSettings(organizationId);
 
-    // Fetch logo buffer from storage for PDF generation
+    // Fetch logo and signature buffers from storage for PDF generation
     const logoBuffer =
       await this.settingsService.getInvoiceLogoBuffer(organizationId);
+    const signatureBuffer =
+      await this.settingsService.getInvoiceSignatureBuffer(organizationId);
 
     // Get exchange rate if invoice currency differs from base currency
     let exchangeRate = null;
@@ -1138,11 +1164,12 @@ export class SalesInvoicesService {
       }
     }
 
-    // Determine payment terms
-    const paymentTerms =
-      templateSettings.invoiceDefaultPaymentTerms === 'Custom'
-        ? templateSettings.invoiceCustomPaymentTerms
-        : templateSettings.invoiceDefaultPaymentTerms;
+    // Payment terms label: Cash Received / Bank Received / Receivable (from invoice payment status)
+    const paymentTerms = this.getPaymentTermsDisplayLabel(invoice);
+
+    const hasVatNumber = Boolean(
+      (invoice.organization?.vatNumber ?? '').toString().trim(),
+    );
 
     const reportData = {
       type: 'sales_invoice',
@@ -1176,6 +1203,7 @@ export class SalesInvoicesService {
         invoiceTemplate: {
           logoBuffer: logoBuffer,
           logoUrl: null, // Logo is provided as buffer, not URL
+          signatureBuffer: signatureBuffer ?? undefined,
           headerText:
             templateSettings.invoiceHeaderText || invoice.organization?.name,
           colorScheme: templateSettings.invoiceColorScheme || 'blue',
@@ -1183,7 +1211,9 @@ export class SalesInvoicesService {
           invoiceTitle:
             invoice.status === 'proforma_invoice'
               ? 'PROFORMA INVOICE'
-              : templateSettings.invoiceTitle || 'TAX INVOICE',
+              : hasVatNumber
+                ? 'Tax Invoice'
+                : 'Invoice',
           showCompanyDetails:
             templateSettings.invoiceShowCompanyDetails ?? true,
           showVatDetails: templateSettings.invoiceShowVatDetails ?? true,
@@ -1193,7 +1223,7 @@ export class SalesInvoicesService {
           showBankDetails: templateSettings.invoiceShowBankDetails ?? false,
           showTermsAndConditions:
             templateSettings.invoiceShowTermsConditions ?? true,
-          paymentTerms: paymentTerms || 'Net 30',
+          paymentTerms,
           defaultNotes: templateSettings.invoiceDefaultNotes,
           termsAndConditions: templateSettings.invoiceTermsConditions,
           footerText: templateSettings.invoiceFooterText,
@@ -1917,6 +1947,7 @@ ${lines}
           organization: { id: lineItemOrganizationId },
           itemName: item.itemName,
           description: item.description,
+          notes: item.notes ?? null,
           quantity: item.quantity.toString(),
           unitPrice: item.unitPrice.toString(),
           unitOfMeasure: item.unitOfMeasure || 'unit',

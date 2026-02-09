@@ -7,6 +7,10 @@ export class UpdateInvoiceTemplateDto {
 
   @IsOptional()
   @IsString()
+  invoiceSignatureUrl?: string;
+
+  @IsOptional()
+  @IsString()
   invoiceHeaderText?: string;
 
   @IsOptional()

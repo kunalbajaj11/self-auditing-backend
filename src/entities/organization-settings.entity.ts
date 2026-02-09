@@ -12,6 +12,9 @@ export class OrganizationSettings extends AbstractEntity {
   @Column({ name: 'invoice_logo_url', type: 'text', nullable: true })
   invoiceLogoUrl?: string | null;
 
+  @Column({ name: 'invoice_signature_url', type: 'text', nullable: true })
+  invoiceSignatureUrl?: string | null;
+
   @Column({ name: 'invoice_header_text', type: 'text', nullable: true })
   invoiceHeaderText?: string | null;
 

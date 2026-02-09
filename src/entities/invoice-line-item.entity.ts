@@ -94,4 +94,7 @@ export class InvoiceLineItem extends AbstractEntity {
 
   @Column({ name: 'account_id', type: 'uuid', nullable: true })
   accountId?: string | null; // Chart of Accounts link (for revenue tracking)
+
+  @Column({ type: 'text', nullable: true })
+  notes?: string | null; // Optional per-line notes (shown under item name on invoice)
 }

@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Injectable,
   NotFoundException,
   Optional,
@@ -206,6 +207,21 @@ export class SettingsService {
       delete updateData.invoiceLogoUrl;
     }
 
+    // Ignore invoiceSignatureUrl when it's the proxy URL (signature only updated via upload endpoint)
+    if (
+      updateData.invoiceSignatureUrl === undefined ||
+      updateData.invoiceSignatureUrl?.startsWith('/api/') ||
+      updateData.invoiceSignatureUrl?.includes('settings/invoice-template/signature')
+    ) {
+      delete updateData.invoiceSignatureUrl;
+    } else if (
+      updateData.invoiceSignatureUrl === '' ||
+      updateData.invoiceSignatureUrl === null
+    ) {
+      settings.invoiceSignatureUrl = null;
+      delete updateData.invoiceSignatureUrl;
+    }
+
     Object.assign(settings, updateData);
     return this.settingsRepository.save(settings);
   }
@@ -221,10 +237,8 @@ export class SettingsService {
     file: Express.Multer.File,
   ): Promise<{ logoUrl: string }> {
     if (!file) {
-      throw new Error('No file provided');
+      throw new BadRequestException('No file provided');
     }
-
-    // Validate file type
     const allowedMimeTypes = [
       'image/jpeg',
       'image/jpg',
@@ -232,15 +246,13 @@ export class SettingsService {
       'image/svg+xml',
     ];
     if (!allowedMimeTypes.includes(file.mimetype)) {
-      throw new Error(
+      throw new BadRequestException(
         'Invalid file type. Only JPEG, PNG, and SVG images are allowed.',
       );
     }
-
-    // Validate file size (max 5MB)
     const maxSize = 5 * 1024 * 1024; // 5MB
     if (file.size > maxSize) {
-      throw new Error('File size exceeds 5MB limit.');
+      throw new BadRequestException('File size exceeds 5MB limit.');
     }
 
     // Upload to file storage
@@ -315,6 +327,74 @@ export class SettingsService {
       return Buffer.concat(chunks);
     } catch (error) {
       console.error('Error converting logo stream to buffer:', error);
+      return null;
+    }
+  }
+
+  async uploadInvoiceSignature(
+    organizationId: string,
+    file: Express.Multer.File,
+  ): Promise<{ signatureUrl: string }> {
+    if (!file) {
+      throw new BadRequestException('No file provided');
+    }
+    const allowedMimeTypes = ['image/jpeg', 'image/jpg', 'image/png'];
+    if (!allowedMimeTypes.includes(file.mimetype)) {
+      throw new BadRequestException(
+        'Invalid file type. Only JPEG and PNG images are allowed for signature.',
+      );
+    }
+    const maxSize = 2 * 1024 * 1024; // 2MB
+    if (file.size > maxSize) {
+      throw new BadRequestException('Signature file size exceeds 2MB limit.');
+    }
+    const uploadResult = await this.fileStorageService.uploadFile(
+      file,
+      organizationId,
+      'invoice-signatures',
+    );
+    const settings = await this.getOrCreateSettings(organizationId);
+    settings.invoiceSignatureUrl = uploadResult.fileKey;
+    await this.settingsRepository.save(settings);
+    return { signatureUrl: '/api/settings/invoice-template/signature' };
+  }
+
+  async getInvoiceSignatureStream(organizationId: string): Promise<{
+    stream: any;
+    contentType?: string;
+    contentLength?: number;
+  } | null> {
+    const settings = await this.getOrCreateSettings(organizationId);
+    if (!settings.invoiceSignatureUrl) return null;
+    let fileKey = settings.invoiceSignatureUrl;
+    if (fileKey.startsWith('http')) {
+      fileKey =
+        this.fileStorageService.extractFileKeyFromUrl(fileKey) || fileKey;
+    }
+    try {
+      const result = await this.fileStorageService.getObject(fileKey);
+      return {
+        stream: result.body,
+        contentType: result.contentType,
+        contentLength: result.contentLength,
+      };
+    } catch (error) {
+      console.error('Error fetching signature from storage:', error);
+      return null;
+    }
+  }
+
+  async getInvoiceSignatureBuffer(organizationId: string): Promise<Buffer | null> {
+    const sigStream = await this.getInvoiceSignatureStream(organizationId);
+    if (!sigStream?.stream) return null;
+    try {
+      const chunks: Buffer[] = [];
+      for await (const chunk of sigStream.stream) {
+        chunks.push(Buffer.from(chunk));
+      }
+      return Buffer.concat(chunks);
+    } catch (error) {
+      console.error('Error converting signature stream to buffer:', error);
       return null;
     }
   }
