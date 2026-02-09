@@ -9011,18 +9011,6 @@ export class ReportGeneratorService {
 
         let footerTextY = footerLineY + 6;
 
-        // Payment methods if enabled - use dark text color
-        if (templateSettings.showPaymentMethods) {
-          doc.fontSize(9).font((doc as any)._fontRegular).fillColor(colors.text);
-          const paymentMethodsText =
-            'Payment Methods: Bank Transfer, Cash, Credit Card';
-          doc.text(paymentMethodsText, margin, footerTextY, {
-            align: 'center',
-            width: contentWidth,
-          });
-          footerTextY += 14;
-        }
-
         // Footer text - show custom footer text or default message
         if (templateSettings.showFooter) {
           const footerText =
