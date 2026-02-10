@@ -7828,10 +7828,10 @@ export class ReportGeneratorService {
           titleHeight += 14;
         }
 
-        // Set currentY to the bottom of logo or title, whichever is lower - reduce spacing
+        // Set currentY to the bottom of logo or title, whichever is lower, plus spacing
         const logoBottom = currentY + logoHeight;
         const titleBottom = currentY + titleHeight;
-        currentY = Math.max(logoBottom, titleBottom) - currentY - 25; // Reduced from 20 to 10
+        currentY = Math.max(logoBottom, titleBottom) + 10;
 
         // ============================================================================
         // SEPARATOR LINE (Premium 2px border with accent)
@@ -7949,7 +7949,6 @@ export class ReportGeneratorService {
         // INVOICE DETAILS BOX (3-column layout: Bill To / Invoice Details / Commercial)
         // ============================================================================
         const boxY = currentY;
-        const headerHeight = 116; // Tight height for single-page fit
 
         // Three equal-width columns inside the box with better spacing
         const innerX = margin + 24; // Increased padding
@@ -7960,6 +7959,116 @@ export class ReportGeneratorService {
         const billToX = innerX;
         const invoiceX = innerX + columnWidth + columnGap;
         const commercialX = innerX + (columnWidth + columnGap) * 2;
+        // Constrain commercial column width to prevent overflow past page edge
+        const commercialColumnWidth = Math.min(
+          columnWidth,
+          margin + contentWidth - commercialX - 8,
+        );
+
+        const colHeaderGap = 14; // Increased spacing after header
+        const lineGap = 8; // Increased spacing between lines for better readability
+
+        // Build commercial lines list first so we can compute box height
+        const commercialLines: { label: string; value: string }[] = [];
+        const deliveryNote = (invoice as any).deliveryNote as string | undefined;
+        if (deliveryNote) {
+          commercialLines.push({ label: 'DELIVERY NOTE', value: deliveryNote });
+        }
+        const suppliersRef = (invoice as any).suppliersRef as string | undefined;
+        if (suppliersRef) {
+          commercialLines.push({ label: "SUPPLIER'S REF", value: suppliersRef });
+        }
+        const otherReference = (invoice as any).otherReference as
+          | string
+          | undefined;
+        if (otherReference) {
+          commercialLines.push({ label: 'OTHER REFERENCE', value: otherReference });
+        }
+        const buyerOrderNo = (invoice as any).buyerOrderNo as string | undefined;
+        if (buyerOrderNo) {
+          commercialLines.push({ label: 'BUYER ORDER NO.', value: buyerOrderNo });
+        }
+        const buyerOrderDate = (invoice as any).buyerOrderDate as
+          | string
+          | undefined;
+        if (buyerOrderDate) {
+          commercialLines.push({
+            label: 'DATED',
+            value: this.formatDateForInvoice(buyerOrderDate),
+          });
+        }
+        const despatchedThrough = (invoice as any).despatchedThrough as
+          | string
+          | undefined;
+        if (despatchedThrough) {
+          commercialLines.push({
+            label: 'DESPATCHED THROUGH',
+            value: despatchedThrough,
+          });
+        }
+        const destination = (invoice as any).destination as string | undefined;
+        if (destination) {
+          commercialLines.push({ label: 'DESTINATION', value: destination });
+        }
+
+        // Measure-only helper for computing box height (no drawing)
+        doc.fontSize(8).font((doc as any)._fontRegular);
+        const measureLabelValue = (label: string, value: string, w: number): number => {
+          const labelText = `${label}: `;
+          const fullText = `${labelText}${value}`;
+          return doc.heightOfString(fullText, { width: w });
+        };
+
+        // Compute content height for each column to size the box dynamically
+        let billToContentH = 18 + colHeaderGap; // top pad + header
+        const customerName = customer?.name || invoice.customerName || '';
+        const customerAddress = customer?.address || '';
+        const customerPhone = customer?.phone || '';
+        const customerEmail = customer?.email || '';
+        const customerTrn =
+          templateSettings.showVatDetails &&
+          (customer?.customerTrn || invoice.customerTrn)
+            ? customer?.customerTrn || invoice.customerTrn
+            : '';
+        if (customerName) billToContentH += doc.heightOfString(customerName, { width: columnWidth }) + lineGap;
+        if (customerAddress) billToContentH += doc.heightOfString(customerAddress, { width: columnWidth }) + lineGap;
+        if (customerPhone) billToContentH += measureLabelValue('Phone', customerPhone, columnWidth) + lineGap;
+        if (customerEmail) billToContentH += measureLabelValue('Email', customerEmail, columnWidth) + lineGap;
+        if (customerTrn) billToContentH += measureLabelValue('TRN', customerTrn, columnWidth) + lineGap;
+
+        let invoiceContentH = 18 + colHeaderGap;
+        const invoiceNumber = invoice.invoiceNumber || '';
+        const invoiceNumberLabel =
+          invoice.status?.toLowerCase() === 'proforma_invoice'
+            ? 'PROFORMA INVOICE NO.'
+            : 'INVOICE NUMBER';
+        invoiceContentH += measureLabelValue(invoiceNumberLabel, invoiceNumber, columnWidth) + lineGap;
+        invoiceContentH += measureLabelValue(
+          invoice.status?.toLowerCase() === 'proforma_invoice' ? 'PROFORMA INVOICE DATE' : 'INVOICE DATE',
+          this.formatDateForInvoice(invoice.invoiceDate || ''),
+          columnWidth,
+        ) + lineGap;
+        const supplyDate = (invoice as any).supplyDate as string | undefined;
+        if (supplyDate && supplyDate !== invoice.invoiceDate) {
+          invoiceContentH += measureLabelValue('DATE OF SUPPLY', this.formatDateForInvoice(supplyDate), columnWidth) + lineGap;
+        }
+        if (invoice.dueDate) {
+          invoiceContentH += measureLabelValue('DUE DATE', this.formatDateForInvoice(invoice.dueDate), columnWidth) + lineGap;
+        }
+        if (templateSettings.showPaymentTerms) {
+          const paymentTerms =
+            templateSettings.paymentTerms ||
+            (customer?.paymentTerms ? `Net ${customer.paymentTerms}` : 'Net 30');
+          invoiceContentH += measureLabelValue('PAYMENT TERMS', paymentTerms, columnWidth) + lineGap;
+        }
+
+        let commercialContentH = 18 + colHeaderGap;
+        for (const { label, value } of commercialLines) {
+          commercialContentH += measureLabelValue(label, value, commercialColumnWidth) + lineGap;
+        }
+
+        const headerHeight =
+          Math.ceil(Math.max(billToContentH, invoiceContentH, commercialContentH)) + 24; // +24 for bottom padding
 
         // Draw premium background box with border
         doc
@@ -7984,9 +8093,6 @@ export class ReportGeneratorService {
           .moveTo(sep2X, boxY + 12)
           .lineTo(sep2X, boxY + headerHeight - 12)
           .stroke();
-
-        const colHeaderGap = 14; // Increased spacing after header
-        const lineGap = 8; // Increased spacing between lines for better readability
 
         // Small helper to render "LABEL: value" with bold label and regular value
         // Improved to handle long values better and prevent splitting
@@ -8017,16 +8123,7 @@ export class ReportGeneratorService {
 
         // Column 1 - BILL TO (improved formatting with consistent bold labels)
         let billToY = boxY + 18; // Slightly more top padding
-        const customerName = customer?.name || invoice.customerName || '';
-        const customerAddress = customer?.address || '';
-        const customerPhone = customer?.phone || '';
-        const customerEmail = customer?.email || '';
-        const customerTrn =
-          templateSettings.showVatDetails &&
-          (customer?.customerTrn || invoice.customerTrn)
-            ? customer?.customerTrn || invoice.customerTrn
-            : '';
-
+        // customerName, customerAddress, etc. already set in measurement block above
         doc.fontSize(8).font((doc as any)._fontBold).fillColor(colors.text);
         doc.text('BILL TO:', billToX, billToY, { width: columnWidth });
         billToY += colHeaderGap;
@@ -8086,12 +8183,7 @@ export class ReportGeneratorService {
         doc.text('INVOICE DETAILS', invoiceX, invoiceY, { width: columnWidth });
         invoiceY += colHeaderGap;
 
-        const invoiceNumberLabel =
-          invoice.status?.toLowerCase() === 'proforma_invoice'
-            ? 'PROFORMA INVOICE NO.'
-            : 'INVOICE NUMBER';
-        // Ensure invoice number doesn't split awkwardly
-        const invoiceNumber = invoice.invoiceNumber || '';
+        // invoiceNumberLabel, invoiceNumber already set in measurement block above
         let h = drawLabelValue(
           invoiceNumberLabel,
           invoiceNumber,
@@ -8114,7 +8206,7 @@ export class ReportGeneratorService {
         );
         invoiceY += h + lineGap;
 
-        const supplyDate = (invoice as any).supplyDate as string | undefined;
+        // supplyDate already set in measurement block above
         if (supplyDate && supplyDate !== invoice.invoiceDate) {
           h = drawLabelValue(
             'DATE OF SUPPLY',
@@ -8153,76 +8245,13 @@ export class ReportGeneratorService {
           invoiceY += h + lineGap;
         }
 
-        // Column 3 - COMMERCIAL DETAILS (improved spacing)
+        // Column 3 - COMMERCIAL DETAILS (improved spacing, constrained width to prevent overflow)
         let commercialY = boxY + 18; // Slightly more top padding
         doc.fontSize(8).font((doc as any)._fontBold).fillColor(colors.text);
         doc.text('COMMERCIAL DETAILS', commercialX, commercialY, {
-          width: columnWidth,
+          width: commercialColumnWidth,
         });
         commercialY += colHeaderGap;
-
-        const commercialLines: { label: string; value: string }[] = [];
-        const deliveryNote = (invoice as any).deliveryNote as
-          | string
-          | undefined;
-        if (deliveryNote) {
-          commercialLines.push({ label: 'DELIVERY NOTE', value: deliveryNote });
-        }
-
-        const suppliersRef = (invoice as any).suppliersRef as
-          | string
-          | undefined;
-        if (suppliersRef) {
-          commercialLines.push({
-            label: "SUPPLIER'S REF",
-            value: suppliersRef,
-          });
-        }
-
-        const otherReference = (invoice as any).otherReference as
-          | string
-          | undefined;
-        if (otherReference) {
-          commercialLines.push({
-            label: 'OTHER REFERENCE',
-            value: otherReference,
-          });
-        }
-
-        const buyerOrderNo = (invoice as any).buyerOrderNo as
-          | string
-          | undefined;
-        if (buyerOrderNo) {
-          commercialLines.push({
-            label: 'BUYER ORDER NO.',
-            value: buyerOrderNo,
-          });
-        }
-
-        const buyerOrderDate = (invoice as any).buyerOrderDate as
-          | string
-          | undefined;
-        if (buyerOrderDate) {
-          commercialLines.push({
-            label: 'DATED',
-            value: this.formatDateForInvoice(buyerOrderDate),
-          });
-        }
-
-        const despatchedThrough = (invoice as any).despatchedThrough as
-          | string
-          | undefined;
-        if (despatchedThrough) {
-          commercialLines.push({
-            label: 'DESPATCHED THROUGH',
-            value: despatchedThrough,
-          });
-        }
-
-        const destination = (invoice as any).destination as string | undefined;
-        if (destination) {
-          commercialLines.push({ label: 'DESTINATION', value: destination });
-        }
 
         for (const { label, value } of commercialLines) {
           const lh = drawLabelValue(
@@ -8230,7 +8259,7 @@ export class ReportGeneratorService {
             value,
             commercialX,
             commercialY,
-            columnWidth,
+            commercialColumnWidth,
           );
           commercialY += lh + lineGap;
         }
@@ -8746,13 +8775,16 @@ export class ReportGeneratorService {
             bankBoxHeight = Math.max(bankDetailCount * 13 + 28, 44);
           }
 
-          // Notes box height (right 60% top) - use invoice notes when present, otherwise default notes
+        // Notes box height (right 60% top) - use invoice notes when present, otherwise default notes
           let notesBoxHeight = 0;
           if (hasNotes) {
-            const notesLines = Math.ceil(
-              effectiveNotes.length / 60,
-            );
-            notesBoxHeight = Math.max(notesLines * 11 + 28, 44);
+            doc.fontSize(10).font((doc as any)._fontRegular);
+            const notesTextHeight = doc.heightOfString(effectiveNotes, {
+              width: rightColumnWidth - 24,
+            });
+            // top pad (12) + title line (14) + content + bottom pad (12) + safety margin (8)
+            notesBoxHeight = Math.ceil(12 + 14 + notesTextHeight + 12 + 8);
+            notesBoxHeight = Math.max(notesBoxHeight, 52);
           }
 
           // Terms box height (right 60% below notes) - fit actual content
@@ -8763,8 +8795,9 @@ export class ReportGeneratorService {
               templateSettings.termsAndConditions,
               { width: rightColumnWidth - 24 },
             );
-            termsBoxHeight = Math.ceil(12 + 14 + termsTextHeight + 12); // top pad + title + content + bottom
-            termsBoxHeight = Math.max(termsBoxHeight, 44);
+            // top pad (12) + title (14) + content + bottom pad (12) + safety margin (8)
+            termsBoxHeight = Math.ceil(12 + 14 + termsTextHeight + 12 + 8);
+            termsBoxHeight = Math.max(termsBoxHeight, 52);
           }
 
           const gapBetweenNotesAndTerms = 6;

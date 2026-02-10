@@ -83,12 +83,12 @@ export class ReportsService {
     return id.length > 0 ? id : null;
   }
 
-  /** Exclude proforma invoices from report queries; they are only shown on the Proforma Invoice page. */
+  /** Exclude non-tax invoices (proforma, quotations) from report queries; they are only shown on their dedicated pages. */
   private excludeProformaInvoice(qb: {
     andWhere: (cond: string, params?: object) => unknown;
   }): void {
-    qb.andWhere('invoice.status != :proformaStatus', {
-      proformaStatus: InvoiceStatus.PROFORMA_INVOICE,
+    qb.andWhere('invoice.status NOT IN (:...nonTaxStatuses)', {
+      nonTaxStatuses: [InvoiceStatus.PROFORMA_INVOICE, InvoiceStatus.QUOTATION],
     });
   }
 
@@ -101,8 +101,8 @@ export class ReportsService {
     andWhere: (cond: string, params?: object) => unknown;
   }): void {
     qb.innerJoin('payment.invoice', 'inv');
-    qb.andWhere('inv.status != :proformaStatus', {
-      proformaStatus: InvoiceStatus.PROFORMA_INVOICE,
+    qb.andWhere('inv.status NOT IN (:...nonTaxStatuses)', {
+      nonTaxStatuses: [InvoiceStatus.PROFORMA_INVOICE, InvoiceStatus.QUOTATION],
     });
   }
 
@@ -8480,9 +8480,12 @@ export class ReportsService {
             .orderBy('payment.payment_date', 'ASC')
             .addOrderBy('payment.created_at', 'ASC');
           cashBankInvoicePaymentsQuery.andWhere(
-            'invoice.status != :proformaStatus',
+            'invoice.status NOT IN (:...nonTaxStatuses)',
             {
-              proformaStatus: InvoiceStatus.PROFORMA_INVOICE,
+              nonTaxStatuses: [
+                InvoiceStatus.PROFORMA_INVOICE,
+                InvoiceStatus.QUOTATION,
+              ],
             },
           );
           const invoicePayments = await cashBankInvoicePaymentsQuery.getMany();
@@ -8686,9 +8689,15 @@ export class ReportsService {
             .andWhere('payment.payment_date >= :startDate', { startDate })
             .andWhere('payment.payment_date <= :endDate', { endDate })
             .orderBy('payment.payment_date', 'ASC');
-          arInvoicePaymentsQuery.andWhere('invoice.status != :proformaStatus', {
-            proformaStatus: InvoiceStatus.PROFORMA_INVOICE,
-          });
+          arInvoicePaymentsQuery.andWhere(
+            'invoice.status NOT IN (:...nonTaxStatuses)',
+            {
+              nonTaxStatuses: [
+                InvoiceStatus.PROFORMA_INVOICE,
+                InvoiceStatus.QUOTATION,
+              ],
+            },
+          );
           const invoicePayments = await arInvoicePaymentsQuery.getMany();
 
           invoicePayments.forEach((payment) => {
@@ -10348,9 +10357,12 @@ export class ReportsService {
             .orderBy('payment.payment_date', 'ASC')
             .addOrderBy('payment.created_at', 'ASC');
         accountEntriesInvoicePaymentsQuery.andWhere(
-          'invoice.status != :proformaStatus',
+          'invoice.status NOT IN (:...nonTaxStatuses)',
           {
-            proformaStatus: InvoiceStatus.PROFORMA_INVOICE,
+            nonTaxStatuses: [
+              InvoiceStatus.PROFORMA_INVOICE,
+              InvoiceStatus.QUOTATION,
+            ],
           },
         );
         const invoicePayments =
