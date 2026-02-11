@@ -7663,6 +7663,11 @@ export class ReportGeneratorService {
             : hasVatNumber
               ? 'Tax Invoice'
               : 'Invoice';
+        // Honour per-invoice title from displayOptions/template when provided
+        const invoiceTitle =
+          invoiceTemplate.invoiceTitle && String(invoiceTemplate.invoiceTitle).trim()
+            ? String(invoiceTemplate.invoiceTitle).trim()
+            : defaultInvoiceTitle;
 
         const templateSettings = {
           logoUrl: logoUrl,
@@ -7673,7 +7678,7 @@ export class ReportGeneratorService {
           headerText: invoiceTemplate.headerText,
           colorScheme: invoiceTemplate.colorScheme || 'blue',
           customColor: invoiceTemplate.customColor,
-          invoiceTitle: defaultInvoiceTitle,
+          invoiceTitle,
           showCompanyDetails: invoiceTemplate.showCompanyDetails ?? true,
           showVatDetails: invoiceTemplate.showVatDetails ?? true,
           showPaymentTerms: invoiceTemplate.showPaymentTerms ?? true,
@@ -7793,10 +7798,10 @@ export class ReportGeneratorService {
           }
         }
 
-        const invoiceTitle =
+        const titleToRender =
           templateSettings.invoiceTitle || 'Invoice';
         doc.fontSize(12).font((doc as any)._fontBold).fillColor(colors.primary);
-        doc.text(invoiceTitle.toUpperCase(), margin, currentY, {
+        doc.text(titleToRender.toUpperCase(), margin, currentY, {
           width: contentWidth,
           align: 'right',
         });

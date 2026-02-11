@@ -200,4 +200,12 @@ export class SalesInvoice extends AbstractEntity {
 
   @Column({ name: 'public_token', length: 64, nullable: true, unique: true })
   publicToken?: string | null; // Token for public invoice viewing
+
+  /** Per-invoice display/template overrides (merged over org template when generating PDF) */
+  @Column({
+    name: 'display_options',
+    type: 'jsonb',
+    nullable: true,
+  })
+  displayOptions?: Record<string, unknown> | null;
 }

@@ -670,6 +670,10 @@ export class SalesInvoicesService {
       customerName: dto.customerName,
       customerTrn: dto.customerTrn,
       publicToken,
+      displayOptions:
+        dto.displayOptions && typeof dto.displayOptions === 'object'
+          ? dto.displayOptions
+          : null,
     });
 
     const savedInvoice = await this.invoicesRepository.save(invoice);
@@ -852,15 +856,23 @@ export class SalesInvoicesService {
       : null;
 
     // Heading: Proforma → "PROFORMA INVOICE"; if org has VAT number → "Tax Invoice"; else "Invoice". No status appended.
+    // Per-invoice displayOptions can override title.
     const hasVatNumber = Boolean(
       (invoice.organization?.vatNumber ?? '').toString().trim(),
     );
-    const invoiceTitle =
+    const defaultTitle =
       invoice.status === 'proforma_invoice'
         ? 'PROFORMA INVOICE'
         : hasVatNumber
           ? 'Tax Invoice'
           : 'Invoice';
+    const invoiceTitle =
+      (invoice.displayOptions?.invoiceTitle as string) ||
+      templateSettings.invoiceTitle ||
+      defaultTitle;
+
+    // Merge per-invoice display options over template (for PDF/preview)
+    const displayOpts = (invoice.displayOptions || {}) as Record<string, unknown>;
 
     // Amount in words for preview (based on totalAmount)
     const totalNumeric = parseFloat(invoice.totalAmount || '0');
@@ -878,27 +890,76 @@ export class SalesInvoicesService {
       templateSettings: {
         logoUrl,
         signatureUrl,
-        headerText: templateSettings.invoiceHeaderText,
-        colorScheme: templateSettings.invoiceColorScheme,
-        customColor: templateSettings.invoiceCustomColor,
+        headerText:
+          (displayOpts.invoiceHeaderText as string) ??
+          templateSettings.invoiceHeaderText,
+        colorScheme:
+          (displayOpts.invoiceColorScheme as string) ??
+          templateSettings.invoiceColorScheme,
+        customColor:
+          (displayOpts.invoiceCustomColor as string) ??
+          templateSettings.invoiceCustomColor,
         title: invoiceTitle,
-        showCompanyDetails: templateSettings.invoiceShowCompanyDetails,
-        showVatDetails: templateSettings.invoiceShowVatDetails,
-        showPaymentTerms: templateSettings.invoiceShowPaymentTerms,
-        showPaymentMethods: templateSettings.invoiceShowPaymentMethods,
-        showBankDetails: templateSettings.invoiceShowBankDetails,
-        showTermsAndConditions: templateSettings.invoiceShowTermsConditions,
-        defaultPaymentTerms: templateSettings.invoiceDefaultPaymentTerms,
-        customPaymentTerms: templateSettings.invoiceCustomPaymentTerms,
+        showCompanyDetails:
+          displayOpts.invoiceShowCompanyDetails !== undefined
+            ? (displayOpts.invoiceShowCompanyDetails as boolean)
+            : templateSettings.invoiceShowCompanyDetails,
+        showVatDetails:
+          displayOpts.invoiceShowVatDetails !== undefined
+            ? (displayOpts.invoiceShowVatDetails as boolean)
+            : templateSettings.invoiceShowVatDetails,
+        showPaymentTerms:
+          displayOpts.invoiceShowPaymentTerms !== undefined
+            ? (displayOpts.invoiceShowPaymentTerms as boolean)
+            : templateSettings.invoiceShowPaymentTerms,
+        showPaymentMethods:
+          displayOpts.invoiceShowPaymentMethods !== undefined
+            ? (displayOpts.invoiceShowPaymentMethods as boolean)
+            : templateSettings.invoiceShowPaymentMethods,
+        showBankDetails:
+          displayOpts.invoiceShowBankDetails !== undefined
+            ? (displayOpts.invoiceShowBankDetails as boolean)
+            : templateSettings.invoiceShowBankDetails,
+        showTermsAndConditions:
+          displayOpts.invoiceShowTermsConditions !== undefined
+            ? (displayOpts.invoiceShowTermsConditions as boolean)
+            : templateSettings.invoiceShowTermsConditions,
+        defaultPaymentTerms:
+          (displayOpts.invoiceDefaultPaymentTerms as string) ??
+          templateSettings.invoiceDefaultPaymentTerms,
+        customPaymentTerms:
+          (displayOpts.invoiceCustomPaymentTerms as string) ??
+          templateSettings.invoiceCustomPaymentTerms,
         paymentTermsDisplay: this.getPaymentTermsDisplayLabel(invoice),
-        defaultNotes: templateSettings.invoiceDefaultNotes,
-        termsAndConditions: templateSettings.invoiceTermsConditions,
-        footerText: templateSettings.invoiceFooterText,
-        showFooter: templateSettings.invoiceShowFooter,
-        showItemDescription: templateSettings.invoiceShowItemDescription,
-        showItemQuantity: templateSettings.invoiceShowItemQuantity,
-        showItemUnitPrice: templateSettings.invoiceShowItemUnitPrice,
-        showItemTotal: templateSettings.invoiceShowItemTotal,
+        defaultNotes:
+          (displayOpts.invoiceDefaultNotes as string) ??
+          templateSettings.invoiceDefaultNotes,
+        termsAndConditions:
+          (displayOpts.invoiceTermsConditions as string) ??
+          templateSettings.invoiceTermsConditions,
+        footerText:
+          (displayOpts.invoiceFooterText as string) ??
+          templateSettings.invoiceFooterText,
+        showFooter:
+          displayOpts.invoiceShowFooter !== undefined
+            ? (displayOpts.invoiceShowFooter as boolean)
+            : templateSettings.invoiceShowFooter,
+        showItemDescription:
+          displayOpts.invoiceShowItemDescription !== undefined
+            ? (displayOpts.invoiceShowItemDescription as boolean)
+            : templateSettings.invoiceShowItemDescription,
+        showItemQuantity:
+          displayOpts.invoiceShowItemQuantity !== undefined
+            ? (displayOpts.invoiceShowItemQuantity as boolean)
+            : templateSettings.invoiceShowItemQuantity,
+        showItemUnitPrice:
+          displayOpts.invoiceShowItemUnitPrice !== undefined
+            ? (displayOpts.invoiceShowItemUnitPrice as boolean)
+            : templateSettings.invoiceShowItemUnitPrice,
+        showItemTotal:
+          displayOpts.invoiceShowItemTotal !== undefined
+            ? (displayOpts.invoiceShowItemTotal as boolean)
+            : templateSettings.invoiceShowItemTotal,
       },
       amountInWords,
     };
@@ -1199,41 +1260,90 @@ export class SalesInvoicesService {
         generatedAt: new Date(),
         generatedByName: invoice.user?.name,
         organizationId: invoice.organization?.id,
-        // Invoice template settings - nested under invoiceTemplate as expected by PDF generator
-        invoiceTemplate: {
-          logoBuffer: logoBuffer,
-          logoUrl: null, // Logo is provided as buffer, not URL
-          signatureBuffer: signatureBuffer ?? undefined,
-          headerText:
-            templateSettings.invoiceHeaderText || invoice.organization?.name,
-          colorScheme: templateSettings.invoiceColorScheme || 'blue',
-          customColor: templateSettings.invoiceCustomColor,
-          invoiceTitle:
+        // Invoice template settings - merge per-invoice displayOptions over org template
+        invoiceTemplate: (() => {
+          const opts = (invoice.displayOptions || {}) as Record<string, unknown>;
+          const defaultTitle =
             invoice.status === 'proforma_invoice'
               ? 'PROFORMA INVOICE'
               : hasVatNumber
                 ? 'Tax Invoice'
-                : 'Invoice',
-          showCompanyDetails:
-            templateSettings.invoiceShowCompanyDetails ?? true,
-          showVatDetails: templateSettings.invoiceShowVatDetails ?? true,
-          showPaymentTerms: templateSettings.invoiceShowPaymentTerms ?? true,
-          showPaymentMethods:
-            templateSettings.invoiceShowPaymentMethods ?? true,
-          showBankDetails: templateSettings.invoiceShowBankDetails ?? false,
-          showTermsAndConditions:
-            templateSettings.invoiceShowTermsConditions ?? true,
-          paymentTerms,
-          defaultNotes: templateSettings.invoiceDefaultNotes,
-          termsAndConditions: templateSettings.invoiceTermsConditions,
-          footerText: templateSettings.invoiceFooterText,
-          showFooter: templateSettings.invoiceShowFooter ?? true,
-          showItemDescription:
-            templateSettings.invoiceShowItemDescription ?? true,
-          showItemQuantity: templateSettings.invoiceShowItemQuantity ?? true,
-          showItemUnitPrice: templateSettings.invoiceShowItemUnitPrice ?? true,
-          showItemTotal: templateSettings.invoiceShowItemTotal ?? true,
-        },
+                : 'Invoice';
+          return {
+            logoBuffer: logoBuffer,
+            logoUrl: null,
+            signatureBuffer: signatureBuffer ?? undefined,
+            headerText:
+              (opts.invoiceHeaderText as string) ??
+              templateSettings.invoiceHeaderText ??
+              invoice.organization?.name,
+            colorScheme:
+              (opts.invoiceColorScheme as string) ??
+              templateSettings.invoiceColorScheme ??
+              'blue',
+            customColor:
+              (opts.invoiceCustomColor as string) ??
+              templateSettings.invoiceCustomColor,
+            invoiceTitle:
+              (opts.invoiceTitle as string) ??
+              templateSettings.invoiceTitle ??
+              defaultTitle,
+            showCompanyDetails:
+              opts.invoiceShowCompanyDetails !== undefined
+                ? (opts.invoiceShowCompanyDetails as boolean)
+                : (templateSettings.invoiceShowCompanyDetails ?? true),
+            showVatDetails:
+              opts.invoiceShowVatDetails !== undefined
+                ? (opts.invoiceShowVatDetails as boolean)
+                : (templateSettings.invoiceShowVatDetails ?? true),
+            showPaymentTerms:
+              opts.invoiceShowPaymentTerms !== undefined
+                ? (opts.invoiceShowPaymentTerms as boolean)
+                : (templateSettings.invoiceShowPaymentTerms ?? true),
+            showPaymentMethods:
+              opts.invoiceShowPaymentMethods !== undefined
+                ? (opts.invoiceShowPaymentMethods as boolean)
+                : (templateSettings.invoiceShowPaymentMethods ?? true),
+            showBankDetails:
+              opts.invoiceShowBankDetails !== undefined
+                ? (opts.invoiceShowBankDetails as boolean)
+                : (templateSettings.invoiceShowBankDetails ?? false),
+            showTermsAndConditions:
+              opts.invoiceShowTermsConditions !== undefined
+                ? (opts.invoiceShowTermsConditions as boolean)
+                : (templateSettings.invoiceShowTermsConditions ?? true),
+            paymentTerms,
+            defaultNotes:
+              (opts.invoiceDefaultNotes as string) ??
+              templateSettings.invoiceDefaultNotes,
+            termsAndConditions:
+              (opts.invoiceTermsConditions as string) ??
+              templateSettings.invoiceTermsConditions,
+            footerText:
+              (opts.invoiceFooterText as string) ??
+              templateSettings.invoiceFooterText,
+            showFooter:
+              opts.invoiceShowFooter !== undefined
+                ? (opts.invoiceShowFooter as boolean)
+                : (templateSettings.invoiceShowFooter ?? true),
+            showItemDescription:
+              opts.invoiceShowItemDescription !== undefined
+                ? (opts.invoiceShowItemDescription as boolean)
+                : (templateSettings.invoiceShowItemDescription ?? true),
+            showItemQuantity:
+              opts.invoiceShowItemQuantity !== undefined
+                ? (opts.invoiceShowItemQuantity as boolean)
+                : (templateSettings.invoiceShowItemQuantity ?? true),
+            showItemUnitPrice:
+              opts.invoiceShowItemUnitPrice !== undefined
+                ? (opts.invoiceShowItemUnitPrice as boolean)
+                : (templateSettings.invoiceShowItemUnitPrice ?? true),
+            showItemTotal:
+              opts.invoiceShowItemTotal !== undefined
+                ? (opts.invoiceShowItemTotal as boolean)
+                : (templateSettings.invoiceShowItemTotal ?? true),
+          };
+        })(),
       },
     };
 
@@ -1874,6 +1984,12 @@ ${lines}
     }
     if (dto.termsOfDelivery !== undefined) {
       invoice.termsOfDelivery = dto.termsOfDelivery;
+    }
+    if (dto.displayOptions !== undefined) {
+      invoice.displayOptions =
+        dto.displayOptions && typeof dto.displayOptions === 'object'
+          ? dto.displayOptions
+          : null;
     }
     if (dto.customerId !== undefined) {
       if (dto.customerId) {
