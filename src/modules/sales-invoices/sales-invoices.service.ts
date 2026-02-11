@@ -579,10 +579,13 @@ export class SalesInvoicesService {
         }
       }
     } else {
-      // Auto-generate invoice number
+      // Auto-generate: use sequence by document type (invoice / proforma / quotation)
+      const sequenceType = this.getNumberingSequenceTypeForStatus(
+        dto.status || 'tax_invoice_receivable',
+      );
       invoiceNumber = await this.settingsService.generateNextNumber(
         organizationId,
-        NumberingSequenceType.INVOICE,
+        sequenceType,
       );
 
       // Check for duplicates if enabled (even for auto-generated numbers)
@@ -603,7 +606,7 @@ export class SalesInvoicesService {
           // Regenerate if duplicate found
           invoiceNumber = await this.settingsService.generateNextNumber(
             organizationId,
-            NumberingSequenceType.INVOICE,
+            sequenceType,
           );
           attempts++;
         }
@@ -937,17 +940,18 @@ export class SalesInvoicesService {
       ? '/api/settings/invoice-template/signature'
       : null;
 
-    // Heading: Proforma → "PROFORMA INVOICE"; if org has VAT number → "Tax Invoice"; else "Invoice". No status appended.
-    // Per-invoice displayOptions can override title.
+    // Heading by document type: Proforma / Quotation / Tax Invoice. Per-invoice displayOptions can override.
     const hasVatNumber = Boolean(
       (invoice.organization?.vatNumber ?? '').toString().trim(),
     );
     const defaultTitle =
       invoice.status === 'proforma_invoice'
-        ? 'PROFORMA INVOICE'
-        : hasVatNumber
-          ? 'Tax Invoice'
-          : 'Invoice';
+        ? 'Proforma Invoice'
+        : invoice.status === 'quotation'
+          ? 'Quotation'
+          : hasVatNumber
+            ? 'Tax Invoice'
+            : 'Invoice';
     const invoiceTitle =
       (invoice.displayOptions?.invoiceTitle as string) ||
       templateSettings.invoiceTitle ||
@@ -1253,14 +1257,29 @@ export class SalesInvoicesService {
    * Format: INV-YYYY-NNN (e.g., INV-2024-001)
    */
   /**
-   * Get next invoice number without creating an invoice
-   * Useful for previewing the next number
+   * Get next document number (invoice, proforma, or quotation) without creating
    */
-  async getNextInvoiceNumber(organizationId: string): Promise<string> {
-    return this.settingsService.getNextNumber(
-      organizationId,
-      NumberingSequenceType.INVOICE,
-    );
+  async getNextInvoiceNumber(
+    organizationId: string,
+    type?: 'invoice' | 'proforma' | 'quotation',
+  ): Promise<string> {
+    const sequenceType =
+      type === 'proforma'
+        ? NumberingSequenceType.PROFORMA_INVOICE
+        : type === 'quotation'
+          ? NumberingSequenceType.QUOTE
+          : NumberingSequenceType.INVOICE;
+    return this.settingsService.getNextNumber(organizationId, sequenceType);
+  }
+
+  private getNumberingSequenceTypeForStatus(
+    status: string,
+  ): NumberingSequenceType {
+    return status === 'proforma_invoice'
+      ? NumberingSequenceType.PROFORMA_INVOICE
+      : status === 'quotation'
+        ? NumberingSequenceType.QUOTE
+        : NumberingSequenceType.INVOICE;
   }
 
   /**
@@ -1347,10 +1366,12 @@ export class SalesInvoicesService {
           const opts = (invoice.displayOptions || {}) as Record<string, unknown>;
           const defaultTitle =
             invoice.status === 'proforma_invoice'
-              ? 'PROFORMA INVOICE'
-              : hasVatNumber
-                ? 'Tax Invoice'
-                : 'Invoice';
+              ? 'Proforma Invoice'
+              : invoice.status === 'quotation'
+                ? 'Quotation'
+                : hasVatNumber
+                  ? 'Tax Invoice'
+                  : 'Invoice';
           return {
             logoBuffer: logoBuffer,
             logoUrl: null,
@@ -2295,6 +2316,26 @@ ${lines}
     ) {
       throw new BadRequestException(
         'Cannot set status to paid unless invoice is fully paid',
+      );
+    }
+
+    // Workflow: Quotation → Proforma Invoice → Tax Invoice (only via convert endpoint)
+    const taxInvoiceStatuses = [
+      InvoiceStatus.TAX_INVOICE_RECEIVABLE,
+      InvoiceStatus.TAX_INVOICE_BANK_RECEIVED,
+      InvoiceStatus.TAX_INVOICE_CASH_RECEIVED,
+    ];
+    if (invoice.status === InvoiceStatus.QUOTATION && taxInvoiceStatuses.includes(status)) {
+      throw new BadRequestException(
+        'Quotation can only be converted to Proforma Invoice. Convert to Proforma first, then use "Convert to Tax Invoice" on the proforma.',
+      );
+    }
+    if (
+      invoice.status === InvoiceStatus.PROFORMA_INVOICE &&
+      taxInvoiceStatuses.includes(status)
+    ) {
+      throw new BadRequestException(
+        'Use the "Convert to Tax Invoice" action to convert a Proforma Invoice to a Tax Invoice.',
       );
     }
 

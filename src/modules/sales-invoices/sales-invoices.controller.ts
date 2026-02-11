@@ -50,9 +50,13 @@ export class SalesInvoicesController {
   @Get('next-invoice-number')
   @UseGuards(JwtAuthGuard, RolesGuard, TenantGuard)
   @Roles(UserRole.ADMIN, UserRole.ACCOUNTANT)
-  async getNextInvoiceNumber(@CurrentUser() user: AuthenticatedUser) {
+  async getNextInvoiceNumber(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query('type') type?: 'invoice' | 'proforma' | 'quotation',
+  ) {
     const invoiceNumber = await this.salesInvoicesService.getNextInvoiceNumber(
       user?.organizationId as string,
+      type,
     );
     return { invoiceNumber };
   }

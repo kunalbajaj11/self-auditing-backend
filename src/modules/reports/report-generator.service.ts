@@ -7653,16 +7653,18 @@ export class ReportGeneratorService {
         const contentWidth = pageWidth - 2 * margin - rightMarginExtra;
 
         // Get template settings from metadata
-        // Heading: Proforma → "PROFORMA INVOICE"; if org has VAT number → "Tax Invoice"; else "Invoice". No status appended.
+        // Heading by document type: Proforma Invoice / Quotation / Tax Invoice
         const hasVatNumber = Boolean(
           (organization?.vatNumber ?? metadata.vatNumber ?? '').toString().trim(),
         );
         const defaultInvoiceTitle =
           invoice.status?.toLowerCase() === 'proforma_invoice'
-            ? 'PROFORMA INVOICE'
-            : hasVatNumber
-              ? 'Tax Invoice'
-              : 'Invoice';
+            ? 'Proforma Invoice'
+            : invoice.status?.toLowerCase() === 'quotation'
+              ? 'Quotation'
+              : hasVatNumber
+                ? 'Tax Invoice'
+                : 'Invoice';
         // Honour per-invoice title from displayOptions/template when provided
         const invoiceTitle =
           invoiceTemplate.invoiceTitle && String(invoiceTemplate.invoiceTitle).trim()
@@ -8684,14 +8686,12 @@ export class ReportGeneratorService {
           templateSettings.showTermsAndConditions &&
           templateSettings.termsAndConditions &&
           templateSettings.termsAndConditions.trim().length > 0;
-        // Normalize T&C the same way as notes (flow as paragraph, preserve intentional breaks)
+        // Normalize T&C: preserve newlines so each line appears on its own in the PDF
         const effectiveTerms = hasTerms
           ? (templateSettings.termsAndConditions || '')
               .replace(/\r\n/g, '\n')
               .replace(/\r/g, '\n')
               .replace(/\n{3,}/g, '\n\n')
-              .replace(/([^\n])\n([^\n])/g, '$1 $2')
-              .replace(/[ \t]+/g, ' ')
               .trim()
           : '';
 

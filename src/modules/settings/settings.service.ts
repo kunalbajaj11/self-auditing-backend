@@ -653,6 +653,22 @@ export class SettingsService {
         resetPeriod: ResetPeriod.NEVER,
         format: 'INV-{YYYY}-{NNNNN}',
       },
+      [NumberingSequenceType.PROFORMA_INVOICE]: {
+        prefix: 'PRO',
+        suffix: '',
+        nextNumber: 1,
+        numberLength: 5,
+        resetPeriod: ResetPeriod.NEVER,
+        format: 'PRO-{YYYY}-{NNNNN}',
+      },
+      [NumberingSequenceType.QUOTE]: {
+        prefix: 'QTE',
+        suffix: '',
+        nextNumber: 1,
+        numberLength: 5,
+        resetPeriod: ResetPeriod.NEVER,
+        format: 'QTE-{YYYY}-{NNNNN}',
+      },
       [NumberingSequenceType.CREDIT_NOTE]: {
         prefix: 'CN',
         suffix: '',
@@ -668,14 +684,6 @@ export class SettingsService {
         numberLength: 5,
         resetPeriod: ResetPeriod.NEVER,
         format: 'DN-{YYYY}-{NNNNN}',
-      },
-      [NumberingSequenceType.QUOTE]: {
-        prefix: 'QTE',
-        suffix: '',
-        nextNumber: 1,
-        numberLength: 5,
-        resetPeriod: ResetPeriod.NEVER,
-        format: 'QTE-{YYYY}-{NNNNN}',
       },
       [NumberingSequenceType.SALES_ORDER]: {
         prefix: 'SO',

@@ -4,9 +4,10 @@ import { Organization } from './organization.entity';
 
 export enum NumberingSequenceType {
   INVOICE = 'invoice',
+  PROFORMA_INVOICE = 'proforma_invoice',
+  QUOTE = 'quote',
   CREDIT_NOTE = 'credit_note',
   DEBIT_NOTE = 'debit_note',
-  QUOTE = 'quote',
   SALES_ORDER = 'sales_order',
   DELIVERY_CHALLAN = 'delivery_challan',
   PURCHASE_ORDER = 'purchase_order',
