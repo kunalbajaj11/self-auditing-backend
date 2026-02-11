@@ -7630,11 +7630,15 @@ export class ReportGeneratorService {
         const currency = metadata.currency || invoice.currency || 'AED';
 
         const doc = new PDFDocument({
-          margin: 28, // Increased from 50 to match premium preview (48px = ~56pt)
+          margin: 20, // Tighter for single-page invoice (A4)
           size: 'A4',
           layout: 'portrait',
         });
         this.setupPdfFonts(doc);
+        // Use Helvetica for invoice PDF so text renders clearly (standard PDF font used by most invoice tools)
+        (doc as any)._fontRegular = 'Helvetica';
+        (doc as any)._fontBold = 'Helvetica-Bold';
+
         const buffers: Buffer[] = [];
         doc.on('data', buffers.push.bind(buffers));
         doc.on('end', () => {
@@ -7644,8 +7648,8 @@ export class ReportGeneratorService {
         doc.on('error', reject);
 
         const pageWidth = doc.page.width;
-        const margin = 28; // Increased from 50 to match premium preview
-        const rightMarginExtra = 7; // Extra space on right so invoice isn't flush to edge
+        const margin = 20; // Tighter for single-page
+        const rightMarginExtra = 6;
         const contentWidth = pageWidth - 2 * margin - rightMarginExtra;
 
         // Get template settings from metadata
@@ -7731,20 +7735,20 @@ export class ReportGeneratorService {
         };
 
         // ============================================================================
-        // TOP BORDER BAR (Premium 6px border matching preview)
+        // TOP BORDER BAR (single-page: compact)
         // ============================================================================
-        doc.fillColor(colors.primary).rect(0, 0, pageWidth, 6).fill();
+        doc.fillColor(colors.primary).rect(0, 0, pageWidth, 4).fill();
 
         // ============================================================================
-        // HEADER: Logo on left, Title on right (Premium layout matching preview)
+        // HEADER: Logo on left, Title on right (compact for single page)
         // ============================================================================
-        let currentY = 32;
+        let currentY = 22;
         let logoHeight = 0;
+        const logoSize = 56; // Smaller for single-page
 
         // Add logo on the left if available
         if (templateSettings.logoBuffer) {
           try {
-            // Check if buffer contains SVG content (PDFKit doesn't support SVG)
             const bufferStart = templateSettings.logoBuffer
               .slice(0, 100)
               .toString('utf-8')
@@ -7754,20 +7758,15 @@ export class ReportGeneratorService {
                 "Skipping SVG invoice logo buffer (PDFKit doesn't support SVG)",
               );
             } else {
-              const logoSize = 140; // Match preview size (140px)
-              const logoX = margin;
-              const logoY = currentY;
-              logoHeight = logoSize;
-
-              doc.image(templateSettings.logoBuffer, logoX, logoY, {
+              doc.image(templateSettings.logoBuffer, margin, currentY, {
                 width: logoSize,
                 height: logoSize,
                 fit: [logoSize, logoSize],
               });
+              logoHeight = logoSize;
             }
           } catch (error) {
             console.warn('Failed to load invoice logo:', error);
-            // No placeholder - just skip logo if it fails
           }
         } else if (
           templateSettings.logoUrl &&
@@ -7776,19 +7775,14 @@ export class ReportGeneratorService {
           fs.existsSync(templateSettings.logoUrl)
         ) {
           try {
-            // Skip SVG files as PDFKit doesn't support them
             const ext = path.extname(templateSettings.logoUrl).toLowerCase();
             if (ext !== '.svg') {
-              const logoSize = 140; // Match preview size (140px)
-              const logoX = margin;
-              const logoY = currentY;
-              logoHeight = logoSize;
-
-              doc.image(templateSettings.logoUrl, logoX, logoY, {
+              doc.image(templateSettings.logoUrl, margin, currentY, {
                 width: logoSize,
                 height: logoSize,
                 fit: [logoSize, logoSize],
               });
+              logoHeight = logoSize;
             } else {
               console.warn(
                 "Skipping SVG invoice logo file (PDFKit doesn't support SVG)",
@@ -7796,70 +7790,56 @@ export class ReportGeneratorService {
             }
           } catch (error) {
             console.warn('Failed to load invoice logo from file:', error);
-            // No placeholder - just skip logo if it fails
           }
         }
-        // No placeholder text - if no logo is configured, just skip it
 
-        // Invoice Title - Right aligned (matching premium preview). No status appended.
         const invoiceTitle =
           templateSettings.invoiceTitle || 'Invoice';
-        // Decreased heading font size, standardize to match rest of content
-        // Position title at same Y as logo start to avoid overlap
-        doc.fontSize(14).font((doc as any)._fontBold).fillColor(colors.primary);
+        doc.fontSize(12).font((doc as any)._fontBold).fillColor(colors.primary);
         doc.text(invoiceTitle.toUpperCase(), margin, currentY, {
           width: contentWidth,
           align: 'right',
         });
 
-        // Header text if available - position below title
-        let titleHeight = 18; // Approximate height for 14px font
+        let titleHeight = 14;
         if (templateSettings.headerText) {
-          doc.fontSize(10).font((doc as any)._fontRegular).fillColor(colors.text); // Use dark text color
+          doc.fontSize(9).font((doc as any)._fontRegular).fillColor(colors.text);
           doc.text(
             templateSettings.headerText,
             margin,
             currentY + titleHeight,
-            {
-              width: contentWidth,
-              align: 'right',
-            },
+            { width: contentWidth, align: 'right' },
           );
-          titleHeight += 14;
+          titleHeight += 12;
         }
 
-        // Set currentY to the bottom of logo or title, whichever is lower, plus spacing
         const logoBottom = currentY + logoHeight;
         const titleBottom = currentY + titleHeight;
-        currentY = Math.max(logoBottom, titleBottom) + 10;
+        currentY = Math.max(logoBottom, titleBottom) + 6;
 
-        // ============================================================================
-        // SEPARATOR LINE (Premium 2px border with accent)
-        // ============================================================================
-        doc.strokeColor(colors.border).lineWidth(2);
+        // Separator line
+        doc.strokeColor(colors.border).lineWidth(1);
         doc
           .moveTo(margin, currentY)
           .lineTo(margin + contentWidth, currentY)
           .stroke();
-
-        // Accent line below separator
-        doc.strokeColor(colors.primary).lineWidth(1);
+        doc.strokeColor(colors.primary).lineWidth(0.5);
         doc
-          .moveTo(margin, currentY + 2)
-          .lineTo(margin + 240, currentY + 2)
+          .moveTo(margin, currentY + 1)
+          .lineTo(margin + 160, currentY + 1)
           .stroke();
 
-        currentY += 10; // Reduced from 32 to 20
+        currentY += 6;
 
         // ============================================================================
-        // COMPANY DETAILS SECTION (Premium styled with background)
+        // COMPANY DETAILS (compact for single page)
         // ============================================================================
         if (templateSettings.showCompanyDetails) {
           const companyBoxY = currentY;
-          const contentStartY = companyBoxY + 12;
-          const leftX = margin + 20;
-          const rightColumnWidth = contentWidth / 2 - 30;
-          const rightX = margin + contentWidth / 2 + 10;
+          const contentStartY = companyBoxY + 8;
+          const leftX = margin + 12;
+          const rightColumnWidth = contentWidth / 2 - 20;
+          const rightX = margin + contentWidth / 2 + 6;
 
           const orgName = organization?.name || metadata.organizationName || '';
           const orgAddress = organization?.address || metadata.address || '';
@@ -7869,21 +7849,18 @@ export class ReportGeneratorService {
             ? organization?.vatNumber || metadata.vatNumber || ''
             : '';
 
-          // Left column height: name + address
           let leftHeight = 0;
-          if (orgName) leftHeight += 16;
-          if (orgAddress) leftHeight += 14;
-          // Right column height: phone, email, TRN
+          if (orgName) leftHeight += 12;
+          if (orgAddress) leftHeight += 10;
           let rightHeight = 0;
-          if (orgPhone) rightHeight += 14;
-          if (orgEmail) rightHeight += 14;
-          if (orgTrn) rightHeight += 14;
+          if (orgPhone) rightHeight += 10;
+          if (orgEmail) rightHeight += 10;
+          if (orgTrn) rightHeight += 10;
           const companyBoxHeight = Math.max(
-            Math.max(leftHeight, rightHeight) + 20,
-            50,
+            Math.max(leftHeight, rightHeight) + 14,
+            36,
           );
 
-          // Draw background box with left border accent FIRST
           doc
             .fillColor(colors.backgroundLight)
             .rect(margin, companyBoxY, contentWidth, companyBoxHeight)
@@ -7893,80 +7870,71 @@ export class ReportGeneratorService {
             .lineWidth(0.5)
             .rect(margin, companyBoxY, contentWidth, companyBoxHeight)
             .stroke();
-
-          // Left border accent
           doc
             .fillColor(colors.primary)
-            .rect(margin, companyBoxY, 4, companyBoxHeight)
+            .rect(margin, companyBoxY, 3, companyBoxHeight)
             .fill();
 
-          // Left column: name & address
           let leftY = contentStartY;
           if (orgName) {
-            doc.fontSize(10).font((doc as any)._fontBold).fillColor(colors.text);
+            doc.fontSize(9).font((doc as any)._fontBold).fillColor(colors.text);
             doc.text(orgName, leftX, leftY);
-            leftY += 16;
+            leftY += 12;
           }
-          doc.fontSize(10).font((doc as any)._fontRegular).fillColor(colors.text);
+          doc.fontSize(8).font((doc as any)._fontRegular).fillColor(colors.text);
           if (orgAddress) {
             doc.text(orgAddress, leftX, leftY);
-            leftY += 14;
+            leftY += 10;
           }
 
-          // Right column: phone, email, TRN (right-aligned)
           let rightY = contentStartY;
+          doc.fontSize(8).font((doc as any)._fontRegular).fillColor(colors.text);
           if (orgPhone) {
-            doc.fontSize(10).font((doc as any)._fontRegular).fillColor(colors.text);
             doc.text(`Phone: ${orgPhone}`, rightX, rightY, {
               width: rightColumnWidth,
               align: 'right',
             });
-            rightY += 14;
+            rightY += 10;
           }
           if (orgEmail) {
-            doc.fontSize(10).font((doc as any)._fontRegular).fillColor(colors.text);
             doc.text(`Email: ${orgEmail}`, rightX, rightY, {
               width: rightColumnWidth,
               align: 'right',
             });
-            rightY += 14;
+            rightY += 10;
           }
           if (orgTrn) {
-            doc.fontSize(10).font((doc as any)._fontRegular).fillColor(colors.text);
             doc.text(`TRN: ${orgTrn}`, rightX, rightY, {
               width: rightColumnWidth,
               align: 'right',
             });
-            rightY += 14;
           }
 
-          currentY = companyBoxY + companyBoxHeight + 8;
+          currentY = companyBoxY + companyBoxHeight + 4;
         } else {
-          currentY += 12;
+          currentY += 6;
         }
 
         // ============================================================================
-        // INVOICE DETAILS BOX (3-column layout: Bill To / Invoice Details / Commercial)
+        // INVOICE DETAILS BOX (3-column: Bill To / Invoice Details / Commercial) — compact
         // ============================================================================
         const boxY = currentY;
 
-        // Three equal-width columns inside the box with better spacing
-        const innerX = margin + 24; // Increased padding
-        const innerWidth = contentWidth - 48; // More padding on sides
-        const columnGap = 24; // Increased gap between columns
+        const innerX = margin + 12;
+        const innerWidth = contentWidth - 24;
+        const columnGap = 12;
         const columnWidth = (innerWidth - columnGap * 2) / 3;
 
         const billToX = innerX;
         const invoiceX = innerX + columnWidth + columnGap;
         const commercialX = innerX + (columnWidth + columnGap) * 2;
-        // Constrain commercial column width to prevent overflow past page edge
         const commercialColumnWidth = Math.min(
           columnWidth,
-          margin + contentWidth - commercialX - 8,
+          margin + contentWidth - commercialX - 6,
         );
 
-        const colHeaderGap = 14; // Increased spacing after header
-        const lineGap = 8; // Increased spacing between lines for better readability
+        const colHeaderGap = 14; // Clear gap below BILL TO / INVOICE DETAILS / COMMERCIAL DETAILS headings
+        const lineGap = 4;
 
         // Build commercial lines list first so we can compute box height
         const commercialLines: { label: string; value: string }[] = [];
@@ -8068,7 +8036,7 @@ export class ReportGeneratorService {
         }
 
         const headerHeight =
-          Math.ceil(Math.max(billToContentH, invoiceContentH, commercialContentH)) + 24; // +24 for bottom padding
+          Math.ceil(Math.max(billToContentH, invoiceContentH, commercialContentH)) + 14;
 
         // Draw premium background box with border
         doc
@@ -8121,8 +8089,8 @@ export class ReportGeneratorService {
           return height;
         };
 
-        // Column 1 - BILL TO (improved formatting with consistent bold labels)
-        let billToY = boxY + 18; // Slightly more top padding
+        // Column 1 - BILL TO
+        let billToY = boxY + 10;
         // customerName, customerAddress, etc. already set in measurement block above
         doc.fontSize(8).font((doc as any)._fontBold).fillColor(colors.text);
         doc.text('BILL TO:', billToX, billToY, { width: columnWidth });
@@ -8177,8 +8145,8 @@ export class ReportGeneratorService {
           billToY += h + lineGap;
         }
 
-        // Column 2 - INVOICE DETAILS (improved spacing and formatting)
-        let invoiceY = boxY + 18; // Slightly more top padding
+        // Column 2 - INVOICE DETAILS
+        let invoiceY = boxY + 10;
         doc.fontSize(8).font((doc as any)._fontBold).fillColor(colors.text);
         doc.text('INVOICE DETAILS', invoiceX, invoiceY, { width: columnWidth });
         invoiceY += colHeaderGap;
@@ -8245,8 +8213,8 @@ export class ReportGeneratorService {
           invoiceY += h + lineGap;
         }
 
-        // Column 3 - COMMERCIAL DETAILS (improved spacing, constrained width to prevent overflow)
-        let commercialY = boxY + 18; // Slightly more top padding
+        // Column 3 - COMMERCIAL DETAILS
+        let commercialY = boxY + 10;
         doc.fontSize(8).font((doc as any)._fontBold).fillColor(colors.text);
         doc.text('COMMERCIAL DETAILS', commercialX, commercialY, {
           width: commercialColumnWidth,
@@ -8264,21 +8232,22 @@ export class ReportGeneratorService {
           commercialY += lh + lineGap;
         }
 
-        // Position next section below the tallest column or the fixed box height
-        // Add extra spacing for better visual separation
         const headerBottomY = Math.max(billToY, invoiceY, commercialY);
-        currentY = Math.max(headerBottomY + 6, boxY + headerHeight + 6);
+        currentY = Math.max(headerBottomY + 2, boxY + headerHeight + 4);
 
         // ============================================================================
-        // LINE ITEMS TABLE - Columns: Item, VAT Rate, Quantity, Rate, Amount, VAT, Total
+        // LINE ITEMS TABLE — compact, single-page (cap visible rows)
         // ============================================================================
         const lineItems = invoice.lineItems || [];
+        const maxVisibleRows = 10; // Fit on one A4 page with totals/notes/footer
+        const visibleItems = lineItems.slice(0, maxVisibleRows);
+        const remainingCount = lineItems.length - visibleItems.length;
+
         const tableTop = currentY;
         const tableStartX = margin;
 
-        // Column widths: Item (with SKU), VAT Rate, Quantity, Rate, Amount, VAT, Total
         const tableWidth = contentWidth;
-        const padding = 6;
+        const padding = 4;
         const totalPaddingPerColumn = padding * 2;
         const numColumns = 7;
         const totalPaddingForAllColumns = totalPaddingPerColumn * numColumns;
@@ -8293,109 +8262,73 @@ export class ReportGeneratorService {
           vat: Math.floor(availableWidth * 0.14),
           total: Math.floor(availableWidth * 0.15),
         };
-        const rowHeight = 36; // Room for Item + SKU
+        const rowHeight = 18; // Compact for single page
 
-        // Table Header row - Premium dark background with white text
         let tableX = tableStartX;
         const headerY = tableTop;
 
-        // Draw dark header background
         doc
           .fillColor(colors.backgroundDark)
           .rect(tableStartX, headerY, tableWidth, rowHeight)
           .fill();
 
-        doc.fontSize(9).font((doc as any)._fontBold).fillColor('#ffffff');
+        doc.fontSize(8).font((doc as any)._fontBold).fillColor('#ffffff');
 
-        doc.text('Item', tableX + padding, headerY + 12, {
+        const headerTextY = headerY + (rowHeight - 10) / 2;
+        doc.text('Item', tableX + padding, headerTextY, {
           width: colWidths.item,
         });
         tableX += colWidths.item + totalPaddingPerColumn;
-        doc.text('VAT Rate', tableX + padding, headerY + 12, {
+        doc.text('VAT Rate', tableX + padding, headerTextY, {
           align: 'right',
           width: colWidths.vatRate,
         });
         tableX += colWidths.vatRate + totalPaddingPerColumn;
-        doc.text('Quantity', tableX + padding, headerY + 12, {
+        doc.text('Qty', tableX + padding, headerTextY, {
           align: 'right',
           width: colWidths.quantity,
         });
         tableX += colWidths.quantity + totalPaddingPerColumn;
-        doc.text('Rate', tableX + padding, headerY + 12, {
+        doc.text('Rate', tableX + padding, headerTextY, {
           align: 'right',
           width: colWidths.rate,
         });
         tableX += colWidths.rate + totalPaddingPerColumn;
-        doc.text('Amount', tableX + padding, headerY + 12, {
+        doc.text('Amount', tableX + padding, headerTextY, {
           align: 'right',
           width: colWidths.amount,
         });
         tableX += colWidths.amount + totalPaddingPerColumn;
-        doc.text('VAT', tableX + padding, headerY + 12, {
+        doc.text('VAT', tableX + padding, headerTextY, {
           align: 'right',
           width: colWidths.vat,
         });
         tableX += colWidths.vat + totalPaddingPerColumn;
-        doc.text('Total', tableX + padding, headerY + 12, {
+        doc.text('Total', tableX + padding, headerTextY, {
           align: 'right',
           width: colWidths.total,
         });
 
         let rowY = headerY + rowHeight;
 
-        const drawLineItemsTableHeader = (y: number) => {
-          let x = tableStartX;
-          doc.fontSize(9).font((doc as any)._fontBold).fillColor('#ffffff');
-          doc.text('Item', x + padding, y + 12, { width: colWidths.item });
-          x += colWidths.item + totalPaddingPerColumn;
-          doc.text('VAT Rate', x + padding, y + 12, {
-            align: 'right',
-            width: colWidths.vatRate,
-          });
-          x += colWidths.vatRate + totalPaddingPerColumn;
-          doc.text('Quantity', x + padding, y + 12, {
-            align: 'right',
-            width: colWidths.quantity,
-          });
-          x += colWidths.quantity + totalPaddingPerColumn;
-          doc.text('Rate', x + padding, y + 12, {
-            align: 'right',
-            width: colWidths.rate,
-          });
-          x += colWidths.rate + totalPaddingPerColumn;
-          doc.text('Amount', x + padding, y + 12, {
-            align: 'right',
-            width: colWidths.amount,
-          });
-          x += colWidths.amount + totalPaddingPerColumn;
-          doc.text('VAT', x + padding, y + 12, {
-            align: 'right',
-            width: colWidths.vat,
-          });
-          x += colWidths.vat + totalPaddingPerColumn;
-          doc.text('Total', x + padding, y + 12, {
-            align: 'right',
-            width: colWidths.total,
-          });
-        };
-
-        // Running totals for summary row
+        // Totals from ALL line items (for summary row)
         let sumQuantity = 0;
         let sumAmount = 0;
         let sumTotal = 0;
+        lineItems.forEach((item: any) => {
+          const amount = parseFloat(item.amount || '0');
+          const vatAmount = parseFloat(item.vatAmount || '0');
+          const lineTotalAmount = parseFloat(
+            item.totalAmount || String(amount + vatAmount),
+          );
+          sumQuantity += parseFloat(item.quantity || '0');
+          sumAmount += amount;
+          sumTotal += lineTotalAmount;
+        });
 
-        // Table Rows - Item, VAT Rate, Quantity, Rate, Amount, VAT, Total
-        lineItems.forEach((item: any, index: number) => {
-          if (rowY + rowHeight > doc.page.height - 150) {
-            doc.addPage();
-            rowY = margin + 40;
-            doc
-              .fillColor(colors.backgroundDark)
-              .rect(tableStartX, rowY, tableWidth, rowHeight)
-              .fill();
-            drawLineItemsTableHeader(rowY);
-            rowY += rowHeight;
-          }
+        // Table rows — only visible items (single-page, no addPage)
+        visibleItems.forEach((item: any, index: number) => {
+          const rowTextY = rowY + (rowHeight - 10) / 2;
 
           if (index % 2 === 0) {
             doc
@@ -8405,46 +8338,22 @@ export class ReportGeneratorService {
           }
 
           tableX = tableStartX;
-          doc.fontSize(9).font((doc as any)._fontRegular).fillColor(colors.text);
+          doc.fontSize(8).font((doc as any)._fontRegular).fillColor(colors.text);
 
           const amount = parseFloat(item.amount || '0');
           const vatAmount = parseFloat(item.vatAmount || '0');
           const lineTotalAmount = parseFloat(
             item.totalAmount || String(amount + vatAmount),
           );
-          sumQuantity += parseFloat(item.quantity || '0');
-          sumAmount += amount;
-          sumTotal += lineTotalAmount;
 
-          // Item name + SKU (smaller) + notes (muted, under item name)
           const itemName = item.itemName || '';
           const sku =
             item.product?.sku || (item as any).sku || (item as any).productSku || '';
-          const rawNotes = (item as any).notes;
-          const lineNotes =
-            rawNotes != null && String(rawNotes).trim() !== ''
-              ? String(rawNotes).trim()
-              : '';
-          let itemTextY = rowY + 8;
-          doc.text(itemName, tableX + padding, itemTextY, {
+          const itemLabel = sku ? `${itemName} (${sku})` : itemName;
+          doc.text(itemLabel, tableX + padding, rowTextY, {
             width: colWidths.item,
+            ellipsis: true,
           });
-          itemTextY += 12;
-          if (sku) {
-            doc.fontSize(8).fillColor(colors.textLight);
-            doc.text(sku, tableX + padding, itemTextY, {
-              width: colWidths.item,
-            });
-            itemTextY += 10;
-            doc.fontSize(9).fillColor(colors.text);
-          }
-          if (lineNotes) {
-            doc.fontSize(8).fillColor(colors.textLight);
-            doc.text(lineNotes, tableX + padding, itemTextY, {
-              width: colWidths.item,
-            });
-            doc.fontSize(9).fillColor(colors.text);
-          }
           tableX += colWidths.item + totalPaddingPerColumn;
 
           const vatTaxType = (item.vatTaxType || '').toLowerCase();
@@ -8452,7 +8361,7 @@ export class ReportGeneratorService {
             vatTaxType === 'zero_rated' || vatTaxType === 'exempt'
               ? '0'
               : item.vatRate || '5';
-          doc.text(`${displayVatRate}%`, tableX + padding, rowY + 12, {
+          doc.text(`${displayVatRate}%`, tableX + padding, rowTextY, {
             align: 'right',
             width: colWidths.vatRate,
           });
@@ -8463,7 +8372,7 @@ export class ReportGeneratorService {
           doc.text(
             `${formatAmount(qty).replace(/,/g, '')} ${unit}`,
             tableX + padding,
-            rowY + 12,
+            rowTextY,
             { align: 'right', width: colWidths.quantity },
           );
           tableX += colWidths.quantity + totalPaddingPerColumn;
@@ -8472,7 +8381,7 @@ export class ReportGeneratorService {
           doc.text(
             `${formatAmount(unitPrice)} ${currency}`,
             tableX + padding,
-            rowY + 12,
+            rowTextY,
             { align: 'right', width: colWidths.rate },
           );
           tableX += colWidths.rate + totalPaddingPerColumn;
@@ -8480,7 +8389,7 @@ export class ReportGeneratorService {
           doc.text(
             `${formatAmount(amount)} ${currency}`,
             tableX + padding,
-            rowY + 12,
+            rowTextY,
             { align: 'right', width: colWidths.amount },
           );
           tableX += colWidths.amount + totalPaddingPerColumn;
@@ -8488,7 +8397,7 @@ export class ReportGeneratorService {
           doc.text(
             `${formatAmount(vatAmount)} ${currency}`,
             tableX + padding,
-            rowY + 12,
+            rowTextY,
             { align: 'right', width: colWidths.vat },
           );
           tableX += colWidths.vat + totalPaddingPerColumn;
@@ -8496,7 +8405,7 @@ export class ReportGeneratorService {
           doc.text(
             `${formatAmount(lineTotalAmount)} ${currency}`,
             tableX + padding,
-            rowY + 12,
+            rowTextY,
             { align: 'right', width: colWidths.total },
           );
 
@@ -8509,19 +8418,41 @@ export class ReportGeneratorService {
           rowY += rowHeight;
         });
 
+        // "... + N more items" row when line items exceed visible cap
+        if (remainingCount > 0) {
+          doc
+            .fillColor(colors.backgroundLight)
+            .rect(tableStartX, rowY, tableWidth, rowHeight)
+            .fill();
+          doc.fontSize(8).font((doc as any)._fontRegular).fillColor(colors.textLight);
+          doc.text(
+            `… + ${remainingCount} more item${remainingCount !== 1 ? 's' : ''}`,
+            tableStartX + padding,
+            rowY + (rowHeight - 10) / 2,
+            { width: colWidths.item },
+          );
+          doc.strokeColor(colors.borderLight).lineWidth(0.5);
+          doc
+            .moveTo(tableStartX, rowY + rowHeight)
+            .lineTo(tableStartX + tableWidth, rowY + rowHeight)
+            .stroke();
+          rowY += rowHeight;
+        }
+
         // Total summary row
         doc
           .fillColor(colors.backgroundLight)
           .rect(tableStartX, rowY, tableWidth, rowHeight)
           .fill();
-        doc.fontSize(10).font((doc as any)._fontBold).fillColor(colors.text);
+        const totalRowTextY = rowY + (rowHeight - 10) / 2;
+        doc.fontSize(9).font((doc as any)._fontBold).fillColor(colors.text);
 
         tableX = tableStartX;
-        doc.text('Total', tableX + padding, rowY + 12, {
+        doc.text('Total', tableX + padding, totalRowTextY, {
           width: colWidths.item,
         });
         tableX += colWidths.item + totalPaddingPerColumn;
-        doc.text('', tableX + padding, rowY + 12, {
+        doc.text('', tableX + padding, totalRowTextY, {
           align: 'right',
           width: colWidths.vatRate,
         });
@@ -8529,11 +8460,11 @@ export class ReportGeneratorService {
         doc.text(
           formatAmount(sumQuantity).replace(/,/g, ''),
           tableX + padding,
-          rowY + 12,
+          totalRowTextY,
           { align: 'right', width: colWidths.quantity },
         );
         tableX += colWidths.quantity + totalPaddingPerColumn;
-        doc.text('', tableX + padding, rowY + 12, {
+        doc.text('', tableX + padding, totalRowTextY, {
           align: 'right',
           width: colWidths.rate,
         });
@@ -8541,11 +8472,11 @@ export class ReportGeneratorService {
         doc.text(
           `${formatAmount(sumAmount)} ${currency}`,
           tableX + padding,
-          rowY + 12,
+          totalRowTextY,
           { align: 'right', width: colWidths.amount },
         );
         tableX += colWidths.amount + totalPaddingPerColumn;
-        doc.text('', tableX + padding, rowY + 12, {
+        doc.text('', tableX + padding, totalRowTextY, {
           align: 'right',
           width: colWidths.vat,
         });
@@ -8553,7 +8484,7 @@ export class ReportGeneratorService {
         doc.text(
           `${formatAmount(sumTotal)} ${currency}`,
           tableX + padding,
-          rowY + 12,
+          totalRowTextY,
           { align: 'right', width: colWidths.total },
         );
 
@@ -8565,22 +8496,21 @@ export class ReportGeneratorService {
           .lineTo(tableStartX + tableWidth, rowY)
           .stroke();
 
-        const sectionGap = 10; // Consistent gap: item table → totals, totals → bank/notes
+        const sectionGap = 6;
         currentY = rowY + sectionGap;
 
-        // Reverse charge statement (UAE VAT: when any line has REVERSE_CHARGE)
         const hasReverseCharge = lineItems.some(
           (li: any) => (li.vatTaxType || '').toLowerCase() === 'reverse_charge',
         );
         if (hasReverseCharge) {
-          doc.fontSize(9).font('Helvetica-Oblique').fillColor(colors.textLight);
+          doc.fontSize(8).font('Helvetica-Oblique').fillColor(colors.textLight);
           doc.text(
             'VAT is payable by the recipient under the reverse charge mechanism (UAE VAT Law).',
             margin,
             currentY,
             { width: contentWidth },
           );
-          currentY += 20;
+          currentY += 12;
         }
 
         // ============================================================================
@@ -8602,13 +8532,11 @@ export class ReportGeneratorService {
         const subtotal = parseFloat(invoice.amount || '0');
         const totalAmount = parseFloat(invoice.totalAmount || '0');
 
-        // Both boxes use the same width and height
         const totalsBoxY = currentY;
-        const boxInternalPadding = 12; // Padding from text to box border (tight for single-page)
-        let totalsBoxHeight = 98;
-        if (discountAmount > 0) totalsBoxHeight += 16;
+        const boxInternalPadding = 8;
+        let totalsBoxHeight = 62;
+        if (discountAmount > 0) totalsBoxHeight += 12;
 
-        // Amount chargeable in words - box on the left (same width & height as totals box)
         const totalNumeric =
           typeof totalAmount === 'string'
             ? parseFloat(totalAmount || '0')
@@ -8621,26 +8549,26 @@ export class ReportGeneratorService {
             .fill();
           doc
             .strokeColor(colors.border)
-            .lineWidth(1)
+            .lineWidth(0.5)
             .rect(margin, totalsBoxY, amountWordsBoxWidth, totalsBoxHeight)
             .stroke();
           doc
             .fillColor(colors.primary)
-            .rect(margin, totalsBoxY, 4, totalsBoxHeight)
+            .rect(margin, totalsBoxY, 3, totalsBoxHeight)
             .fill();
           const wordsContentY = totalsBoxY + boxInternalPadding;
           const wordsTextWidth = amountWordsBoxWidth - boxInternalPadding * 2;
-          doc.fontSize(9).font((doc as any)._fontBold).fillColor(colors.textLight);
+          doc.fontSize(8).font((doc as any)._fontBold).fillColor(colors.textLight);
           doc.text(
             'Amount Chargeable (in words):',
             margin + boxInternalPadding,
             wordsContentY,
             { width: wordsTextWidth },
           );
-          doc.fontSize(9).font((doc as any)._fontBold).fillColor(colors.text);
+          doc.fontSize(8).font((doc as any)._fontBold).fillColor(colors.text);
           const currencyLabel = (metadata.currency || 'AED').toUpperCase();
           const wordsLine = `${currencyLabel} ${amountInWords} Only`;
-          doc.text(wordsLine, margin + boxInternalPadding, wordsContentY + 14, {
+          doc.text(wordsLine, margin + boxInternalPadding, wordsContentY + 10, {
             width: wordsTextWidth,
           });
         }
@@ -8658,67 +8586,59 @@ export class ReportGeneratorService {
           .fill();
         doc
           .strokeColor(colors.border)
-          .lineWidth(1)
+          .lineWidth(0.5)
           .rect(totalsBoxLeft, totalsBoxY, totalsBoxWidth, totalsBoxHeight)
           .stroke();
 
         let totalsY = totalsBoxY + boxInternalPadding;
 
-        // Subtotal row
-        doc.fontSize(10).font((doc as any)._fontBold).fillColor(colors.text);
+        doc.fontSize(9).font((doc as any)._fontBold).fillColor(colors.text);
         doc.text('Subtotal:', totalsLabelX, totalsY);
-        doc.font((doc as any)._fontBold).fillColor(colors.text);
         doc.text(
           `${formatAmount(subtotal)} ${currency}`,
           totalsValueX,
           totalsY,
           { width: totalsValueWidth, align: 'right' },
         );
-        totalsY += 20;
+        totalsY += 14;
 
-        // Discount row (UAE VAT: if applicable)
         if (discountAmount > 0) {
-          doc.fontSize(10).font((doc as any)._fontBold).fillColor(colors.text);
+          doc.fontSize(9).font((doc as any)._fontBold).fillColor(colors.text);
           doc.text('Discount:', totalsLabelX, totalsY);
-          doc.font((doc as any)._fontBold).fillColor(colors.text);
           doc.text(
             `-${formatAmount(discountAmount)} ${currency}`,
             totalsValueX,
             totalsY,
             { width: totalsValueWidth, align: 'right' },
           );
-          totalsY += 20;
+          totalsY += 14;
         }
 
-        // VAT row
         const taxBase = subtotal - discountAmount;
         const effectiveVatRate =
           taxBase > 0 && totalVat >= 0
             ? ((totalVat / taxBase) * 100).toFixed(1)
             : '5';
-        doc.fontSize(10).font((doc as any)._fontBold).fillColor(colors.text);
+        doc.fontSize(9).font((doc as any)._fontBold).fillColor(colors.text);
         doc.text(`VAT @ ${effectiveVatRate}%:`, totalsLabelX, totalsY);
-        doc.font((doc as any)._fontBold).fillColor(colors.text);
         doc.text(
           `${formatAmount(totalVat)} ${currency}`,
           totalsValueX,
           totalsY,
           { width: totalsValueWidth, align: 'right' },
         );
-        totalsY += 24;
+        totalsY += 16;
 
-        // Separator line before total (inside padded area)
-        doc.strokeColor(colors.border).lineWidth(1);
+        doc.strokeColor(colors.border).lineWidth(0.5);
         doc
           .moveTo(totalsLabelX, totalsY)
           .lineTo(totalsBoxRight - boxInternalPadding, totalsY)
           .stroke();
-        totalsY += 18;
+        totalsY += 10;
 
-        // Total Amount row
-        doc.fontSize(10).font((doc as any)._fontBold).fillColor(colors.text);
+        doc.fontSize(9).font((doc as any)._fontBold).fillColor(colors.text);
         doc.text('Total Amount:', totalsLabelX, totalsY);
-        doc.fontSize(10).fillColor(colors.primary);
+        doc.fontSize(9).fillColor(colors.primary);
         doc.text(
           `${formatAmount(totalAmount)} ${currency}`,
           totalsValueX,
@@ -8739,30 +8659,44 @@ export class ReportGeneratorService {
             organization.bankName ||
             organization.bankAccountHolder);
         const invoiceNotes = ((invoice as any).notes || '') as string;
-        const effectiveNotes =
+        let effectiveNotes =
           invoiceNotes && invoiceNotes.trim().length > 0
             ? invoiceNotes
             : (templateSettings.defaultNotes || '');
+        // Normalize notes: replace single newlines with spaces so text flows as a
+        // paragraph (fixes pasted lists where each word was on its own line).
+        // Preserve double newlines as paragraph breaks.
+        effectiveNotes = effectiveNotes
+          .replace(/\r\n/g, '\n')
+          .replace(/\r/g, '\n')
+          .replace(/\n{3,}/g, '\n\n') // collapse 3+ newlines to 2
+          .replace(/([^\n])\n([^\n])/g, '$1 $2') // single newline -> space
+          .replace(/[ \t]+/g, ' ') // collapse spaces/tabs only (preserve \n)
+          .trim();
         const hasNotes =
           effectiveNotes && effectiveNotes.trim().length > 0;
         const hasTerms =
           templateSettings.showTermsAndConditions &&
           templateSettings.termsAndConditions &&
           templateSettings.termsAndConditions.trim().length > 0;
+        // Normalize T&C the same way as notes (flow as paragraph, preserve intentional breaks)
+        const effectiveTerms = hasTerms
+          ? (templateSettings.termsAndConditions || '')
+              .replace(/\r\n/g, '\n')
+              .replace(/\r/g, '\n')
+              .replace(/\n{3,}/g, '\n\n')
+              .replace(/([^\n])\n([^\n])/g, '$1 $2')
+              .replace(/[ \t]+/g, ' ')
+              .trim()
+          : '';
 
         if (hasBankDetails || hasNotes || hasTerms) {
-          if (currentY > doc.page.height - 200) {
-            doc.addPage();
-            currentY = margin + 40;
-          }
-
           const bankBoxWidth = Math.floor(contentWidth * 0.4);
-          const gapBetweenColumns = 20;
+          const gapBetweenColumns = 12;
           const rightColumnLeft = margin + bankBoxWidth + gapBetweenColumns;
           const rightColumnWidth = contentWidth - bankBoxWidth - gapBetweenColumns;
           const sectionStartY = currentY;
 
-          // Bank box height (left 40%)
           let bankBoxHeight = 0;
           if (hasBankDetails) {
             let bankDetailCount = 0;
@@ -8772,42 +8706,37 @@ export class ReportGeneratorService {
             if (organization.bankIban) bankDetailCount++;
             if (organization.bankBranch) bankDetailCount++;
             if (organization.bankSwiftCode) bankDetailCount++;
-            bankBoxHeight = Math.max(bankDetailCount * 13 + 28, 44);
+            bankBoxHeight = Math.max(bankDetailCount * 10 + 20, 36);
           }
 
-        // Notes box height (right 60% top) - use invoice notes when present, otherwise default notes
           let notesBoxHeight = 0;
           if (hasNotes) {
-            doc.fontSize(10).font((doc as any)._fontRegular);
+            doc.fontSize(8).font((doc as any)._fontRegular);
             const notesTextHeight = doc.heightOfString(effectiveNotes, {
-              width: rightColumnWidth - 24,
+              width: rightColumnWidth - 20,
             });
-            // top pad (12) + title line (14) + content + bottom pad (12) + safety margin (8)
-            notesBoxHeight = Math.ceil(12 + 14 + notesTextHeight + 12 + 8);
-            notesBoxHeight = Math.max(notesBoxHeight, 52);
+            notesBoxHeight = Math.ceil(8 + 10 + notesTextHeight + 8 + 4);
+            notesBoxHeight = Math.min(Math.max(notesBoxHeight, 36), 72);
           }
 
-          // Terms box height (right 60% below notes) - fit actual content
           let termsBoxHeight = 0;
           if (hasTerms) {
-            doc.fontSize(10).font((doc as any)._fontRegular);
+            doc.fontSize(8).font((doc as any)._fontRegular);
             const termsTextHeight = doc.heightOfString(
-              templateSettings.termsAndConditions,
-              { width: rightColumnWidth - 24 },
+              effectiveTerms,
+              { width: rightColumnWidth - 20 },
             );
-            // top pad (12) + title (14) + content + bottom pad (12) + safety margin (8)
-            termsBoxHeight = Math.ceil(12 + 14 + termsTextHeight + 12 + 8);
-            termsBoxHeight = Math.max(termsBoxHeight, 52);
+            termsBoxHeight = Math.ceil(8 + 10 + termsTextHeight + 8 + 4);
+            termsBoxHeight = Math.min(Math.max(termsBoxHeight, 36), 60);
           }
 
-          const gapBetweenNotesAndTerms = 6;
+          const gapBetweenNotesAndTerms = 4;
           const rightColumnHeight =
             notesBoxHeight +
             (hasNotes && hasTerms ? gapBetweenNotesAndTerms : 0) +
             termsBoxHeight;
           const rowHeight = Math.max(bankBoxHeight, rightColumnHeight);
 
-          // --- Bank Details box: 40% width, left-aligned
           if (hasBankDetails) {
             const bankBoxY = sectionStartY;
             doc
@@ -8816,66 +8745,64 @@ export class ReportGeneratorService {
               .fill();
             doc
               .strokeColor(colors.border)
-              .lineWidth(1)
+              .lineWidth(0.5)
               .rect(margin, bankBoxY, bankBoxWidth, bankBoxHeight)
               .stroke();
             doc
               .fillColor(colors.primary)
-              .rect(margin, bankBoxY, 4, bankBoxHeight)
+              .rect(margin, bankBoxY, 3, bankBoxHeight)
               .fill();
-            const bankContentStartY = bankBoxY + 10;
-            doc.fontSize(10).font((doc as any)._fontBold).fillColor(colors.text);
-            doc.text('Bank Details:', margin + 12, bankContentStartY);
-            let bankY = bankContentStartY + 12;
-            doc.fontSize(10).font((doc as any)._fontRegular).fillColor(colors.text);
+            const bankContentStartY = bankBoxY + 6;
+            doc.fontSize(8).font((doc as any)._fontBold).fillColor(colors.text);
+            doc.text('Bank Details:', margin + 8, bankContentStartY);
+            let bankY = bankContentStartY + 10;
+            doc.fontSize(8).font((doc as any)._fontRegular).fillColor(colors.text);
             if (organization.bankAccountHolder) {
               doc.text(
                 `Account Holder: ${organization.bankAccountHolder}`,
-                margin + 12,
+                margin + 8,
                 bankY,
-                { width: bankBoxWidth - 24 },
+                { width: bankBoxWidth - 16 },
               );
-              bankY += 13;
+              bankY += 10;
             }
             if (organization.bankName) {
-              doc.text(`Bank: ${organization.bankName}`, margin + 12, bankY, {
-                width: bankBoxWidth - 24,
+              doc.text(`Bank: ${organization.bankName}`, margin + 8, bankY, {
+                width: bankBoxWidth - 16,
               });
-              bankY += 13;
+              bankY += 10;
             }
             if (organization.bankAccountNumber) {
               doc.text(
                 `Account Number: ${organization.bankAccountNumber}`,
-                margin + 12,
+                margin + 8,
                 bankY,
-                { width: bankBoxWidth - 24 },
+                { width: bankBoxWidth - 16 },
               );
-              bankY += 13;
+              bankY += 10;
             }
             if (organization.bankIban) {
-              doc.text(`IBAN: ${organization.bankIban}`, margin + 12, bankY, {
-                width: bankBoxWidth - 24,
+              doc.text(`IBAN: ${organization.bankIban}`, margin + 8, bankY, {
+                width: bankBoxWidth - 16,
               });
-              bankY += 13;
+              bankY += 10;
             }
             if (organization.bankBranch) {
-              doc.text(`Branch: ${organization.bankBranch}`, margin + 12, bankY, {
-                width: bankBoxWidth - 24,
+              doc.text(`Branch: ${organization.bankBranch}`, margin + 8, bankY, {
+                width: bankBoxWidth - 16,
               });
-              bankY += 13;
+              bankY += 10;
             }
             if (organization.bankSwiftCode) {
               doc.text(
-                `SWIFT Code: ${organization.bankSwiftCode}`,
-                margin + 12,
+                `SWIFT: ${organization.bankSwiftCode}`,
+                margin + 8,
                 bankY,
-                { width: bankBoxWidth - 24 },
+                { width: bankBoxWidth - 16 },
               );
-              bankY += 13;
             }
           }
 
-          // --- Notes box: right 60%, top
           if (hasNotes) {
             const notesBoxY = sectionStartY;
             doc
@@ -8884,26 +8811,25 @@ export class ReportGeneratorService {
               .fill();
             doc
               .strokeColor(colors.border)
-              .lineWidth(1)
+              .lineWidth(0.5)
               .rect(rightColumnLeft, notesBoxY, rightColumnWidth, notesBoxHeight)
               .stroke();
             doc
               .fillColor(colors.primary)
-              .rect(rightColumnLeft, notesBoxY, 4, notesBoxHeight)
+              .rect(rightColumnLeft, notesBoxY, 3, notesBoxHeight)
               .fill();
-            const notesContentStartY = notesBoxY + 12;
-            doc.fontSize(10).font((doc as any)._fontBold).fillColor(colors.text);
-            doc.text('Notes:', rightColumnLeft + 12, notesContentStartY);
-            doc.fontSize(10).font((doc as any)._fontRegular).fillColor(colors.text);
+            const notesContentStartY = notesBoxY + 8;
+            doc.fontSize(8).font((doc as any)._fontBold).fillColor(colors.text);
+            doc.text('Notes:', rightColumnLeft + 8, notesContentStartY);
+            doc.fontSize(8).font((doc as any)._fontRegular).fillColor(colors.text);
             doc.text(
               effectiveNotes,
-              rightColumnLeft + 12,
-              notesContentStartY + 16,
-              { width: rightColumnWidth - 24 },
+              rightColumnLeft + 8,
+              notesContentStartY + 12,
+              { width: rightColumnWidth - 20 },
             );
           }
 
-          // --- Terms & Conditions box: right 60%, below notes
           if (hasTerms) {
             const termsBoxY =
               sectionStartY +
@@ -8915,59 +8841,48 @@ export class ReportGeneratorService {
               .fill();
             doc
               .strokeColor(colors.border)
-              .lineWidth(1)
+              .lineWidth(0.5)
               .rect(rightColumnLeft, termsBoxY, rightColumnWidth, termsBoxHeight)
               .stroke();
             doc
               .fillColor(colors.primary)
-              .rect(rightColumnLeft, termsBoxY, 4, termsBoxHeight)
+              .rect(rightColumnLeft, termsBoxY, 3, termsBoxHeight)
               .fill();
-            const termsContentStartY = termsBoxY + 12;
-            doc.fontSize(10).font((doc as any)._fontBold).fillColor(colors.text);
+            const termsContentStartY = termsBoxY + 8;
+            doc.fontSize(8).font((doc as any)._fontBold).fillColor(colors.text);
             doc.text(
               'Terms & Conditions:',
-              rightColumnLeft + 12,
+              rightColumnLeft + 8,
               termsContentStartY,
             );
-            doc.fontSize(10).font((doc as any)._fontRegular).fillColor(colors.text);
+            doc.fontSize(8).font((doc as any)._fontRegular).fillColor(colors.text);
             doc.text(
-              templateSettings.termsAndConditions,
-              rightColumnLeft + 12,
-              termsContentStartY + 16,
-              { width: rightColumnWidth - 24 },
+              effectiveTerms,
+              rightColumnLeft + 8,
+              termsContentStartY + 12,
+              { width: rightColumnWidth - 20 },
             );
           }
 
-          currentY = sectionStartY + rowHeight + 12;
+          currentY = sectionStartY + rowHeight + 6;
         }
 
         // ============================================================================
-        // AUTHORISED SIGNATORY + FOOTER - flow directly after content (no large gap)
+        // AUTHORISED SIGNATORY + FOOTER (compact, single-page)
         // ============================================================================
-        const footerReservedSpace = 100;
-        const gapBeforeSignatory = 18; // Tight gap so QR/signatory stay on first page
-        let footerY = currentY + gapBeforeSignatory;
+        const gapBeforeSignatory = 8;
+        const footerY = currentY + gapBeforeSignatory;
 
-        // If signatory + footer would run off the page, add a new page
-        if (footerY > doc.page.height - footerReservedSpace - 12) {
-          doc.addPage();
-          currentY = margin + 40;
-          footerY = currentY;
-        }
-
-        // QR + Signatory footer row (QR left, signatory right, vertically aligned) - compact for single-page
-        const qrSizePx = 62;
+        const qrSizePx = 48;
         const hasSignature = Boolean(
           (templateSettings as any).signatureBuffer,
         );
-        const signatoryBlockHeight = hasSignature ? 72 : 46;
+        const signatoryBlockHeight = hasSignature ? 52 : 32;
 
-        // Signatory block on the right edge
-        const signatoryBlockWidth = 220;
+        const signatoryBlockWidth = 180;
         const signatoryX = margin + contentWidth - signatoryBlockWidth;
         const signatoryY = footerY;
 
-        // QR Code (UAE e-invoicing) - aligned vertically with signatory, at left edge
         const qrX = margin;
         const qrY = signatoryY;
         if (qrBuffer) {
@@ -8976,8 +8891,8 @@ export class ReportGeneratorService {
               width: qrSizePx,
               height: qrSizePx,
             });
-            doc.fontSize(7).font((doc as any)._fontRegular).fillColor(colors.textMuted);
-            doc.text('QR Code for validation', qrX, qrY + qrSizePx + 4, {
+            doc.fontSize(6).font((doc as any)._fontRegular).fillColor(colors.textMuted);
+            doc.text('QR', qrX, qrY + qrSizePx + 2, {
               width: qrSizePx,
               align: 'center',
             });
@@ -8986,55 +8901,47 @@ export class ReportGeneratorService {
           }
         }
 
-        doc.fontSize(9).font((doc as any)._fontBold).fillColor(colors.text);
-        doc.text(
-          `For ${organization?.name || 'the Company'}`,
-          signatoryX,
-          signatoryY,
-          { width: signatoryBlockWidth, align: 'right' },
-        );
-
         const signatureBuffer = templateSettings.signatureBuffer as
           | Buffer
           | undefined;
-        const signatureHeight = 28;
-        const lineY = signatureBuffer
-          ? signatoryY + 10 + signatureHeight + 4
-          : signatoryY + 24;
+        const signatureHeight = 24;
+        const signatureDisplayWidth = 100; // Centered in block
+        const signatureX = signatoryX + (signatoryBlockWidth - signatureDisplayWidth) / 2;
 
         if (signatureBuffer) {
           try {
-            doc.image(signatureBuffer, signatoryX, signatoryY + 10, {
-              width: signatoryBlockWidth,
+            doc.image(signatureBuffer, signatureX, signatoryY, {
+              width: signatureDisplayWidth,
               height: signatureHeight,
-              fit: [signatoryBlockWidth, signatureHeight],
+              fit: [signatureDisplayWidth, signatureHeight],
             });
           } catch (sigErr) {
             console.warn('Failed to embed signature in PDF:', sigErr);
           }
         }
 
-        // Signature line
+        const lineY = signatureBuffer
+          ? signatoryY + signatureHeight + 6
+          : signatoryY + 8;
+
         doc
           .strokeColor(colors.border)
-          .lineWidth(0.8)
+          .lineWidth(0.5)
           .moveTo(signatoryX, lineY)
           .lineTo(signatoryX + signatoryBlockWidth, lineY)
           .stroke();
 
-        // Label
-        doc.fontSize(8).font((doc as any)._fontBold).fillColor(colors.textMuted);
+        doc.fontSize(7).font((doc as any)._fontBold).fillColor(colors.textMuted);
         doc.text('Authorised Signatory', signatoryX, lineY + 4, {
           width: signatoryBlockWidth,
-          align: 'right',
+          align: 'center',
         });
 
-        // Footer separator line (placed below whichever is lower: QR or signatory)
         const footerContentBottom = Math.max(
           signatoryY + signatoryBlockHeight,
-          qrY + (qrBuffer ? qrSizePx + 16 : 0),
+          qrY + (qrBuffer ? qrSizePx + 10 : 0),
         );
-        const footerLineY = footerContentBottom + 4;
+        const footerLineY = footerContentBottom + 2;
 
         doc.strokeColor(colors.border).lineWidth(0.5);
         doc
@@ -9042,16 +8949,15 @@ export class ReportGeneratorService {
           .lineTo(margin + contentWidth, footerLineY)
           .stroke();
 
-        let footerTextY = footerLineY + 6;
+        const footerTextY = footerLineY + 4;
 
-        // Footer text - show custom footer text or default message
         if (templateSettings.showFooter) {
           const footerText =
             templateSettings.footerText &&
             templateSettings.footerText.trim().length > 0
               ? templateSettings.footerText
               : 'This is a Computer Generated Invoice';
-          doc.fontSize(8).font((doc as any)._fontRegular).fillColor(colors.textMuted);
+          doc.fontSize(7).font((doc as any)._fontRegular).fillColor(colors.textMuted);
           doc.text(footerText, margin, footerTextY, {
             align: 'center',
             width: contentWidth,
