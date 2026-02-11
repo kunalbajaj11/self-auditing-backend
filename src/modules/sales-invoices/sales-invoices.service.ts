@@ -32,6 +32,8 @@ import { PlanType } from '../../common/enums/plan-type.enum';
 import { PurchaseLineItem } from '../../entities/purchase-line-item.entity';
 import { Expense } from '../../entities/expense.entity';
 import { InvoiceHash } from '../../entities/invoice-hash.entity';
+import { JournalEntriesService } from '../journal-entries/journal-entries.service';
+import { JournalEntryAccount } from '../../common/enums/journal-entry-account.enum';
 import * as crypto from 'crypto';
 
 @Injectable()
@@ -67,7 +69,85 @@ export class SalesInvoicesService {
     private readonly settingsService: SettingsService,
     private readonly inventoryService: InventoryService,
     private readonly dataSource: DataSource,
+    private readonly journalEntriesService: JournalEntriesService,
   ) {}
+
+  /**
+   * Post sales invoice to ledger based on status:
+   * - Receivable: Dr Accounts Receivable, Cr Sales Revenue
+   * - Bank Received: Dr Bank, Cr Sales Revenue (or Dr Bank Cr AR if previously Receivable)
+   * - Cash Received: Dr Cash, Cr Sales Revenue (or Dr Cash Cr AR if previously Receivable)
+   */
+  private async postInvoiceToLedger(
+    organizationId: string,
+    userId: string,
+    invoice: SalesInvoice,
+    previousStatus?: string,
+  ): Promise<void> {
+    const totalAmount =
+      parseFloat(invoice.amount || '0') + parseFloat(invoice.vatAmount || '0');
+    if (totalAmount <= 0) return;
+
+    const status = invoice.status as InvoiceStatus;
+    const prev = previousStatus as InvoiceStatus | undefined;
+    const receivable = InvoiceStatus.TAX_INVOICE_RECEIVABLE;
+    const bankReceived = InvoiceStatus.TAX_INVOICE_BANK_RECEIVED;
+    const cashReceived = InvoiceStatus.TAX_INVOICE_CASH_RECEIVED;
+
+    const payload = {
+      amount: totalAmount,
+      entryDate: invoice.invoiceDate,
+      referenceNumber: invoice.invoiceNumber,
+      description: `Invoice: ${invoice.invoiceNumber}`,
+      customerVendorId: invoice.customer?.id ?? undefined,
+      customerVendorName: invoice.customerName ?? undefined,
+      vatAmount: parseFloat(invoice.vatAmount || '0') || undefined,
+    };
+
+    try {
+      // Status changed from Receivable to Bank/Cash → post payment (clear AR, record Bank/Cash)
+      if (prev === receivable && status === bankReceived) {
+        await this.journalEntriesService.create(organizationId, userId, {
+          ...payload,
+          debitAccount: JournalEntryAccount.BANK,
+          creditAccount: JournalEntryAccount.ACCOUNTS_RECEIVABLE,
+        });
+        return;
+      }
+      if (prev === receivable && status === cashReceived) {
+        await this.journalEntriesService.create(organizationId, userId, {
+          ...payload,
+          debitAccount: JournalEntryAccount.CASH,
+          creditAccount: JournalEntryAccount.ACCOUNTS_RECEIVABLE,
+        });
+        return;
+      }
+
+      // New post: Dr (AR | Bank | Cash), Cr Sales
+      if (status === receivable) {
+        await this.journalEntriesService.create(organizationId, userId, {
+          ...payload,
+          debitAccount: JournalEntryAccount.ACCOUNTS_RECEIVABLE,
+          creditAccount: JournalEntryAccount.SALES_REVENUE,
+        });
+      } else if (status === bankReceived) {
+        await this.journalEntriesService.create(organizationId, userId, {
+          ...payload,
+          debitAccount: JournalEntryAccount.BANK,
+          creditAccount: JournalEntryAccount.SALES_REVENUE,
+        });
+      } else if (status === cashReceived) {
+        await this.journalEntriesService.create(organizationId, userId, {
+          ...payload,
+          debitAccount: JournalEntryAccount.CASH,
+          creditAccount: JournalEntryAccount.SALES_REVENUE,
+        });
+      }
+    } catch (err) {
+      console.error('Failed to post sales invoice to ledger:', err);
+      // Do not fail invoice create/update if JE fails
+    }
+  }
 
   async findAll(organizationId: string, filters: any): Promise<SalesInvoice[]> {
     const query = this.invoicesRepository
@@ -624,21 +704,14 @@ export class SalesInvoicesService {
       subtotal += shippingAmount;
     }
 
-    // Calculate tax on discounts if enabled
+    // VAT is calculated on (amount - discount): apply discount then scale VAT
     const discountAmount = parseFloat(dto.discountAmount || '0');
-    let discountVatAmount = 0;
-    if (discountAmount > 0 && taxSettings.taxCalculateOnDiscounts) {
-      // Tax on discount: reverse calculation (subtract tax from discount)
-      discountVatAmount = discountAmount * (effectiveDefaultRate / 100);
-      standardVatAmount -= discountVatAmount; // Subtract tax on discount
-      subtotal -= discountAmount; // Subtract discount from subtotal
-    } else if (discountAmount > 0) {
-      // Discount without tax
-      subtotal -= discountAmount;
+    const taxableBase = Math.max(0, subtotal - discountAmount);
+    let totalVatAmount = standardVatAmount + reverseChargeVatAmount;
+    if (discountAmount > 0 && subtotal > 0) {
+      totalVatAmount = totalVatAmount * (taxableBase / subtotal);
     }
-
-    // Total VAT amount includes both standard and reverse charge (for reporting)
-    const totalVatAmount = standardVatAmount + reverseChargeVatAmount;
+    subtotal = taxableBase;
 
     const invoice = this.invoicesRepository.create({
       organization,
@@ -827,7 +900,16 @@ export class SalesInvoicesService {
       }
     }
 
-    return this.findById(organizationId, savedInvoice.id);
+    const result = await this.findById(organizationId, savedInvoice.id);
+    const status = result.status as InvoiceStatus;
+    if (
+      status === InvoiceStatus.TAX_INVOICE_RECEIVABLE ||
+      status === InvoiceStatus.TAX_INVOICE_BANK_RECEIVED ||
+      status === InvoiceStatus.TAX_INVOICE_CASH_RECEIVED
+    ) {
+      await this.postInvoiceToLedger(organizationId, userId, result);
+    }
+    return result;
   }
 
   /**
@@ -1912,6 +1994,7 @@ ${lines}
     if (!invoice) {
       throw new NotFoundException('Invoice not found');
     }
+    const previousStatus = invoice.status;
 
     if (
       invoice.status === InvoiceStatus.PAID ||
@@ -2120,24 +2203,17 @@ ${lines}
         subtotal += shippingAmount;
       }
 
-      // Calculate tax on discounts if enabled (use taxSettings already declared above)
+      // VAT is calculated on (amount - discount): apply discount then scale VAT
       const discountAmount = parseFloat(dto.discountAmount || '0');
-      let discountVatAmount = 0;
-      if (discountAmount > 0 && taxSettings.taxCalculateOnDiscounts) {
-        // Tax on discount: reverse calculation (subtract tax from discount)
-        discountVatAmount = discountAmount * (effectiveDefaultRate / 100);
-        standardVatAmount -= discountVatAmount; // Subtract tax on discount
-        subtotal -= discountAmount; // Subtract discount from subtotal
-      } else if (discountAmount > 0) {
-        // Discount without tax
-        subtotal -= discountAmount;
+      const taxableBase = Math.max(0, subtotal - discountAmount);
+      let totalVatAmount = standardVatAmount + reverseChargeVatAmount;
+      if (discountAmount > 0 && subtotal > 0) {
+        totalVatAmount = totalVatAmount * (taxableBase / subtotal);
       }
 
       invoice.discountAmount = discountAmount.toString();
-      invoice.amount = subtotal.toString(); // Subtotal BEFORE VAT
-      invoice.vatAmount = (
-        standardVatAmount + reverseChargeVatAmount
-      ).toString(); // Both for reporting
+      invoice.amount = taxableBase.toString(); // Amount after discount (taxable base)
+      invoice.vatAmount = totalVatAmount.toString();
     } else if (dto.amount !== undefined || dto.vatAmount !== undefined) {
       // Update amounts directly
       if (dto.amount !== undefined) {
@@ -2160,7 +2236,23 @@ ${lines}
       changes: dto,
     });
 
-    return this.findById(organizationId, updated.id);
+    const result = await this.findById(organizationId, updated.id);
+    if (dto.status !== undefined) {
+      const newStatus = result.status as InvoiceStatus;
+      if (
+        newStatus === InvoiceStatus.TAX_INVOICE_RECEIVABLE ||
+        newStatus === InvoiceStatus.TAX_INVOICE_BANK_RECEIVED ||
+        newStatus === InvoiceStatus.TAX_INVOICE_CASH_RECEIVED
+      ) {
+        await this.postInvoiceToLedger(
+          organizationId,
+          userId,
+          result,
+          previousStatus,
+        );
+      }
+    }
+    return result;
   }
 
   /**
@@ -2206,6 +2298,7 @@ ${lines}
       );
     }
 
+    const previousStatus = invoice.status;
     invoice.status = status;
     const updated = await this.invoicesRepository.save(invoice);
 
@@ -2216,10 +2309,23 @@ ${lines}
       entityType: 'SalesInvoice',
       entityId: invoiceId,
       action: AuditAction.UPDATE,
-      changes: { status: { from: invoice.status, to: status } },
+      changes: { status: { from: previousStatus, to: status } },
     });
 
-    return this.findById(organizationId, updated.id);
+    const result = await this.findById(organizationId, updated.id);
+    if (
+      status === InvoiceStatus.TAX_INVOICE_RECEIVABLE ||
+      status === InvoiceStatus.TAX_INVOICE_BANK_RECEIVED ||
+      status === InvoiceStatus.TAX_INVOICE_CASH_RECEIVED
+    ) {
+      await this.postInvoiceToLedger(
+        organizationId,
+        userId,
+        result,
+        previousStatus,
+      );
+    }
+    return result;
   }
 
   /**
@@ -2310,7 +2416,14 @@ ${lines}
       },
     });
 
-    return this.findById(organizationId, updated.id);
+    const result = await this.findById(organizationId, updated.id);
+    await this.postInvoiceToLedger(
+      organizationId,
+      userId,
+      result,
+      InvoiceStatus.PROFORMA_INVOICE,
+    );
+    return result;
   }
 
   /**

@@ -20,6 +20,7 @@ import { ReportsModule } from '../reports/reports.module';
 import { AuditLogsModule } from '../audit-logs/audit-logs.module';
 import { SettingsModule } from '../settings/settings.module';
 import { InventoryModule } from '../inventory/inventory.module';
+import { JournalEntriesModule } from '../journal-entries/journal-entries.module';
 
 @Module({
   imports: [
@@ -43,6 +44,7 @@ import { InventoryModule } from '../inventory/inventory.module';
     AuditLogsModule,
     SettingsModule,
     InventoryModule,
+    JournalEntriesModule,
   ],
   providers: [SalesInvoicesService],
   controllers: [SalesInvoicesController],
