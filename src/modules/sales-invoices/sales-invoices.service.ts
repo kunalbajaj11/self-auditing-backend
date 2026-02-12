@@ -637,7 +637,17 @@ export class SalesInvoicesService {
 
     if (dto.lineItems && dto.lineItems.length > 0) {
       for (const item of dto.lineItems) {
-        const amount = parseFloat(item.quantity) * parseFloat(item.unitPrice);
+        const calculatedAmount =
+          parseFloat(item.quantity) * parseFloat(item.unitPrice);
+        const parsedAmount =
+          item.amount !== undefined &&
+          item.amount !== null &&
+          item.amount !== ''
+            ? parseFloat(String(item.amount))
+            : NaN;
+        const amount = !Number.isNaN(parsedAmount)
+          ? parsedAmount
+          : calculatedAmount;
         const isReverseCharge =
           item.vatTaxType === 'REVERSE_CHARGE' ||
           item.vatTaxType === 'reverse_charge';
@@ -665,11 +675,17 @@ export class SalesInvoicesService {
           }
         }
 
-        const vatAmount = amount * (itemVatRate / 100);
+        const calculatedVat = amount * (itemVatRate / 100);
+        const parsedVat =
+          item.vatAmount !== undefined &&
+          item.vatAmount !== null &&
+          item.vatAmount !== ''
+            ? parseFloat(String(item.vatAmount))
+            : NaN;
+        const vatAmount = !Number.isNaN(parsedVat) ? parsedVat : calculatedVat;
         subtotal += amount; // Add base amount to subtotal
 
         if (isReverseCharge) {
-          // Reverse charge VAT: calculated but NOT added to total
           reverseChargeVatAmount += vatAmount;
         } else if (
           item.vatTaxType === 'ZERO_RATED' ||
@@ -678,20 +694,25 @@ export class SalesInvoicesService {
           item.vatTaxType === 'exempt'
         ) {
           // Zero rated or exempt: no VAT
-          // Do nothing
         } else {
-          // Standard VAT: track for vatAmount field, but don't add to subtotal
           standardVatAmount += vatAmount;
         }
       }
     } else {
       // No line items - use provided amount as subtotal
       subtotal = parseFloat(dto.amount || '0');
-      // If VAT amount not provided, calculate from default rate
-      if (!dto.vatAmount || dto.vatAmount === 0) {
-        standardVatAmount = subtotal * (effectiveDefaultRate / 100);
+      // Use VAT from DTO when provided (including explicit 0). Only calculate when not provided.
+      const dtoVat =
+        dto.vatAmount !== undefined &&
+        dto.vatAmount !== null &&
+        dto.vatAmount !== '';
+      if (dtoVat) {
+        const parsed = parseFloat(String(dto.vatAmount));
+        standardVatAmount = Number.isNaN(parsed)
+          ? subtotal * (effectiveDefaultRate / 100)
+          : parsed;
       } else {
-        standardVatAmount = parseFloat(dto.vatAmount || '0');
+        standardVatAmount = subtotal * (effectiveDefaultRate / 100);
       }
     }
 
@@ -754,60 +775,62 @@ export class SalesInvoicesService {
 
     const savedInvoice = await this.invoicesRepository.save(invoice);
 
-    // Create line items
+    // Create line items (use amount/vatAmount from DTO when provided; otherwise calculate)
     if (dto.lineItems && dto.lineItems.length > 0) {
       const lineItems = dto.lineItems.map((item: any, index: number) => {
-        const amount = parseFloat(item.quantity) * parseFloat(item.unitPrice);
+        const calculatedAmount =
+          parseFloat(item.quantity) * parseFloat(item.unitPrice);
+        const parsedAmount =
+          item.amount !== undefined &&
+          item.amount !== null &&
+          item.amount !== ''
+            ? parseFloat(String(item.amount))
+            : NaN;
+        const amount = !Number.isNaN(parsedAmount)
+          ? parsedAmount
+          : calculatedAmount;
 
-        // Determine VAT rate for this line item
         const isReverseCharge =
           item.vatTaxType === 'REVERSE_CHARGE' ||
           item.vatTaxType === 'reverse_charge';
         let itemVatRate = parseFloat(item.vatRate || '0');
-        let taxCode = item.taxCode || null; // Get tax code from item if provided
+        let taxCode = item.taxCode || null;
 
         if (itemVatRate === 0) {
-          // Try to find matching tax rate by code or type
           if (item.vatTaxType && !isReverseCharge) {
             const matchingRate = taxRates.find(
               (rate) => rate.isActive && rate.type === item.vatTaxType,
             );
             if (matchingRate) {
               itemVatRate = matchingRate.rate;
-              // Use tax code from matching rate if not provided
-              if (!taxCode && matchingRate.code) {
-                taxCode = matchingRate.code;
-              }
+              if (!taxCode && matchingRate.code) taxCode = matchingRate.code;
             } else {
               itemVatRate = effectiveDefaultRate;
-              // Use default tax code from settings if not provided
-              if (!taxCode && taxSettings.taxDefaultCode) {
+              if (!taxCode && taxSettings.taxDefaultCode)
                 taxCode = taxSettings.taxDefaultCode;
-              }
             }
           } else if (isReverseCharge) {
-            // Use reverse charge rate from settings
             itemVatRate =
               taxSettings.taxReverseChargeRate || effectiveDefaultRate;
-            // Use default tax code from settings if not provided
-            if (!taxCode && taxSettings.taxDefaultCode) {
+            if (!taxCode && taxSettings.taxDefaultCode)
               taxCode = taxSettings.taxDefaultCode;
-            }
           } else {
             itemVatRate = effectiveDefaultRate;
-            // Use default tax code from settings if not provided
-            if (!taxCode && taxSettings.taxDefaultCode) {
+            if (!taxCode && taxSettings.taxDefaultCode)
               taxCode = taxSettings.taxDefaultCode;
-            }
           }
         } else {
-          // VAT rate provided, but check for default tax code
-          if (!taxCode && taxSettings.taxDefaultCode) {
+          if (!taxCode && taxSettings.taxDefaultCode)
             taxCode = taxSettings.taxDefaultCode;
-          }
         }
 
-        const vatAmount = amount * (itemVatRate / 100);
+        const calculatedVat = amount * (itemVatRate / 100);
+        const vatAmount =
+          item.vatAmount !== undefined &&
+          item.vatAmount !== null &&
+          item.vatAmount !== ''
+            ? parseFloat(String(item.vatAmount))
+            : calculatedVat;
 
         const lineItem = this.lineItemsRepository.create({
           invoice: savedInvoice,
@@ -2139,9 +2162,19 @@ ${lines}
       );
       const effectiveDefaultRate = taxSettings.taxDefaultRate || 5;
 
-      // Create new line items
+      // Create new line items (use amount/vatAmount from DTO when provided; otherwise calculate)
       const lineItems = dto.lineItems.map((item: any, index: number) => {
-        const amount = parseFloat(item.quantity) * parseFloat(item.unitPrice);
+        const calculatedAmount =
+          parseFloat(item.quantity) * parseFloat(item.unitPrice);
+        const parsedAmount =
+          item.amount !== undefined &&
+          item.amount !== null &&
+          item.amount !== ''
+            ? parseFloat(String(item.amount))
+            : NaN;
+        const amount = !Number.isNaN(parsedAmount)
+          ? parsedAmount
+          : calculatedAmount;
         const isReverseCharge =
           item.vatTaxType === 'REVERSE_CHARGE' ||
           item.vatTaxType === 'reverse_charge';
@@ -2160,7 +2193,14 @@ ${lines}
           }
         }
 
-        const vatAmount = amount * (vatRate / 100);
+        const calculatedVat = amount * (vatRate / 100);
+        const parsedVat =
+          item.vatAmount !== undefined &&
+          item.vatAmount !== null &&
+          item.vatAmount !== ''
+            ? parseFloat(String(item.vatAmount))
+            : NaN;
+        const vatAmount = !Number.isNaN(parsedVat) ? parsedVat : calculatedVat;
 
         return this.lineItemsRepository.create({
           invoice: { id: invoiceId },
@@ -2233,15 +2273,52 @@ ${lines}
       }
 
       invoice.discountAmount = discountAmount.toString();
-      invoice.amount = taxableBase.toString(); // Amount after discount (taxable base)
-      invoice.vatAmount = totalVatAmount.toString();
-    } else if (dto.amount !== undefined || dto.vatAmount !== undefined) {
-      // Update amounts directly
-      if (dto.amount !== undefined) {
-        invoice.amount = dto.amount.toString();
+      // Prefer DTO amount/vatAmount when provided (user override); else use recalculated from line items
+      if (
+        dto.amount !== undefined &&
+        dto.amount !== null &&
+        dto.amount !== ''
+      ) {
+        const parsed = parseFloat(String(dto.amount));
+        invoice.amount = Number.isNaN(parsed)
+          ? taxableBase.toString()
+          : parsed.toString();
+      } else {
+        invoice.amount = taxableBase.toString();
       }
-      if (dto.vatAmount !== undefined) {
-        invoice.vatAmount = dto.vatAmount.toString();
+      if (
+        dto.vatAmount !== undefined &&
+        dto.vatAmount !== null &&
+        dto.vatAmount !== ''
+      ) {
+        const parsed = parseFloat(String(dto.vatAmount));
+        invoice.vatAmount = Number.isNaN(parsed)
+          ? totalVatAmount.toString()
+          : parsed.toString();
+      } else {
+        invoice.vatAmount = totalVatAmount.toString();
+      }
+    } else if (dto.amount !== undefined || dto.vatAmount !== undefined) {
+      // Update amounts directly (no line items or flat update)
+      if (
+        dto.amount !== undefined &&
+        dto.amount !== null &&
+        dto.amount !== ''
+      ) {
+        const parsed = parseFloat(String(dto.amount));
+        if (!Number.isNaN(parsed)) {
+          invoice.amount = parsed.toString();
+        }
+      }
+      if (
+        dto.vatAmount !== undefined &&
+        dto.vatAmount !== null &&
+        dto.vatAmount !== ''
+      ) {
+        const parsed = parseFloat(String(dto.vatAmount));
+        if (!Number.isNaN(parsed)) {
+          invoice.vatAmount = parsed.toString();
+        }
       }
     }
 
