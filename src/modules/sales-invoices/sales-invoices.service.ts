@@ -4,7 +4,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource, In } from 'typeorm';
+import { Repository, DataSource, In, EntityManager } from 'typeorm';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { SalesInvoice } from '../../entities/sales-invoice.entity';
 import { InvoiceLineItem } from '../../entities/invoice-line-item.entity';
@@ -162,7 +162,25 @@ export class SalesInvoicesService {
       .andWhere('invoice.is_deleted = false');
 
     if (filters.status) {
-      query.andWhere('invoice.status = :status', { status: filters.status });
+      // Quotations list: include converted-to-proforma so we can track counts
+      if (filters.status === InvoiceStatus.QUOTATION) {
+        query.andWhere('invoice.status IN (:...statuses)', {
+          statuses: [
+            InvoiceStatus.QUOTATION,
+            InvoiceStatus.QUOTATION_CONVERTED_TO_PROFORMA,
+          ],
+        });
+      } else if (filters.status === InvoiceStatus.PROFORMA_INVOICE) {
+        // Proforma list: include converted-to-invoice so we can track counts
+        query.andWhere('invoice.status IN (:...statuses)', {
+          statuses: [
+            InvoiceStatus.PROFORMA_INVOICE,
+            InvoiceStatus.PROFORMA_CONVERTED_TO_INVOICE,
+          ],
+        });
+      } else {
+        query.andWhere('invoice.status = :status', { status: filters.status });
+      }
     }
     if (filters.paymentStatus) {
       query.andWhere('invoice.payment_status = :paymentStatus', {
@@ -963,14 +981,15 @@ export class SalesInvoicesService {
       ? '/api/settings/invoice-template/signature'
       : null;
 
-    // Heading by document type: Proforma / Quotation / Tax Invoice. Per-invoice displayOptions can override.
+    // Heading by document type: Proforma / Quotation / Tax Invoice. Converted statuses show as original type.
     const hasVatNumber = Boolean(
       (invoice.organization?.vatNumber ?? '').toString().trim(),
     );
+    const docType = this.getDocumentTypeForDisplay(invoice.status as string);
     const defaultTitle =
-      invoice.status === 'proforma_invoice'
+      docType === 'proforma_invoice'
         ? 'Proforma Invoice'
-        : invoice.status === 'quotation'
+        : docType === 'quotation'
           ? 'Quotation'
           : hasVatNumber
             ? 'Tax Invoice'
@@ -1276,9 +1295,130 @@ export class SalesInvoicesService {
   }
 
   /**
-   * Thread-safe invoice number generation using database-level locking
-   * Format: INV-YYYY-NNN (e.g., INV-2024-001)
+   * Document type for display/PDF/export: converted statuses show as their original type
+   * (Quotation or Proforma Invoice) so the document title is correct when viewing.
    */
+  private getDocumentTypeForDisplay(status: string): 'quotation' | 'proforma_invoice' | 'tax' {
+    switch (status) {
+      case InvoiceStatus.QUOTATION:
+      case InvoiceStatus.QUOTATION_CONVERTED_TO_PROFORMA:
+        return 'quotation';
+      case InvoiceStatus.PROFORMA_INVOICE:
+      case InvoiceStatus.PROFORMA_CONVERTED_TO_INVOICE:
+        return 'proforma_invoice';
+      default:
+        return 'tax';
+    }
+  }
+
+  /**
+   * Clone an invoice into a new document with a new number and status (for conversion flows).
+   * Copies header and line items; does not copy payments or credit note applications.
+   * When manager is provided, all saves run inside that transaction.
+   */
+  private async cloneInvoiceForConversion(
+    source: SalesInvoice,
+    newStatus: InvoiceStatus,
+    newInvoiceNumber: string,
+    organizationId: string,
+    userId: string,
+    manager?: EntityManager,
+  ): Promise<SalesInvoice> {
+    const organization = source.organization;
+    const user = organization?.id
+      ? await this.usersRepository.findOne({
+          where: { id: userId },
+        })
+      : null;
+    if (!organization || !user) {
+      throw new BadRequestException('Organization or user not found');
+    }
+
+    const invRepo = manager
+      ? manager.getRepository(SalesInvoice)
+      : this.invoicesRepository;
+    const lineRepo = manager
+      ? manager.getRepository(InvoiceLineItem)
+      : this.lineItemsRepository;
+
+    const newInvoice = invRepo.create({
+      organization: { id: organization.id },
+      user: { id: user.id },
+      invoiceNumber: newInvoiceNumber,
+      invoiceDate: source.invoiceDate,
+      supplyDate: source.supplyDate ?? null,
+      dueDate: source.dueDate ?? null,
+      discountAmount: source.discountAmount ?? '0',
+      amount: source.amount,
+      vatAmount: source.vatAmount,
+      currency: source.currency ?? 'AED',
+      description: source.description ?? null,
+      notes: source.notes ?? null,
+      deliveryNote: source.deliveryNote ?? null,
+      suppliersRef: source.suppliersRef ?? null,
+      otherReference: source.otherReference ?? null,
+      buyerOrderNo: source.buyerOrderNo ?? null,
+      buyerOrderDate: source.buyerOrderDate ?? null,
+      despatchedThrough: source.despatchedThrough ?? null,
+      destination: source.destination ?? null,
+      termsOfDelivery: source.termsOfDelivery ?? null,
+      status: newStatus,
+      paymentStatus: PaymentStatus.UNPAID,
+      paidAmount: '0',
+      customer: source.customer?.id ? { id: source.customer.id } : undefined,
+      customerName: source.customerName ?? null,
+      customerTrn: source.customerTrn ?? null,
+      publicToken: this.generatePublicToken(),
+      displayOptions:
+        source.displayOptions && typeof source.displayOptions === 'object'
+          ? source.displayOptions
+          : null,
+    });
+
+    const savedInvoice = await invRepo.save(newInvoice);
+
+    if (source.lineItems && source.lineItems.length > 0) {
+      const newLineItems = source.lineItems.map((item, index) =>
+        lineRepo.create({
+          invoice: { id: savedInvoice.id },
+          organization: { id: organizationId },
+          itemName: item.itemName,
+          description: item.description ?? null,
+          notes: item.notes ?? null,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice,
+          unitOfMeasure: item.unitOfMeasure ?? 'unit',
+          vatRate: item.vatRate,
+          vatTaxType: (item.vatTaxType as VatTaxType) ?? VatTaxType.STANDARD,
+          amount: item.amount,
+          vatAmount: item.vatAmount,
+          lineNumber: index + 1,
+          product: item.product?.id ? { id: item.product.id } : undefined,
+        }),
+      );
+      await lineRepo.save(newLineItems);
+    }
+
+    if (manager) {
+      const found = await manager.findOne(SalesInvoice, {
+        where: { id: savedInvoice.id, organization: { id: organizationId } },
+        relations: [
+          'organization',
+          'customer',
+          'lineItems',
+          'payments',
+          'creditNoteApplications',
+          'invoiceHash',
+        ],
+      });
+      if (!found) {
+        throw new BadRequestException('Failed to load created invoice');
+      }
+      return found;
+    }
+    return this.findById(organizationId, savedInvoice.id);
+  }
+
   /**
    * Get next document number (invoice, proforma, or quotation) without creating
    */
@@ -1387,10 +1527,11 @@ export class SalesInvoicesService {
         // Invoice template settings - merge per-invoice displayOptions over org template
         invoiceTemplate: (() => {
           const opts = (invoice.displayOptions || {}) as Record<string, unknown>;
+          const docType = this.getDocumentTypeForDisplay(invoice.status as string);
           const defaultTitle =
-            invoice.status === 'proforma_invoice'
+            docType === 'proforma_invoice'
               ? 'Proforma Invoice'
-              : invoice.status === 'quotation'
+              : docType === 'quotation'
                 ? 'Quotation'
                 : hasVatNumber
                   ? 'Tax Invoice'
@@ -1510,7 +1651,7 @@ export class SalesInvoicesService {
         IssueDate: invoice.invoiceDate,
         SupplyDate: (invoice as any).supplyDate || invoice.invoiceDate,
         DueDate: invoice.dueDate || null,
-        InvoiceTypeCode: invoice.status === 'proforma_invoice' ? 384 : 380,
+        InvoiceTypeCode: this.getDocumentTypeForDisplay(invoice.status as string) === 'proforma_invoice' ? 384 : 380,
         CurrencyCode: currency,
         Seller: {
           Name: org?.name,
@@ -2052,6 +2193,15 @@ ${lines}
       throw new BadRequestException('Cannot update cancelled invoice');
     }
 
+    if (
+      invoice.status === InvoiceStatus.QUOTATION_CONVERTED_TO_PROFORMA ||
+      invoice.status === InvoiceStatus.PROFORMA_CONVERTED_TO_INVOICE
+    ) {
+      throw new BadRequestException(
+        'Cannot update a converted document. It is read-only for tracking.',
+      );
+    }
+
     // Update allowed fields
     if (dto.status !== undefined) {
       // Validate status transition
@@ -2364,6 +2514,15 @@ ${lines}
   ): Promise<SalesInvoice> {
     const invoice = await this.findById(organizationId, invoiceId);
 
+    if (
+      invoice.status === InvoiceStatus.QUOTATION_CONVERTED_TO_PROFORMA ||
+      invoice.status === InvoiceStatus.PROFORMA_CONVERTED_TO_INVOICE
+    ) {
+      throw new BadRequestException(
+        'Cannot change status of a converted document. It is read-only for tracking.',
+      );
+    }
+
     // Validate status transition
     if (
       (invoice.status === InvoiceStatus.PAID ||
@@ -2396,12 +2555,17 @@ ${lines}
       );
     }
 
-    // Workflow: Quotation → Proforma Invoice → Tax Invoice (only via convert endpoint)
+    // Workflow: Quotation → Proforma Invoice → Tax Invoice (only via convert endpoints)
     const taxInvoiceStatuses = [
       InvoiceStatus.TAX_INVOICE_RECEIVABLE,
       InvoiceStatus.TAX_INVOICE_BANK_RECEIVED,
       InvoiceStatus.TAX_INVOICE_CASH_RECEIVED,
     ];
+    if (invoice.status === InvoiceStatus.QUOTATION && status === InvoiceStatus.PROFORMA_INVOICE) {
+      throw new BadRequestException(
+        'Use the "Convert to Proforma Invoice" action to convert a Quotation to a Proforma Invoice.',
+      );
+    }
     if (invoice.status === InvoiceStatus.QUOTATION && taxInvoiceStatuses.includes(status)) {
       throw new BadRequestException(
         'Quotation can only be converted to Proforma Invoice. Convert to Proforma first, then use "Convert to Tax Invoice" on the proforma.',
@@ -2497,29 +2661,129 @@ ${lines}
   }
 
   /**
-   * Convert Proforma Invoice to Tax Invoice
+   * Convert Quotation to Proforma Invoice: create a new proforma (clone) and mark original as "Converted to Proforma Invoice"
+   * so the quotation stays in the quotations list for tracking. Runs in a transaction for consistency.
+   */
+  async convertQuotationToProforma(
+    organizationId: string,
+    quotationId: string,
+    userId: string,
+  ): Promise<SalesInvoice> {
+    const newProformaId = await this.dataSource.transaction<string>(
+      async (manager) => {
+        const quotation = await manager.findOne(SalesInvoice, {
+          where: {
+            id: quotationId,
+            organization: { id: organizationId },
+            isDeleted: false,
+          },
+          relations: ['organization', 'customer', 'lineItems', 'lineItems.product'],
+        });
+
+        if (!quotation) {
+          throw new NotFoundException('Quotation not found');
+        }
+        if (quotation.status !== InvoiceStatus.QUOTATION) {
+          throw new BadRequestException(
+            'Only quotations can be converted to proforma invoices',
+          );
+        }
+
+        const newProformaNumber =
+          await this.settingsService.generateNextNumber(
+            organizationId,
+            NumberingSequenceType.PROFORMA_INVOICE,
+          );
+
+        const newProforma = await this.cloneInvoiceForConversion(
+          quotation,
+          InvoiceStatus.PROFORMA_INVOICE,
+          newProformaNumber,
+          organizationId,
+          userId,
+          manager,
+        );
+
+        quotation.status = InvoiceStatus.QUOTATION_CONVERTED_TO_PROFORMA;
+        await manager.save(SalesInvoice, quotation);
+
+        return newProforma.id;
+      },
+    );
+
+    await this.auditLogsService.record({
+      organizationId,
+      userId,
+      entityType: 'SalesInvoice',
+      entityId: quotationId,
+      action: AuditAction.UPDATE,
+      changes: {
+        status: {
+          from: InvoiceStatus.QUOTATION,
+          to: InvoiceStatus.QUOTATION_CONVERTED_TO_PROFORMA,
+        },
+        convertedToInvoiceId: newProformaId,
+      },
+    });
+
+    return this.findById(organizationId, newProformaId);
+  }
+
+  /**
+   * Convert Proforma Invoice to Tax Invoice: create a new tax invoice (clone) and mark original as "Converted to Invoice"
+   * so the proforma stays in the proforma list for tracking. Runs in a transaction for consistency.
    */
   async convertProformaToInvoice(
     organizationId: string,
     invoiceId: string,
     userId: string,
   ): Promise<SalesInvoice> {
-    const invoice = await this.findById(organizationId, invoiceId);
+    const newInvoiceId = await this.dataSource.transaction<string>(
+      async (manager) => {
+        const proforma = await manager.findOne(SalesInvoice, {
+          where: {
+            id: invoiceId,
+            organization: { id: organizationId },
+            isDeleted: false,
+          },
+          relations: ['organization', 'customer', 'lineItems', 'lineItems.product'],
+        });
 
-    if (invoice.status !== InvoiceStatus.PROFORMA_INVOICE) {
-      throw new BadRequestException(
-        'Only proforma invoices can be converted to tax invoices',
-      );
-    }
+        if (!proforma) {
+          throw new NotFoundException('Proforma invoice not found');
+        }
+        if (proforma.status !== InvoiceStatus.PROFORMA_INVOICE) {
+          throw new BadRequestException(
+            'Only proforma invoices can be converted to tax invoices',
+          );
+        }
 
-    // Update status to TAX_INVOICE_RECEIVABLE
-    invoice.status = InvoiceStatus.TAX_INVOICE_RECEIVABLE;
-    const updated = await this.invoicesRepository.save(invoice);
+        const newTaxInvoiceNumber =
+          await this.settingsService.generateNextNumber(
+            organizationId,
+            NumberingSequenceType.INVOICE,
+          );
 
-    // Integrity hash when finalized
-    await this.computeAndPersistInvoiceHash(invoice);
+        const newInvoice = await this.cloneInvoiceForConversion(
+          proforma,
+          InvoiceStatus.TAX_INVOICE_RECEIVABLE,
+          newTaxInvoiceNumber,
+          organizationId,
+          userId,
+          manager,
+        );
 
-    // Audit log
+        proforma.status = InvoiceStatus.PROFORMA_CONVERTED_TO_INVOICE;
+        await manager.save(SalesInvoice, proforma);
+
+        return newInvoice.id;
+      },
+    );
+
+    const newInvoice = await this.findById(organizationId, newInvoiceId);
+
+    await this.computeAndPersistInvoiceHash(newInvoice);
+
     await this.auditLogsService.record({
       organizationId,
       userId,
@@ -2529,19 +2793,20 @@ ${lines}
       changes: {
         status: {
           from: InvoiceStatus.PROFORMA_INVOICE,
-          to: InvoiceStatus.TAX_INVOICE_RECEIVABLE,
+          to: InvoiceStatus.PROFORMA_CONVERTED_TO_INVOICE,
         },
+        convertedToInvoiceId: newInvoiceId,
       },
     });
 
-    const result = await this.findById(organizationId, updated.id);
     await this.postInvoiceToLedger(
       organizationId,
       userId,
-      result,
+      newInvoice,
       InvoiceStatus.PROFORMA_INVOICE,
     );
-    return result;
+
+    return newInvoice;
   }
 
   /**

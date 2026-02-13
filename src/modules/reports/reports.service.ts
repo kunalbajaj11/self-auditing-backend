@@ -88,7 +88,12 @@ export class ReportsService {
     andWhere: (cond: string, params?: object) => unknown;
   }): void {
     qb.andWhere('invoice.status NOT IN (:...nonTaxStatuses)', {
-      nonTaxStatuses: [InvoiceStatus.PROFORMA_INVOICE, InvoiceStatus.QUOTATION],
+      nonTaxStatuses: [
+        InvoiceStatus.PROFORMA_INVOICE,
+        InvoiceStatus.QUOTATION,
+        InvoiceStatus.QUOTATION_CONVERTED_TO_PROFORMA,
+        InvoiceStatus.PROFORMA_CONVERTED_TO_INVOICE,
+      ],
     });
   }
 
@@ -102,7 +107,12 @@ export class ReportsService {
   }): void {
     qb.innerJoin('payment.invoice', 'inv');
     qb.andWhere('inv.status NOT IN (:...nonTaxStatuses)', {
-      nonTaxStatuses: [InvoiceStatus.PROFORMA_INVOICE, InvoiceStatus.QUOTATION],
+      nonTaxStatuses: [
+        InvoiceStatus.PROFORMA_INVOICE,
+        InvoiceStatus.QUOTATION,
+        InvoiceStatus.QUOTATION_CONVERTED_TO_PROFORMA,
+        InvoiceStatus.PROFORMA_CONVERTED_TO_INVOICE,
+      ],
     });
   }
 
@@ -8485,6 +8495,8 @@ export class ReportsService {
               nonTaxStatuses: [
                 InvoiceStatus.PROFORMA_INVOICE,
                 InvoiceStatus.QUOTATION,
+                InvoiceStatus.QUOTATION_CONVERTED_TO_PROFORMA,
+                InvoiceStatus.PROFORMA_CONVERTED_TO_INVOICE,
               ],
             },
           );
@@ -8695,6 +8707,8 @@ export class ReportsService {
               nonTaxStatuses: [
                 InvoiceStatus.PROFORMA_INVOICE,
                 InvoiceStatus.QUOTATION,
+                InvoiceStatus.QUOTATION_CONVERTED_TO_PROFORMA,
+                InvoiceStatus.PROFORMA_CONVERTED_TO_INVOICE,
               ],
             },
           );
@@ -10362,6 +10376,8 @@ export class ReportsService {
             nonTaxStatuses: [
               InvoiceStatus.PROFORMA_INVOICE,
               InvoiceStatus.QUOTATION,
+              InvoiceStatus.QUOTATION_CONVERTED_TO_PROFORMA,
+              InvoiceStatus.PROFORMA_CONVERTED_TO_INVOICE,
             ],
           },
         );
