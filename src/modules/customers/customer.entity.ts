@@ -24,6 +24,10 @@ export class Customer extends AbstractEntity {
   @JoinColumn({ name: 'organization_id' })
   organization: Organization;
 
+  /** Display ID for invoices/reports, e.g. C2026021301 (C + YYYYMMDD + 2-digit sequence) */
+  @Column({ name: 'customer_number', length: 20, nullable: true })
+  customerNumber?: string | null;
+
   @Column({ length: 200 })
   name: string;
 

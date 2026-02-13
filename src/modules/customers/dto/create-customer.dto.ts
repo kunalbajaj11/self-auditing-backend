@@ -13,6 +13,10 @@ export class CreateCustomerDto {
 
   @IsOptional()
   @IsString()
+  customerNumber?: string;
+
+  @IsOptional()
+  @IsString()
   displayName?: string;
 
   @IsOptional()

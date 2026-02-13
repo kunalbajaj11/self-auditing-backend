@@ -134,18 +134,21 @@ export class SalesInvoicesController {
       user?.organizationId as string,
       id,
     );
+    const filenamePrefix = this.salesInvoicesService.getPdfFilenamePrefix(
+      invoice.status as string,
+    );
     if (fmt === 'json') {
       res.setHeader('Content-Type', 'application/json');
       res.setHeader(
         'Content-Disposition',
-        `attachment; filename="invoice-${invoice.invoiceNumber}.json"`,
+        `attachment; filename="${filenamePrefix}${invoice.invoiceNumber}.json"`,
       );
       res.send(JSON.stringify(result, null, 2));
     } else {
       res.setHeader('Content-Type', 'application/xml');
       res.setHeader(
         'Content-Disposition',
-        `attachment; filename="invoice-${invoice.invoiceNumber}.xml"`,
+        `attachment; filename="${filenamePrefix}${invoice.invoiceNumber}.xml"`,
       );
       res.send(result);
     }
@@ -169,10 +172,13 @@ export class SalesInvoicesController {
       id,
     );
 
+    const filenamePrefix = this.salesInvoicesService.getPdfFilenamePrefix(
+      invoice.status as string,
+    );
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader(
       'Content-Disposition',
-      `attachment; filename="invoice-${invoice.invoiceNumber}.pdf"`,
+      `attachment; filename="${filenamePrefix}${invoice.invoiceNumber}.pdf"`,
     );
     res.send(pdfBuffer);
   }

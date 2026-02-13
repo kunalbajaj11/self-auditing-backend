@@ -162,16 +162,23 @@ export class SalesInvoicesService {
       .andWhere('invoice.is_deleted = false');
 
     if (filters.status) {
+      const statusFilter = String(filters.status);
       // Quotations list: include converted-to-proforma so we can track counts
-      if (filters.status === InvoiceStatus.QUOTATION) {
+      if (
+        statusFilter === InvoiceStatus.QUOTATION ||
+        statusFilter === 'quotation'
+      ) {
         query.andWhere('invoice.status IN (:...statuses)', {
           statuses: [
             InvoiceStatus.QUOTATION,
             InvoiceStatus.QUOTATION_CONVERTED_TO_PROFORMA,
           ],
         });
-      } else if (filters.status === InvoiceStatus.PROFORMA_INVOICE) {
-        // Proforma list: include converted-to-invoice so we can track counts
+      } else if (
+        statusFilter === InvoiceStatus.PROFORMA_INVOICE ||
+        statusFilter === 'proforma_invoice'
+      ) {
+        // Proforma list: include converted-to-invoice so original stays visible after conversion
         query.andWhere('invoice.status IN (:...statuses)', {
           statuses: [
             InvoiceStatus.PROFORMA_INVOICE,
@@ -784,6 +791,8 @@ export class SalesInvoicesService {
       customer: dto.customerId ? { id: dto.customerId } : undefined,
       customerName: dto.customerName,
       customerTrn: dto.customerTrn,
+      customerAddress: dto.customerAddress ?? null,
+      customerPhone: dto.customerPhone ?? null,
       publicToken,
       displayOptions:
         dto.displayOptions && typeof dto.displayOptions === 'object'
@@ -981,12 +990,13 @@ export class SalesInvoicesService {
       ? '/api/settings/invoice-template/signature'
       : null;
 
-    // Heading by document type: Proforma / Quotation / Tax Invoice. Converted statuses show as original type.
+    // Heading by document type: always use status so PDF/preview show correct type
+    // (e.g. converted quotation → new proforma shows "Proforma Invoice", not "Quotation")
     const hasVatNumber = Boolean(
       (invoice.organization?.vatNumber ?? '').toString().trim(),
     );
     const docType = this.getDocumentTypeForDisplay(invoice.status as string);
-    const defaultTitle =
+    const invoiceTitle =
       docType === 'proforma_invoice'
         ? 'Proforma Invoice'
         : docType === 'quotation'
@@ -994,10 +1004,6 @@ export class SalesInvoicesService {
           : hasVatNumber
             ? 'Tax Invoice'
             : 'Invoice';
-    const invoiceTitle =
-      (invoice.displayOptions?.invoiceTitle as string) ||
-      templateSettings.invoiceTitle ||
-      defaultTitle;
 
     // Merge per-invoice display options over template (for PDF/preview)
     const displayOpts = (invoice.displayOptions || {}) as Record<string, unknown>;
@@ -1312,6 +1318,16 @@ export class SalesInvoicesService {
   }
 
   /**
+   * Filename prefix for PDF/download by document type (quotation-, proforma-invoice-, invoice-).
+   */
+  getPdfFilenamePrefix(status: string): string {
+    const docType = this.getDocumentTypeForDisplay(status);
+    if (docType === 'quotation') return 'quotation-';
+    if (docType === 'proforma_invoice') return 'proforma-invoice-';
+    return 'invoice-';
+  }
+
+  /**
    * Clone an invoice into a new document with a new number and status (for conversion flows).
    * Copies header and line items; does not copy payments or credit note applications.
    * When manager is provided, all saves run inside that transaction.
@@ -1368,11 +1384,26 @@ export class SalesInvoicesService {
       customer: source.customer?.id ? { id: source.customer.id } : undefined,
       customerName: source.customerName ?? null,
       customerTrn: source.customerTrn ?? null,
+      customerAddress: source.customerAddress ?? null,
+      customerPhone: source.customerPhone ?? null,
       publicToken: this.generatePublicToken(),
-      displayOptions:
-        source.displayOptions && typeof source.displayOptions === 'object'
-          ? source.displayOptions
-          : null,
+      displayOptions: (() => {
+        const base =
+          source.displayOptions && typeof source.displayOptions === 'object'
+            ? { ...source.displayOptions }
+            : {};
+        // Set title by new document type so PDF/preview show "Proforma Invoice" or "Tax Invoice"
+        if (newStatus === InvoiceStatus.PROFORMA_INVOICE) {
+          (base as Record<string, unknown>).invoiceTitle = 'Proforma Invoice';
+        } else if (
+          newStatus === InvoiceStatus.TAX_INVOICE_RECEIVABLE ||
+          newStatus === InvoiceStatus.TAX_INVOICE_BANK_RECEIVED ||
+          newStatus === InvoiceStatus.TAX_INVOICE_CASH_RECEIVED
+        ) {
+          (base as Record<string, unknown>).invoiceTitle = 'Tax Invoice';
+        }
+        return base as typeof source.displayOptions;
+      })(),
     });
 
     const savedInvoice = await invRepo.save(newInvoice);
@@ -1528,7 +1559,8 @@ export class SalesInvoicesService {
         invoiceTemplate: (() => {
           const opts = (invoice.displayOptions || {}) as Record<string, unknown>;
           const docType = this.getDocumentTypeForDisplay(invoice.status as string);
-          const defaultTitle =
+          // PDF title from status so converted docs show correct type (Proforma Invoice / Tax Invoice)
+          const pdfTitle =
             docType === 'proforma_invoice'
               ? 'Proforma Invoice'
               : docType === 'quotation'
@@ -1551,10 +1583,7 @@ export class SalesInvoicesService {
             customColor:
               (opts.invoiceCustomColor as string) ??
               templateSettings.invoiceCustomColor,
-            invoiceTitle:
-              (opts.invoiceTitle as string) ??
-              templateSettings.invoiceTitle ??
-              defaultTitle,
+            invoiceTitle: pdfTitle,
             showCompanyDetails:
               opts.invoiceShowCompanyDetails !== undefined
                 ? (opts.invoiceShowCompanyDetails as boolean)
@@ -1833,7 +1862,8 @@ ${lines}
       .replace(/\{\{totalAmount\}\}/g, totalAmount)
       .replace(/\{\{currency\}\}/g, currency);
 
-    // Send email with PDF attachment
+    // Send email with PDF attachment (filename matches document type)
+    const pdfPrefix = this.getPdfFilenamePrefix(invoice.status as string);
     await this.emailService.sendEmail({
       to: recipientEmail,
       subject: emailSubject,
@@ -1841,7 +1871,7 @@ ${lines}
       html: `<p>${emailMessage.replace(/\n/g, '<br>')}</p>`,
       attachments: [
         {
-          filename: `invoice-${invoice.invoiceNumber}.pdf`,
+          filename: `${pdfPrefix}${invoice.invoiceNumber}.pdf`,
           content: pdfBuffer,
           contentType: 'application/pdf',
         },
@@ -2193,15 +2223,6 @@ ${lines}
       throw new BadRequestException('Cannot update cancelled invoice');
     }
 
-    if (
-      invoice.status === InvoiceStatus.QUOTATION_CONVERTED_TO_PROFORMA ||
-      invoice.status === InvoiceStatus.PROFORMA_CONVERTED_TO_INVOICE
-    ) {
-      throw new BadRequestException(
-        'Cannot update a converted document. It is read-only for tracking.',
-      );
-    }
-
     // Update allowed fields
     if (dto.status !== undefined) {
       // Validate status transition
@@ -2279,11 +2300,21 @@ ${lines}
         invoice.customer = customer;
         invoice.customerName = customer.name;
         invoice.customerTrn = customer.customerTrn;
+        invoice.customerAddress = customer.address ?? null;
+        invoice.customerPhone = customer.phone ?? null;
       } else {
         invoice.customer = null;
         invoice.customerName = dto.customerName;
         invoice.customerTrn = dto.customerTrn;
+        invoice.customerAddress = dto.customerAddress ?? null;
+        invoice.customerPhone = dto.customerPhone ?? null;
       }
+    }
+    if (dto.customerAddress !== undefined) {
+      invoice.customerAddress = dto.customerAddress ?? null;
+    }
+    if (dto.customerPhone !== undefined) {
+      invoice.customerPhone = dto.customerPhone ?? null;
     }
 
     // Update line items if provided
@@ -2514,15 +2545,6 @@ ${lines}
   ): Promise<SalesInvoice> {
     const invoice = await this.findById(organizationId, invoiceId);
 
-    if (
-      invoice.status === InvoiceStatus.QUOTATION_CONVERTED_TO_PROFORMA ||
-      invoice.status === InvoiceStatus.PROFORMA_CONVERTED_TO_INVOICE
-    ) {
-      throw new BadRequestException(
-        'Cannot change status of a converted document. It is read-only for tracking.',
-      );
-    }
-
     // Validate status transition
     if (
       (invoice.status === InvoiceStatus.PAID ||
@@ -2689,10 +2711,17 @@ ${lines}
           );
         }
 
+        if (!quotation.customer?.id) {
+          throw new BadRequestException(
+            'Customer must be selected from the customers list before converting to proforma invoice. Please add the customer first, then edit the quotation and select them.',
+          );
+        }
+
         const newProformaNumber =
-          await this.settingsService.generateNextNumber(
+          await this.settingsService.getConvertedDocumentNumber(
             organizationId,
             NumberingSequenceType.PROFORMA_INVOICE,
+            quotation.invoiceNumber || '',
           );
 
         const newProforma = await this.cloneInvoiceForConversion(
@@ -2757,11 +2786,17 @@ ${lines}
             'Only proforma invoices can be converted to tax invoices',
           );
         }
+        if (!proforma.customer?.id) {
+          throw new BadRequestException(
+            'Customer must be selected from the customers list before converting to tax invoice. Please add the customer first, then edit the proforma and select them.',
+          );
+        }
 
         const newTaxInvoiceNumber =
-          await this.settingsService.generateNextNumber(
+          await this.settingsService.getConvertedDocumentNumber(
             organizationId,
             NumberingSequenceType.INVOICE,
+            proforma.invoiceNumber || '',
           );
 
         const newInvoice = await this.cloneInvoiceForConversion(

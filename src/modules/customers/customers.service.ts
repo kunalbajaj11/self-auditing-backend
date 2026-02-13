@@ -14,6 +14,43 @@ export class CustomersService {
     private readonly customersRepository: Repository<Customer>,
   ) {}
 
+  /**
+   * Generate next customer number for the organization: C + YYYYMMDD + sequence (e.g. C2026021301, C20260213100).
+   * Orders by numeric suffix so 99, 100, 101 are correct.
+   */
+  private async generateNextCustomerNumber(
+    organizationId: string,
+  ): Promise<string> {
+    const now = new Date();
+    const yyyy = now.getFullYear();
+    const mm = String(now.getMonth() + 1).padStart(2, '0');
+    const dd = String(now.getDate()).padStart(2, '0');
+    const datePrefix = `C${yyyy}${mm}${dd}`;
+
+    const rows = await this.customersRepository
+      .createQueryBuilder('c')
+      .select('c.customer_number')
+      .addSelect(
+        'CAST(SUBSTRING(c.customer_number FROM 10) AS INTEGER)',
+        'seq',
+      )
+      .where('c.organization_id = :organizationId', { organizationId })
+      .andWhere('c.customer_number LIKE :prefix', {
+        prefix: `${datePrefix}%`,
+      })
+      .orderBy('seq', 'DESC')
+      .limit(1)
+      .getRawOne<{ customer_number: string; seq: string }>();
+
+    const suffix = rows?.customer_number?.slice(9) ?? '';
+    const nextSeq = suffix ? parseInt(suffix, 10) + 1 : 1;
+    const seqStr =
+      nextSeq >= 100
+        ? String(nextSeq)
+        : String(nextSeq).padStart(2, '0');
+    return `${datePrefix}${seqStr}`;
+  }
+
   async findAll(
     organizationId: string,
     filters?: CustomerFilterDto,
@@ -25,7 +62,7 @@ export class CustomersService {
 
     if (filters?.search) {
       query.andWhere(
-        '(customer.name ILIKE :search OR customer.display_name ILIKE :search OR customer.email ILIKE :search)',
+        '(customer.name ILIKE :search OR customer.display_name ILIKE :search OR customer.email ILIKE :search OR customer.customer_number ILIKE :search)',
         { search: `%${filters.search}%` },
       );
     }
@@ -71,8 +108,12 @@ export class CustomersService {
     organizationId: string,
     dto: CreateCustomerDto,
   ): Promise<Customer> {
+    const customerNumber =
+      dto.customerNumber ?? (await this.generateNextCustomerNumber(organizationId));
+
     const customer = this.customersRepository.create({
       organization: { id: organizationId } as Organization,
+      customerNumber,
       name: dto.name,
       displayName: dto.displayName,
       customerTrn: dto.customerTrn,

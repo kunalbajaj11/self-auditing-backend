@@ -53,6 +53,12 @@ export class SalesInvoice extends AbstractEntity {
   @Column({ name: 'customer_trn', length: 50, nullable: true })
   customerTrn?: string | null;
 
+  @Column({ name: 'customer_address', type: 'text', nullable: true })
+  customerAddress?: string | null;
+
+  @Column({ name: 'customer_phone', length: 50, nullable: true })
+  customerPhone?: string | null;
+
   @Column({ name: 'invoice_date', type: 'date' })
   invoiceDate: string;
 

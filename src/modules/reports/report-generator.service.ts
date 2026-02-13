@@ -7951,7 +7951,7 @@ export class ReportGeneratorService {
         }
         const suppliersRef = (invoice as any).suppliersRef as string | undefined;
         if (suppliersRef) {
-          commercialLines.push({ label: "SUPPLIER'S REF", value: suppliersRef });
+          commercialLines.push({ label: "CUSTOMER REF NUMBER", value: suppliersRef });
         }
         const otherReference = (invoice as any).otherReference as
           | string
@@ -7997,6 +7997,7 @@ export class ReportGeneratorService {
         // Compute content height for each column to size the box dynamically
         let billToContentH = 18 + colHeaderGap; // top pad + header
         const customerName = customer?.name || invoice.customerName || '';
+        const customerNumber = customer?.customerNumber || '';
         const customerAddress = customer?.address || '';
         const customerPhone = customer?.phone || '';
         const customerEmail = customer?.email || '';
@@ -8006,6 +8007,7 @@ export class ReportGeneratorService {
             ? customer?.customerTrn || invoice.customerTrn
             : '';
         if (customerName) billToContentH += doc.heightOfString(customerName, { width: columnWidth }) + lineGap;
+        if (customerNumber) billToContentH += measureLabelValue('Customer ID', customerNumber, columnWidth) + lineGap;
         if (customerAddress) billToContentH += doc.heightOfString(customerAddress, { width: columnWidth }) + lineGap;
         if (customerPhone) billToContentH += measureLabelValue('Phone', customerPhone, columnWidth) + lineGap;
         if (customerEmail) billToContentH += measureLabelValue('Email', customerEmail, columnWidth) + lineGap;
@@ -8107,6 +8109,17 @@ export class ReportGeneratorService {
           const h = doc.heightOfString(customerName, { width: columnWidth });
           doc.fontSize(8).font((doc as any)._fontBold).fillColor(colors.text);
           doc.text(customerName, billToX, billToY, { width: columnWidth });
+          billToY += h + lineGap;
+        }
+
+        if (customerNumber) {
+          const h = drawLabelValue(
+            'Customer ID',
+            customerNumber,
+            billToX,
+            billToY,
+            columnWidth,
+          );
           billToY += h + lineGap;
         }
 
@@ -8622,10 +8635,24 @@ export class ReportGeneratorService {
         }
 
         const taxBase = subtotal - discountAmount;
+        // Prefer VAT rate from line items (so "VAT @ 5%" matches itemized 5%, not a derived 6.7%)
+        const taxableRates = lineItems
+          .filter(
+            (li: any) =>
+              (li.vatTaxType || '').toLowerCase() !== 'zero_rated' &&
+              (li.vatTaxType || '').toLowerCase() !== 'exempt',
+          )
+          .map((li: any) => parseFloat(li.vatRate || '0'))
+          .filter((r: number) => !Number.isNaN(r) && r >= 0);
+        const uniqueRates = [
+          ...new Set(taxableRates.map((r: number) => r.toFixed(1))),
+        ];
         const effectiveVatRate =
-          taxBase > 0 && totalVat >= 0
-            ? ((totalVat / taxBase) * 100).toFixed(1)
-            : '5';
+          uniqueRates.length === 1
+            ? uniqueRates[0]
+            : taxBase > 0 && totalVat >= 0
+              ? ((totalVat / taxBase) * 100).toFixed(1)
+              : '5';
         doc.fontSize(9).font((doc as any)._fontBold).fillColor(colors.text);
         doc.text(`VAT @ ${effectiveVatRate}%:`, totalsLabelX, totalsY);
         doc.text(

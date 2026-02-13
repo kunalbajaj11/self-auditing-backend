@@ -835,6 +835,28 @@ export class SettingsService {
   }
 
   /**
+   * Build document number for conversion (Quotation → Proforma → Invoice) so the number transits.
+   * Uses the target type's prefix with the numeric/suffix part of the source number.
+   * E.g. Quo-123456 → PI-123456, PI-123456 → INV-123456.
+   */
+  async getConvertedDocumentNumber(
+    organizationId: string,
+    targetType: NumberingSequenceType,
+    sourceDocumentNumber: string,
+  ): Promise<string> {
+    const source = (sourceDocumentNumber || '').trim();
+    const parts = source.split('-').filter(Boolean);
+    const rest = parts.length >= 2 ? parts.slice(1).join('-') : source;
+    const sequence = await this.getOrCreateNumberingSequence(
+      organizationId,
+      targetType,
+    );
+    const prefix = (sequence.prefix || this.getDefaultSequence(targetType).prefix || '').trim();
+    if (!prefix) return rest || source;
+    return rest ? `${prefix}-${rest}` : prefix;
+  }
+
+  /**
    * Get next number without incrementing (for preview)
    */
   async getNextNumber(
