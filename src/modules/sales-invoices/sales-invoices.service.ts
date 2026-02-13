@@ -210,7 +210,7 @@ export class SalesInvoicesService {
       });
     }
 
-    query.orderBy('invoice.invoice_date', 'DESC');
+    query.orderBy('invoice.created_at', 'DESC');
     const list = await query.getMany();
     // Ensure totalAmount is set for each invoice (DB column may be generated or missing)
     list.forEach((inv) => {
