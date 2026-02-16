@@ -74,9 +74,8 @@ export class SalesInvoicesService {
 
   /**
    * Post sales invoice to ledger based on status:
-   * - Receivable: Dr Accounts Receivable, Cr Sales Revenue
-   * - Bank Received: Dr Bank, Cr Sales Revenue (or Dr Bank Cr AR if previously Receivable)
-   * - Cash Received: Dr Cash, Cr Sales Revenue (or Dr Cash Cr AR if previously Receivable)
+   * - Receivable: Dr AR (base), Cr Sales Revenue (base); and if VAT: Dr AR (vat), Cr VAT Payable (vat).
+   * - Bank/Cash Received: Dr Bank/Cash, Cr AR (payment clearing).
    */
   private async postInvoiceToLedger(
     organizationId: string,
@@ -84,8 +83,9 @@ export class SalesInvoicesService {
     invoice: SalesInvoice,
     previousStatus?: string,
   ): Promise<void> {
-    const totalAmount =
-      parseFloat(invoice.amount || '0') + parseFloat(invoice.vatAmount || '0');
+    const baseAmount = parseFloat(invoice.amount || '0');
+    const vatAmount = parseFloat(invoice.vatAmount || '0');
+    const totalAmount = baseAmount + vatAmount;
     if (totalAmount <= 0) return;
 
     const status = invoice.status as InvoiceStatus;
@@ -94,21 +94,21 @@ export class SalesInvoicesService {
     const bankReceived = InvoiceStatus.TAX_INVOICE_BANK_RECEIVED;
     const cashReceived = InvoiceStatus.TAX_INVOICE_CASH_RECEIVED;
 
-    const payload = {
-      amount: totalAmount,
+    const basePayload = {
       entryDate: invoice.invoiceDate,
       referenceNumber: invoice.invoiceNumber,
       description: `Invoice: ${invoice.invoiceNumber}`,
       customerVendorId: invoice.customer?.id ?? undefined,
       customerVendorName: invoice.customerName ?? undefined,
-      vatAmount: parseFloat(invoice.vatAmount || '0') || undefined,
     };
 
     try {
       // Status changed from Receivable to Bank/Cash → post payment (clear AR, record Bank/Cash)
       if (prev === receivable && status === bankReceived) {
         await this.journalEntriesService.create(organizationId, userId, {
-          ...payload,
+          ...basePayload,
+          amount: totalAmount,
+          vatAmount: vatAmount || undefined,
           debitAccount: JournalEntryAccount.BANK,
           creditAccount: JournalEntryAccount.ACCOUNTS_RECEIVABLE,
         });
@@ -116,37 +116,59 @@ export class SalesInvoicesService {
       }
       if (prev === receivable && status === cashReceived) {
         await this.journalEntriesService.create(organizationId, userId, {
-          ...payload,
+          ...basePayload,
+          amount: totalAmount,
+          vatAmount: vatAmount || undefined,
           debitAccount: JournalEntryAccount.CASH,
           creditAccount: JournalEntryAccount.ACCOUNTS_RECEIVABLE,
         });
         return;
       }
 
-      // New post: Dr (AR | Bank | Cash), Cr Sales
-      if (status === receivable) {
-        await this.journalEntriesService.create(organizationId, userId, {
-          ...payload,
-          debitAccount: JournalEntryAccount.ACCOUNTS_RECEIVABLE,
-          creditAccount: JournalEntryAccount.SALES_REVENUE,
-        });
-      } else if (status === bankReceived) {
-        await this.journalEntriesService.create(organizationId, userId, {
-          ...payload,
-          debitAccount: JournalEntryAccount.BANK,
-          creditAccount: JournalEntryAccount.SALES_REVENUE,
-        });
-      } else if (status === cashReceived) {
-        await this.journalEntriesService.create(organizationId, userId, {
-          ...payload,
-          debitAccount: JournalEntryAccount.CASH,
-          creditAccount: JournalEntryAccount.SALES_REVENUE,
-        });
+      // New invoice or first post: Dr AR, Cr Sales Revenue (base); Dr AR, Cr VAT Payable (vat) so TB matches.
+      if (status === receivable || status === bankReceived || status === cashReceived) {
+        // 1) Base amount: Dr AR, Cr Sales Revenue (no VAT on this JE so TB doesn't treat it as input VAT)
+        if (baseAmount > 0) {
+          await this.journalEntriesService.create(organizationId, userId, {
+            ...basePayload,
+            amount: baseAmount,
+            vatAmount: undefined,
+            debitAccount: JournalEntryAccount.ACCOUNTS_RECEIVABLE,
+            creditAccount: JournalEntryAccount.SALES_REVENUE,
+          });
+        }
+        // 2) VAT amount: Dr AR, Cr VAT Payable (output VAT)
+        if (vatAmount > 0) {
+          await this.journalEntriesService.create(organizationId, userId, {
+            ...basePayload,
+            amount: vatAmount,
+            vatAmount,
+            debitAccount: JournalEntryAccount.ACCOUNTS_RECEIVABLE,
+            creditAccount: JournalEntryAccount.VAT_PAYABLE,
+          });
+        }
       }
     } catch (err) {
       console.error('Failed to post sales invoice to ledger:', err);
       // Do not fail invoice create/update if JE fails
     }
+  }
+
+  /**
+   * On create, tax invoices must always start as Receivable. Bank/Cash received
+   * is only set when a payment is recorded via recordPayment(), not at creation.
+   */
+  private effectiveStatusOnCreate(dtoStatus: any): InvoiceStatus {
+    if (!dtoStatus) return InvoiceStatus.PROFORMA_INVOICE;
+    const s = String(dtoStatus).toLowerCase();
+    if (
+      s === InvoiceStatus.TAX_INVOICE_RECEIVABLE ||
+      s === InvoiceStatus.TAX_INVOICE_BANK_RECEIVED ||
+      s === InvoiceStatus.TAX_INVOICE_CASH_RECEIVED
+    ) {
+      return InvoiceStatus.TAX_INVOICE_RECEIVABLE;
+    }
+    return dtoStatus as InvoiceStatus;
   }
 
   async findAll(organizationId: string, filters: any): Promise<SalesInvoice[]> {
@@ -190,9 +212,17 @@ export class SalesInvoicesService {
       }
     }
     if (filters.paymentStatus) {
-      query.andWhere('invoice.payment_status = :paymentStatus', {
-        paymentStatus: filters.paymentStatus,
-      });
+      const statusFilter = String(filters.paymentStatus).toLowerCase();
+      // "Payments Received" screen: show invoices that have any payment (paid or partial)
+      if (statusFilter === 'paid') {
+        query.andWhere('invoice.payment_status IN (:...paymentStatuses)', {
+          paymentStatuses: [PaymentStatus.PAID, PaymentStatus.PARTIAL],
+        });
+      } else {
+        query.andWhere('invoice.payment_status = :paymentStatus', {
+          paymentStatus: filters.paymentStatus,
+        });
+      }
     }
     if (filters.customerId) {
       query.andWhere('invoice.customer_id = :customerId', {
@@ -524,6 +554,49 @@ export class SalesInvoicesService {
   }
 
   /**
+   * Build effective T&C list for an invoice: selected items from org list + custom lines.
+   * displayOpts may have invoiceTermsConditionsSelected (number[]) and invoiceTermsConditionsCustom (string[]).
+   */
+  private getEffectiveTermsConditionsList(
+    templateSettings: {
+      invoiceTermsConditionsList?: string[] | null;
+      invoiceTermsConditions?: string | null;
+    },
+    displayOpts: Record<string, unknown>,
+  ): string[] {
+    const orgList =
+      Array.isArray(templateSettings.invoiceTermsConditionsList) &&
+      templateSettings.invoiceTermsConditionsList.length > 0
+        ? templateSettings.invoiceTermsConditionsList
+        : templateSettings.invoiceTermsConditions
+          ? [String(templateSettings.invoiceTermsConditions).trim()].filter(
+              Boolean,
+            )
+          : [];
+    const selected = displayOpts.invoiceTermsConditionsSelected;
+    let effective: string[] = [];
+    if (Array.isArray(selected) && selected.length >= 0) {
+      effective = selected
+        .filter(
+          (i) =>
+            Number.isInteger(Number(i)) &&
+            Number(i) >= 0 &&
+            Number(i) < orgList.length,
+        )
+        .map((i) => orgList[Number(i)] as string);
+    } else {
+      effective = [...orgList];
+    }
+    const custom = displayOpts.invoiceTermsConditionsCustom;
+    if (Array.isArray(custom) && custom.length > 0) {
+      effective = effective.concat(
+        custom.map((s) => (s != null ? String(s).trim() : '')).filter(Boolean),
+      );
+    }
+    return effective;
+  }
+
+  /**
    * Update payment status based on outstanding balance
    */
   async updatePaymentStatus(
@@ -783,9 +856,8 @@ export class SalesInvoicesService {
       despatchedThrough: dto.despatchedThrough,
       destination: dto.destination,
       termsOfDelivery: dto.termsOfDelivery,
-      status: dto.status
-        ? (dto.status as InvoiceStatus)
-        : InvoiceStatus.PROFORMA_INVOICE,
+      // New invoices must start as Receivable; Bank/Cash received only after payment is recorded
+      status: this.effectiveStatusOnCreate(dto.status),
       paymentStatus: PaymentStatus.UNPAID,
       paidAmount: '0',
       customer: dto.customerId ? { id: dto.customerId } : undefined,
@@ -1068,9 +1140,18 @@ export class SalesInvoicesService {
         defaultNotes:
           (displayOpts.invoiceDefaultNotes as string) ??
           templateSettings.invoiceDefaultNotes,
-        termsAndConditions:
-          (displayOpts.invoiceTermsConditions as string) ??
-          templateSettings.invoiceTermsConditions,
+        termsAndConditionsList: this.getEffectiveTermsConditionsList(
+          templateSettings,
+          displayOpts,
+        ),
+        termsAndConditions: (() => {
+          const list = this.getEffectiveTermsConditionsList(
+            templateSettings,
+            displayOpts,
+          );
+          if (list.length === 0) return '';
+          return list.join('\n');
+        })(),
         footerText:
           (displayOpts.invoiceFooterText as string) ??
           templateSettings.invoiceFooterText,
@@ -1612,9 +1693,17 @@ export class SalesInvoicesService {
             defaultNotes:
               (opts.invoiceDefaultNotes as string) ??
               templateSettings.invoiceDefaultNotes,
-            termsAndConditions:
-              (opts.invoiceTermsConditions as string) ??
-              templateSettings.invoiceTermsConditions,
+            termsAndConditionsList: this.getEffectiveTermsConditionsList(
+              templateSettings as any,
+              opts,
+            ),
+            termsAndConditions: (() => {
+              const list = this.getEffectiveTermsConditionsList(
+                templateSettings as any,
+                opts,
+              );
+              return list.length === 0 ? '' : list.join('\n');
+            })(),
             footerText:
               (opts.invoiceFooterText as string) ??
               templateSettings.invoiceFooterText,
@@ -1921,7 +2010,13 @@ ${lines}
 
       const currentPaidAmount = parseFloat(invoice.paidAmount || '0');
       const paymentAmount = parseFloat(dto.amount.toString());
-      const totalAmount = parseFloat(invoice.totalAmount);
+      // totalAmount can be missing if column is computed/not selected; fallback to baseAmount + vatAmount
+      let totalAmount = parseFloat(invoice.totalAmount);
+      if (Number.isNaN(totalAmount)) {
+        const base = parseFloat(invoice.baseAmount || invoice.amount || '0');
+        const vat = parseFloat(invoice.vatAmount || '0');
+        totalAmount = Math.round((base + vat) * 100) / 100;
+      }
 
       // Calculate outstanding balance including credit notes
       const applications = await manager.find(CreditNoteApplication, {
@@ -1949,7 +2044,9 @@ ${lines}
         throw new BadRequestException('Payment amount must be greater than 0');
       }
 
-      // Create payment record
+      // Create payment record. Trial Balance: this invoice will drop out of Accounts
+      // Receivable (when fully paid) and this payment will appear under Cash or Bank
+      // in TB according to paymentMethod (cash / bank_transfer).
       const payment = manager.create(InvoicePayment, {
         invoice: { id: invoiceId },
         organization: { id: organizationId },
@@ -1962,14 +2059,21 @@ ${lines}
 
       await manager.save(payment);
 
-      // Update invoice paidAmount
-      invoice.paidAmount = (currentPaidAmount + paymentAmount).toString();
+      // Update invoice paidAmount (round to 2 decimals to avoid float drift)
+      const newPaidAmount = Math.round((currentPaidAmount + paymentAmount) * 100) / 100;
+      const newPaidAmountStr = newPaidAmount.toFixed(2);
 
       // Update payment status and invoice status
-      const newOutstanding = outstandingBalance - paymentAmount;
-      if (newOutstanding <= 0) {
-        invoice.paymentStatus = PaymentStatus.PAID;
-        invoice.paidDate = dto.paymentDate;
+      // Use a small tolerance (0.01) so floating-point rounding doesn't leave invoice as PARTIAL when fully paid
+      const newOutstanding = Math.round((outstandingBalance - paymentAmount) * 100) / 100;
+      const outstandingTolerance = 0.01;
+      let newPaymentStatus: PaymentStatus;
+      let newInvoiceStatus: InvoiceStatus | undefined;
+      let newPaidDate: string | null = null;
+
+      if (newOutstanding <= outstandingTolerance) {
+        newPaymentStatus = PaymentStatus.PAID;
+        newPaidDate = dto.paymentDate;
 
         // Check if all payments are cash
         const allPayments = await manager.find(InvoicePayment, {
@@ -1983,16 +2087,34 @@ ${lines}
           allPayments.length > 0 &&
           allPayments.every((p) => p.paymentMethod === PaymentMethod.CASH);
 
-        invoice.status = allPaymentsCash
+        newInvoiceStatus = allPaymentsCash
           ? InvoiceStatus.TAX_INVOICE_CASH_RECEIVED
           : InvoiceStatus.TAX_INVOICE_BANK_RECEIVED;
       } else if (currentPaidAmount > 0 || paymentAmount > 0) {
-        invoice.paymentStatus = PaymentStatus.PARTIAL;
+        newPaymentStatus = PaymentStatus.PARTIAL;
       } else {
-        invoice.paymentStatus = PaymentStatus.UNPAID;
+        newPaymentStatus = PaymentStatus.UNPAID;
       }
 
-      await manager.save(invoice);
+      // Persist via QueryBuilder so WHERE is explicit (relation in criteria can be unreliable in update)
+      const updateQb = manager
+        .createQueryBuilder()
+        .update(SalesInvoice)
+        .set({
+          paidAmount: newPaidAmountStr,
+          paymentStatus: newPaymentStatus,
+          ...(newPaidDate != null && { paidDate: newPaidDate }),
+          ...(newInvoiceStatus != null && { status: newInvoiceStatus }),
+        })
+        .where('id = :invoiceId', { invoiceId })
+        .andWhere('organization_id = :organizationId', { organizationId });
+      await updateQb.execute();
+
+      // Keep entity in sync for audit log
+      invoice.paidAmount = newPaidAmountStr;
+      invoice.paymentStatus = newPaymentStatus;
+      if (newPaidDate != null) invoice.paidDate = newPaidDate;
+      if (newInvoiceStatus != null) invoice.status = newInvoiceStatus;
 
       // Audit log
       await this.auditLogsService.record({
@@ -2516,7 +2638,12 @@ ${lines}
     });
 
     const result = await this.findById(organizationId, updated.id);
-    if (dto.status !== undefined) {
+    // Only post to ledger when status actually changed (e.g. Receivable → Bank/Cash after payment).
+    // Editing amount/date/description must not create duplicate journal entries.
+    const statusChanged =
+      dto.status !== undefined &&
+      String(dto.status).toLowerCase() !== String(previousStatus || '').toLowerCase();
+    if (statusChanged) {
       const newStatus = result.status as InvoiceStatus;
       if (
         newStatus === InvoiceStatus.TAX_INVOICE_RECEIVABLE ||
@@ -2845,7 +2972,8 @@ ${lines}
   }
 
   /**
-   * Delete invoice (soft delete)
+   * Delete invoice (soft delete).
+   * Allowed only when no payments have been received (paymentStatus UNPAID, paidAmount 0).
    */
   async delete(
     organizationId: string,
@@ -2854,12 +2982,17 @@ ${lines}
   ): Promise<void> {
     const invoice = await this.findById(organizationId, invoiceId);
 
+    const paidAmount = parseFloat(invoice.paidAmount || '0');
+    const paymentStatus = String(invoice.paymentStatus || '').toLowerCase();
+
     if (
-      invoice.status === InvoiceStatus.PAID ||
-      invoice.status === InvoiceStatus.TAX_INVOICE_BANK_RECEIVED ||
-      invoice.status === InvoiceStatus.TAX_INVOICE_CASH_RECEIVED
+      paymentStatus === PaymentStatus.PAID ||
+      paymentStatus === PaymentStatus.PARTIAL ||
+      paidAmount > 0.001
     ) {
-      throw new BadRequestException('Cannot delete paid invoice');
+      throw new BadRequestException(
+        'Cannot delete invoice that has received payments. Remove payments first or only unpaid invoices can be deleted.',
+      );
     }
 
     // Soft delete

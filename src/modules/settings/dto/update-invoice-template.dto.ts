@@ -1,4 +1,4 @@
-import { IsOptional, IsString, IsBoolean, IsIn } from 'class-validator';
+import { IsOptional, IsString, IsBoolean, IsIn, IsArray } from 'class-validator';
 
 export class UpdateInvoiceTemplateDto {
   @IsOptional()
@@ -65,6 +65,12 @@ export class UpdateInvoiceTemplateDto {
   @IsOptional()
   @IsString()
   invoiceTermsConditions?: string;
+
+  /** Terms & conditions as array of items (each item one condition). Replaces single text when provided. */
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  invoiceTermsConditionsList?: string[];
 
   @IsOptional()
   @IsString()

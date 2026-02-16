@@ -145,6 +145,17 @@ export class SettingsService {
       invoiceShowTermsConditions: settings.invoiceShowTermsConditions ?? true,
       invoiceDefaultPaymentTerms:
         settings.invoiceDefaultPaymentTerms || 'Net 30',
+      invoiceTermsConditionsList: (() => {
+        const list = settings.invoiceTermsConditionsList;
+        if (Array.isArray(list) && list.length > 0) return list;
+        const text = settings.invoiceTermsConditions;
+        if (text && String(text).trim())
+          return String(text)
+            .split(/\r?\n/)
+            .map((s) => s.trim())
+            .filter(Boolean);
+        return [];
+      })(),
       invoiceShowFooter: settings.invoiceShowFooter ?? true,
       invoiceShowItemDescription: settings.invoiceShowItemDescription ?? true,
       invoiceShowItemQuantity: settings.invoiceShowItemQuantity ?? true,

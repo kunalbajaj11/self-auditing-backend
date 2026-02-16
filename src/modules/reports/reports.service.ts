@@ -759,7 +759,8 @@ export class ReportsService {
         };
       });
 
-      // Calculate revenue (matching P&L logic: invoices - credit notes + customer debit notes + journal revenue)
+      // Calculate revenue from invoices only (exclude journal revenue to avoid double count:
+      // invoice posting creates JEs to sales_revenue, so adding both would double revenue).
       const revenueAmount = Number(revenueResult?.revenue || 0);
       const revenueVat = Number(revenueResult?.vat || 0);
       const creditNotesAmount = Number(revenueResult?.creditNoteApplied || 0);
@@ -767,29 +768,9 @@ export class ReportsService {
       const debitNotesAmount = Number(revenueResult?.debitNoteAmount || 0);
       const debitNotesVat = Number(revenueResult?.debitNoteVat || 0);
 
-      // Add journal entry revenue
-      const journalRevenue =
-        Number(
-          journalRevenueResult?.revenuecredit ||
-            journalRevenueResult?.revenueCredit ||
-            0,
-        ) -
-        Number(
-          journalRevenueResult?.revenuedebit ||
-            journalRevenueResult?.revenueDebit ||
-            0,
-        );
-      const journalRevenueVat =
-        Number(
-          journalRevenueResult?.revenuevatcredit ||
-            journalRevenueResult?.revenueVatCredit ||
-            0,
-        ) -
-        Number(
-          journalRevenueResult?.revenuevatdebit ||
-            journalRevenueResult?.revenueVatDebit ||
-            0,
-        );
+      // Do not add journal entry revenue here — it duplicates invoice revenue (auto-posted JEs).
+      // Custom ledger revenue (manual JEs to ledger:xxx revenue accounts) is still included below.
+      const journalRevenue = 0;
 
       // Process custom ledger journal entries for revenue (matching P&L logic)
       const customLedgerRows: any[] = (journalExpenseResult?.customLedgerRows ||
@@ -923,6 +904,34 @@ export class ReportsService {
       const netProfit = netRevenue - totalExpenses;
 
       // Batch 7: Cash/Bank balance queries - split into smaller batches
+      // Invoice payments: exclude proforma/quotation so only tax-invoice receipts affect reports
+      const openingInvoicePaymentsQuery = this.invoicePaymentsRepository
+        .createQueryBuilder('payment')
+        .select([
+          "SUM(CASE WHEN payment.payment_method = 'cash' THEN COALESCE(payment.amount, 0) ELSE 0 END) AS cashReceipts",
+          "SUM(CASE WHEN payment.payment_method = 'bank_transfer' THEN COALESCE(payment.amount, 0) ELSE 0 END) AS bankReceipts",
+        ])
+        .where('payment.organization_id = :organizationId', {
+          organizationId,
+        })
+        .andWhere('payment.is_deleted = false')
+        .andWhere('payment.payment_date < :startDate', { startDate });
+      this.excludeProformaFromInvoicePaymentQuery(openingInvoicePaymentsQuery);
+
+      const periodInvoicePaymentsQuery = this.invoicePaymentsRepository
+        .createQueryBuilder('payment')
+        .select([
+          "SUM(CASE WHEN payment.payment_method = 'cash' THEN COALESCE(payment.amount, 0) ELSE 0 END) AS cashReceipts",
+          "SUM(CASE WHEN payment.payment_method = 'bank_transfer' THEN COALESCE(payment.amount, 0) ELSE 0 END) AS bankReceipts",
+        ])
+        .where('payment.organization_id = :organizationId', {
+          organizationId,
+        })
+        .andWhere('payment.is_deleted = false')
+        .andWhere('payment.payment_date >= :startDate', { startDate })
+        .andWhere('payment.payment_date <= :endDate', { endDate });
+      this.excludeProformaFromInvoicePaymentQuery(periodInvoicePaymentsQuery);
+
       // Batch 7a: Opening payments (2 queries)
       const [openingExpensePaymentsRow, openingInvoicePaymentsRow] =
         await Promise.all([
@@ -939,19 +948,7 @@ export class ReportsService {
             .andWhere('payment.is_deleted = false')
             .andWhere('payment.payment_date < :startDate', { startDate })
             .getRawOne(),
-          // Opening cash receipts
-          this.invoicePaymentsRepository
-            .createQueryBuilder('payment')
-            .select([
-              "SUM(CASE WHEN payment.payment_method = 'cash' THEN COALESCE(payment.amount, 0) ELSE 0 END) AS cashReceipts",
-              "SUM(CASE WHEN payment.payment_method = 'bank_transfer' THEN COALESCE(payment.amount, 0) ELSE 0 END) AS bankReceipts",
-            ])
-            .where('payment.organization_id = :organizationId', {
-              organizationId,
-            })
-            .andWhere('payment.is_deleted = false')
-            .andWhere('payment.payment_date < :startDate', { startDate })
-            .getRawOne(),
+          openingInvoicePaymentsQuery.getRawOne(),
         ]);
 
       // Batch 7b: Period payments (2 queries)
@@ -971,20 +968,7 @@ export class ReportsService {
             .andWhere('payment.payment_date >= :startDate', { startDate })
             .andWhere('payment.payment_date <= :endDate', { endDate })
             .getRawOne(),
-          // Period cash receipts
-          this.invoicePaymentsRepository
-            .createQueryBuilder('payment')
-            .select([
-              "SUM(CASE WHEN payment.payment_method = 'cash' THEN COALESCE(payment.amount, 0) ELSE 0 END) AS cashReceipts",
-              "SUM(CASE WHEN payment.payment_method = 'bank_transfer' THEN COALESCE(payment.amount, 0) ELSE 0 END) AS bankReceipts",
-            ])
-            .where('payment.organization_id = :organizationId', {
-              organizationId,
-            })
-            .andWhere('payment.is_deleted = false')
-            .andWhere('payment.payment_date >= :startDate', { startDate })
-            .andWhere('payment.payment_date <= :endDate', { endDate })
-            .getRawOne(),
+          periodInvoicePaymentsQuery.getRawOne(),
         ]);
 
       // Batch 7c: Cash journal entries (2 queries)
@@ -1470,6 +1454,7 @@ export class ReportsService {
           'SUM(COALESCE(invoice.base_amount, invoice.amount)) AS credit',
         ])
         .where('invoice.organization_id = :organizationId', { organizationId })
+        .andWhere('invoice.is_deleted = false')
         .andWhere('invoice.invoice_date >= :startDate', { startDate })
         .andWhere('invoice.invoice_date <= :endDate', { endDate });
 
@@ -1696,6 +1681,7 @@ export class ReportsService {
           "SUM(CASE WHEN entry.debit_account = 'accounts_payable' THEN (entry.amount + COALESCE(entry.vat_amount, 0)) ELSE 0 END) AS debit",
         ])
         .where('entry.organization_id = :organizationId', { organizationId })
+        .andWhere('entry.is_deleted = false')
         .andWhere('entry.entry_date <= :endDate', { endDate });
 
       const journalApAtStartQuery = this.journalEntriesRepository
@@ -1705,6 +1691,7 @@ export class ReportsService {
           "SUM(CASE WHEN entry.debit_account = 'accounts_payable' THEN (entry.amount + COALESCE(entry.vat_amount, 0)) ELSE 0 END) AS debit",
         ])
         .where('entry.organization_id = :organizationId', { organizationId })
+        .andWhere('entry.is_deleted = false')
         .andWhere('entry.entry_date < :startDate', { startDate });
 
       // Total supplier purchases for the period (incl. VAT), regardless of settlement method
@@ -1723,6 +1710,7 @@ export class ReportsService {
         .createQueryBuilder('entry')
         .select(['SUM(entry.amount + COALESCE(entry.vat_amount, 0)) AS credit'])
         .where('entry.organization_id = :organizationId', { organizationId })
+        .andWhere('entry.is_deleted = false')
         .andWhere("entry.credit_account = 'accounts_payable'")
         .andWhere('entry.entry_date >= :startDate', { startDate })
         .andWhere('entry.entry_date <= :endDate', { endDate });
@@ -1934,34 +1922,30 @@ export class ReportsService {
         AND cn.status IN ('${CreditNoteStatus.DRAFT}', '${CreditNoteStatus.ISSUED}', '${CreditNoteStatus.APPLIED}')
       )`;
 
-      // Calculate receivables - match Balance Sheet query EXACTLY
-      // Balance Sheet uses: invoice_date <= asOfDate with payment_status filter
-      // Trial Balance should use: invoice_date <= endDate with same payment_status filter
-      // Note: Balance Sheet selects both 'category' and 'amount', but we only need the amount
+      // Calculate receivables from actual payments (invoice_payments), not invoice.paid_amount,
+      // so AR drops to 0 once payment is recorded even if invoice row lags. Payments up to endDate/startDate.
+      const paidFromPaymentsSubqueryEnd = `(SELECT COALESCE(SUM(ip.amount), 0) FROM invoice_payments ip WHERE ip.invoice_id = invoice.id AND ip.organization_id = invoice.organization_id AND ip.payment_date <= :endDate)`;
+      const outstandingExprEnd = `COALESCE(invoice.total_amount, 0) - (${paidFromPaymentsSubqueryEnd}) - (${creditNoteApplicationsSubqueryEnd}) - (${unappliedCreditNotesSubqueryEnd})`;
       const receivablesAtEndQuery = this.salesInvoicesRepository
         .createQueryBuilder('invoice')
-        .select([
-          `SUM(COALESCE(invoice.total_amount, 0) - COALESCE(invoice.paid_amount, 0) - (${creditNoteApplicationsSubqueryEnd}) - (${unappliedCreditNotesSubqueryEnd})) AS invoiceAmount`,
-        ])
+        .select([`SUM(GREATEST(0, (${outstandingExprEnd}))) AS invoiceAmount`])
         .where('invoice.organization_id = :organizationId', { organizationId })
+        .andWhere('invoice.is_deleted = false')
         .andWhere('invoice.invoice_date <= :endDate', { endDate })
-        .andWhere('invoice.payment_status IN (:...statuses)', {
-          statuses: [PaymentStatus.UNPAID, PaymentStatus.PARTIAL],
-        })
         .setParameter('organizationId', organizationId)
         .setParameter('endDate', endDate);
       this.excludeProformaInvoice(receivablesAtEndQuery);
 
+      const paidFromPaymentsSubqueryStart = `(SELECT COALESCE(SUM(ip.amount), 0) FROM invoice_payments ip WHERE ip.invoice_id = invoice.id AND ip.organization_id = invoice.organization_id AND ip.payment_date < :startDate)`;
+      const outstandingExprStart = `COALESCE(invoice.total_amount, 0) - (${paidFromPaymentsSubqueryStart}) - (${creditNoteApplicationsSubqueryStart}) - (${unappliedCreditNotesSubqueryStart})`;
       const receivablesAtStartQuery = this.salesInvoicesRepository
         .createQueryBuilder('invoice')
         .select([
-          `SUM(COALESCE(invoice.total_amount, 0) - COALESCE(invoice.paid_amount, 0) - (${creditNoteApplicationsSubqueryStart}) - (${unappliedCreditNotesSubqueryStart})) AS invoiceAmount`,
+          `SUM(GREATEST(0, (${outstandingExprStart}))) AS invoiceAmount`,
         ])
         .where('invoice.organization_id = :organizationId', { organizationId })
+        .andWhere('invoice.is_deleted = false')
         .andWhere('invoice.invoice_date < :startDate', { startDate })
-        .andWhere('invoice.payment_status IN (:...statuses)', {
-          statuses: [PaymentStatus.UNPAID, PaymentStatus.PARTIAL],
-        })
         .setParameter('organizationId', organizationId)
         .setParameter('startDate', startDate);
       this.excludeProformaInvoice(receivablesAtStartQuery);
@@ -2273,6 +2257,7 @@ export class ReportsService {
           "SUM(CASE WHEN payment.payment_method NOT IN ('cash', 'bank_transfer') OR payment.payment_method IS NULL THEN COALESCE(payment.amount, 0) ELSE 0 END) AS otherReceipts",
         ])
         .where('payment.organization_id = :organizationId', { organizationId })
+        .andWhere('payment.is_deleted = false')
         .andWhere('payment.payment_date < :startDate', { startDate });
       this.excludeProformaFromInvoicePaymentQuery(openingInvoicePaymentsQuery);
 
@@ -2284,6 +2269,7 @@ export class ReportsService {
           "SUM(CASE WHEN entry.credit_account = 'cash' THEN entry.amount ELSE 0 END) AS paid",
         ])
         .where('entry.organization_id = :organizationId', { organizationId })
+        .andWhere('entry.is_deleted = false')
         .andWhere('entry.entry_date < :startDate', { startDate })
         .andWhere(
           "(entry.debit_account = 'cash' OR entry.credit_account = 'cash')",
@@ -2297,6 +2283,7 @@ export class ReportsService {
           "SUM(CASE WHEN entry.credit_account = 'bank' THEN entry.amount ELSE 0 END) AS paid",
         ])
         .where('entry.organization_id = :organizationId', { organizationId })
+        .andWhere('entry.is_deleted = false')
         .andWhere('entry.entry_date < :startDate', { startDate })
         .andWhere(
           "(entry.debit_account = 'bank' OR entry.credit_account = 'bank')",
@@ -2324,6 +2311,7 @@ export class ReportsService {
           "SUM(CASE WHEN payment.payment_method NOT IN ('cash', 'bank_transfer') OR payment.payment_method IS NULL THEN COALESCE(payment.amount, 0) ELSE 0 END) AS otherReceipts",
         ])
         .where('payment.organization_id = :organizationId', { organizationId })
+        .andWhere('payment.is_deleted = false')
         .andWhere('payment.payment_date >= :startDate', { startDate })
         .andWhere('payment.payment_date <= :endDate', { endDate });
       this.excludeProformaFromInvoicePaymentQuery(periodInvoicePaymentsQuery);
@@ -2336,6 +2324,7 @@ export class ReportsService {
           "SUM(CASE WHEN entry.credit_account = 'cash' THEN entry.amount ELSE 0 END) AS paid",
         ])
         .where('entry.organization_id = :organizationId', { organizationId })
+        .andWhere('entry.is_deleted = false')
         .andWhere('entry.entry_date >= :startDate', { startDate })
         .andWhere('entry.entry_date <= :endDate', { endDate })
         .andWhere(
@@ -2350,6 +2339,7 @@ export class ReportsService {
           "SUM(CASE WHEN entry.credit_account = 'bank' THEN entry.amount ELSE 0 END) AS paid",
         ])
         .where('entry.organization_id = :organizationId', { organizationId })
+        .andWhere('entry.is_deleted = false')
         .andWhere('entry.entry_date >= :startDate', { startDate })
         .andWhere('entry.entry_date <= :endDate', { endDate })
         .andWhere(
@@ -2519,19 +2509,20 @@ export class ReportsService {
       // in the aggregation (Cash/Bank are handled separately). This avoids missing the non-cash side
       // of cash/bank journal entries (e.g., custom expense paid in cash).
       // IMPORTANT: VAT should be posted separately to VAT Receivable, not included in asset/expense accounts
+      // Fetch one row per JE so we can exclude invoice-posted JEs (reference INV-*) from AR/Sales/VAT Payable
       const journalEntriesQuery = this.journalEntriesRepository
         .createQueryBuilder('entry')
         .select([
           'entry.debit_account AS debitAccount',
           'entry.credit_account AS creditAccount',
-          'SUM(entry.amount) AS amount',
-          'SUM(COALESCE(entry.vat_amount, 0)) AS vatAmount',
+          'entry.amount AS amount',
+          'COALESCE(entry.vat_amount, 0) AS vatAmount',
+          'entry.reference_number AS referenceNumber',
         ])
         .where('entry.organization_id = :organizationId', { organizationId })
+        .andWhere('entry.is_deleted = false')
         .andWhere('entry.entry_date >= :startDate', { startDate })
-        .andWhere('entry.entry_date <= :endDate', { endDate })
-        .groupBy('entry.debit_account')
-        .addGroupBy('entry.credit_account');
+        .andWhere('entry.entry_date <= :endDate', { endDate });
 
       const journalRows = await journalEntriesQuery.getRawMany();
 
@@ -2541,11 +2532,31 @@ export class ReportsService {
       const journalEntryVatReceivable = { amount: 0 }; // Track VAT from journal entries
       const customLedgerIds: string[] = [];
 
+      const isInvoicePostedJE = (ref: string | null | undefined): boolean =>
+        !!ref && /^INV-/i.test(String(ref).trim());
+
       journalRows.forEach((row) => {
         const amount = Number(row.amount || 0);
-        const vatAmount = Number(row.vatamount || row.vatAmount || 0);
+        const vatAmount = Number(row.vatamount ?? row.vatAmount ?? 0);
         const debitAccount = row.debitaccount || row.debitAccount;
         const creditAccount = row.creditaccount || row.creditAccount;
+        const referenceNumber =
+          row.referencenumber ?? row.referenceNumber ?? null;
+
+        // Do not add invoice-posted JEs to AR / Sales Revenue / VAT Payable (already in TB via receivables/invoices)
+        const skipDebit =
+          isInvoicePostedJE(referenceNumber) &&
+          debitAccount
+            ?.toLowerCase()
+            === 'accounts_receivable';
+        const skipCredit =
+          isInvoicePostedJE(referenceNumber) &&
+          (creditAccount
+            ?.toLowerCase()
+            === 'sales_revenue' ||
+            creditAccount
+              ?.toLowerCase()
+              === 'vat_payable');
 
         // Accounts Payable is calculated separately (accruals + JE AP totals) to satisfy the
         // “gross debit/credit movement” requirement. To avoid double-counting AP, we skip
@@ -2564,14 +2575,13 @@ export class ReportsService {
           if (creditLedgerId) customLedgerIds.push(creditLedgerId);
         }
 
-        // Add base amount to debit account
-        // If credit account is Accounts Payable, VAT is part of what you owe (not a receivable)
-        // Otherwise, VAT goes to VAT Receivable (Input VAT)
+        // Add base amount to debit account (skip AR when JE is from invoice posting)
         if (
           debitAccount &&
           !debitIsAp &&
           debitAccount !== 'cash' &&
-          debitAccount !== 'bank'
+          debitAccount !== 'bank' &&
+          !skipDebit
         ) {
           const existing = accountMap.get(debitAccount) || {
             debit: 0,
@@ -2580,22 +2590,24 @@ export class ReportsService {
           existing.debit += amount;
           accountMap.set(debitAccount, existing);
 
-          // If there's VAT on the debit side, add it to VAT Receivable (Input VAT)
-          // This is input VAT that can be reclaimed, regardless of the credit account
-          // (Even if credit is Accounts Payable, the VAT is still input VAT)
-          if (vatAmount > 0) {
+          // If there's VAT on the debit side, add to VAT Receivable only when it is Input VAT.
+          // Exclude Output VAT: credit vat_payable (sales), and debit accounts_receivable (sales-side JEs).
+          const creditIsVatPayable =
+            String(creditAccount || '').toLowerCase().trim() === 'vat_payable';
+          const debitIsAr =
+            String(debitAccount || '').toLowerCase().trim() === 'accounts_receivable';
+          if (vatAmount > 0 && !creditIsVatPayable && !debitIsAr) {
             journalEntryVatReceivable.amount += vatAmount;
           }
         }
 
-        // Add amount to credit account
-        // For Accounts Payable: include VAT (you owe the total including VAT)
-        // For other accounts: base amount only (VAT handled separately)
+        // Add amount to credit account (skip Sales Revenue / VAT Payable when JE is from invoice posting)
         if (
           creditAccount &&
           !creditIsAp &&
           creditAccount !== 'cash' &&
-          creditAccount !== 'bank'
+          creditAccount !== 'bank' &&
+          !skipCredit
         ) {
           const existing = accountMap.get(creditAccount) || {
             debit: 0,
@@ -2663,30 +2675,14 @@ export class ReportsService {
                 accountMeta.category.slice(1)
               : 'Journal Entry';
 
-          // If this is Accounts Receivable from journal entries, merge with existing entry
+          // If this is Accounts Receivable from journal entries, do not merge into existing AR.
+          // AR is already set from receivables (invoices outstanding). Invoice postings create
+          // Dr AR JEs, so merging would double-count. Use receivables-based AR only.
           if (accountName === 'Accounts Receivable' && existingARIndex >= 0) {
-            const existingAR = accounts[existingARIndex];
-            // Merge journal entry amounts with existing AR entry
-            existingAR.debit += balances.debit;
-            existingAR.credit += balances.credit;
-            const isCreditAccount =
-              accountType === 'Equity' ||
-              accountType === 'Revenue' ||
-              accountType === 'Liability';
-            const journalBalance = isCreditAccount
-              ? balances.credit - balances.debit
-              : balances.debit - balances.credit;
-            // Update balance: for assets, balance = debit - credit
-            if (accountType === 'Asset') {
-              existingAR.balance = existingAR.debit - existingAR.credit;
-            } else {
-              existingAR.balance += journalBalance;
-            }
             this.logger.debug(
-              `Merged journal entry Accounts Receivable: debit=${balances.debit}, ` +
-                `credit=${balances.credit}, into existing AR entry, organizationId=${organizationId}`,
+              `Skipping merge of journal entry into Accounts Receivable (use receivables-based amount only), organizationId=${organizationId}`,
             );
-            return; // Skip adding duplicate entry
+            return;
           }
 
           // Merge common system accounts that can be produced by both the main TB logic
@@ -2704,6 +2700,17 @@ export class ReportsService {
 
           if (existingSystemIndex >= 0) {
             const existing = accounts[existingSystemIndex];
+            // Sales Revenue / VAT Payable: already set from invoices (and credit notes/debit notes).
+            // Do not add journal amounts again to avoid double count (invoice + JE from same posting).
+            if (
+              accountName === 'Sales Revenue' ||
+              accountName === 'VAT Payable (Output VAT)'
+            ) {
+              this.logger.debug(
+                `Skipping merge of journal entry into ${accountName} (use invoice-based amount only), organizationId=${organizationId}`,
+              );
+              return;
+            }
             existing.debit += balances.debit;
             existing.credit += balances.credit;
 
@@ -2815,6 +2822,7 @@ export class ReportsService {
           'SUM(entry.amount) AS amount',
         ])
         .where('entry.organization_id = :organizationId', { organizationId })
+        .andWhere('entry.is_deleted = false')
         .andWhere('entry.entry_date < :startDate', { startDate })
         .andWhere(
           "entry.credit_account IN ('share_capital', 'owner_shareholder_account')",
@@ -2836,6 +2844,7 @@ export class ReportsService {
           'SUM(entry.amount) AS amount',
         ])
         .where('entry.organization_id = :organizationId', { organizationId })
+        .andWhere('entry.is_deleted = false')
         .andWhere('entry.entry_date >= :startDate', { startDate })
         .andWhere('entry.entry_date <= :endDate', { endDate })
         .andWhere(
@@ -3169,6 +3178,7 @@ export class ReportsService {
           "SUM(CASE WHEN entry.debit_account = 'accounts_payable' THEN (entry.amount + COALESCE(entry.vat_amount, 0)) ELSE 0 END) AS debit",
         ])
         .where('entry.organization_id = :organizationId', { organizationId })
+        .andWhere('entry.is_deleted = false')
         .andWhere('entry.entry_date < :startDate', { startDate })
         .getRawOne();
 
@@ -3206,17 +3216,18 @@ export class ReportsService {
         AND cn.status IN ('${CreditNoteStatus.DRAFT}', '${CreditNoteStatus.ISSUED}', '${CreditNoteStatus.APPLIED}')
       )`;
 
+      const openingPaidFromPayments = `(SELECT COALESCE(SUM(ip.amount), 0) FROM invoice_payments ip WHERE ip.invoice_id = invoice.id AND ip.organization_id = invoice.organization_id AND ip.payment_date < :startDate)`;
+      const openingOutstandingExpr = `COALESCE(invoice.total_amount, 0) - (${openingPaidFromPayments}) - (${openingCreditNoteApplicationsSubquery}) - (${openingUnappliedCreditNotesSubquery})`;
       const openingReceivablesQuery = this.salesInvoicesRepository
         .createQueryBuilder('invoice')
         .select([
-          `SUM(COALESCE(invoice.total_amount, 0) - COALESCE(invoice.paid_amount, 0) - (${openingCreditNoteApplicationsSubquery}) - (${openingUnappliedCreditNotesSubquery})) AS invoiceAmount`,
+          `SUM(GREATEST(0, (${openingOutstandingExpr}))) AS invoiceAmount`,
         ])
         .where('invoice.organization_id = :organizationId', { organizationId })
+        .andWhere('invoice.is_deleted = false')
         .andWhere('invoice.invoice_date < :startDate', { startDate })
-        .andWhere('invoice.payment_status IN (:...statuses)', {
-          statuses: [PaymentStatus.UNPAID, PaymentStatus.PARTIAL],
-        })
-        .setParameter('organizationId', organizationId);
+        .setParameter('organizationId', organizationId)
+        .setParameter('startDate', startDate);
       this.excludeProformaInvoice(openingReceivablesQuery);
 
       const openingReceivablesRow = await openingReceivablesQuery.getRawOne();
@@ -3287,6 +3298,7 @@ export class ReportsService {
         .createQueryBuilder('entry')
         .select(['SUM(COALESCE(entry.vat_amount, 0)) AS vatAmount'])
         .where('entry.organization_id = :organizationId', { organizationId })
+        .andWhere('entry.is_deleted = false')
         .andWhere('entry.entry_date < :startDate', { startDate })
         .andWhere('CAST(entry.vat_amount AS DECIMAL) > 0')
         .andWhere(
@@ -3406,6 +3418,7 @@ export class ReportsService {
           'SUM(COALESCE(entry.vat_amount, 0)) AS vatAmount',
         ])
         .where('entry.organization_id = :organizationId', { organizationId })
+        .andWhere('entry.is_deleted = false')
         .andWhere('entry.entry_date < :startDate', { startDate })
         .groupBy('entry.debit_account')
         .addGroupBy('entry.credit_account');
@@ -3820,18 +3833,19 @@ export class ReportsService {
         AND cn.status IN ('${CreditNoteStatus.DRAFT}', '${CreditNoteStatus.ISSUED}', '${CreditNoteStatus.APPLIED}')
       )`;
 
+      const paidFromPaymentsAsOf = `(SELECT COALESCE(SUM(ip.amount), 0) FROM invoice_payments ip WHERE ip.invoice_id = invoice.id AND ip.organization_id = invoice.organization_id AND ip.payment_date <= :asOfDate)`;
+      const receivablesOutstandingExpr = `COALESCE(invoice.total_amount, 0) - (${paidFromPaymentsAsOf}) - (${creditNoteApplicationsSubquery}) - (${unappliedCreditNotesSubquery})`;
       const receivablesQuery = this.salesInvoicesRepository
         .createQueryBuilder('invoice')
         .select([
           "'Accounts Receivable' AS category",
-          `SUM(COALESCE(invoice.total_amount, 0) - COALESCE(invoice.paid_amount, 0) - (${creditNoteApplicationsSubquery}) - (${unappliedCreditNotesSubquery})) AS amount`,
+          `SUM(GREATEST(0, (${receivablesOutstandingExpr}))) AS amount`,
         ])
         .where('invoice.organization_id = :organizationId', { organizationId })
+        .andWhere('invoice.is_deleted = false')
         .andWhere('invoice.invoice_date <= :asOfDate', { asOfDate })
-        .andWhere('invoice.payment_status IN (:...statuses)', {
-          statuses: [PaymentStatus.UNPAID, PaymentStatus.PARTIAL],
-        })
-        .setParameter('organizationId', organizationId);
+        .setParameter('organizationId', organizationId)
+        .setParameter('asOfDate', asOfDate);
       this.excludeProformaInvoice(receivablesQuery);
 
       // Customer debit notes (for accounts receivable in Balance Sheet)
@@ -3905,6 +3919,7 @@ export class ReportsService {
           "SUM(CASE WHEN entry.credit_account = 'cash' THEN entry.amount ELSE 0 END) AS paid",
         ])
         .where('entry.organization_id = :organizationId', { organizationId })
+        .andWhere('entry.is_deleted = false')
         .andWhere('entry.entry_date <= :asOfDate', { asOfDate })
         .andWhere(
           "(entry.debit_account = 'cash' OR entry.credit_account = 'cash')",
@@ -3918,6 +3933,7 @@ export class ReportsService {
           "SUM(CASE WHEN entry.credit_account = 'bank' THEN entry.amount ELSE 0 END) AS paid",
         ])
         .where('entry.organization_id = :organizationId', { organizationId })
+        .andWhere('entry.is_deleted = false')
         .andWhere('entry.entry_date <= :asOfDate', { asOfDate })
         .andWhere(
           "(entry.debit_account = 'bank' OR entry.credit_account = 'bank')",
@@ -4369,6 +4385,7 @@ export class ReportsService {
           'SUM(COALESCE(entry.vat_amount, 0)) AS vatAmount',
         ])
         .where('entry.organization_id = :organizationId', { organizationId })
+        .andWhere('entry.is_deleted = false')
         .andWhere('entry.entry_date <= :asOfDate', { asOfDate })
         .groupBy('entry.debit_account')
         .addGroupBy('entry.credit_account');
@@ -4638,6 +4655,7 @@ export class ReportsService {
         .createQueryBuilder('entry')
         .select(['SUM(COALESCE(entry.vat_amount, 0)) AS vatAmount'])
         .where('entry.organization_id = :organizationId', { organizationId })
+        .andWhere('entry.is_deleted = false')
         .andWhere('entry.entry_date <= :asOfDate', { asOfDate })
         .andWhere('CAST(entry.vat_amount AS DECIMAL) > 0')
         .andWhere(
@@ -4688,6 +4706,7 @@ export class ReportsService {
           'SUM(COALESCE(entry.vat_amount, 0)) AS vatAmount',
         ])
         .where('entry.organization_id = :organizationId', { organizationId })
+        .andWhere('entry.is_deleted = false')
         .andWhere("entry.credit_account = 'accounts_payable'")
         .andWhere('entry.entry_date <= :asOfDate', { asOfDate })
         .groupBy('entry.customer_vendor_name')
@@ -4797,17 +4816,18 @@ export class ReportsService {
         AND cn.status IN ('${CreditNoteStatus.DRAFT}', '${CreditNoteStatus.ISSUED}', '${CreditNoteStatus.APPLIED}')
       )`;
 
+      const openingReceivablesPaidFromPayments = `(SELECT COALESCE(SUM(ip.amount), 0) FROM invoice_payments ip WHERE ip.invoice_id = invoice.id AND ip.organization_id = invoice.organization_id AND ip.payment_date < :startDate)`;
+      const openingReceivablesOutstandingExpr = `COALESCE(invoice.total_amount, 0) - (${openingReceivablesPaidFromPayments}) - (${openingCreditNoteApplicationsSubquery}) - (${openingUnappliedCreditNotesSubquery})`;
       const openingReceivablesQuery = this.salesInvoicesRepository
         .createQueryBuilder('invoice')
         .select([
-          `SUM(COALESCE(invoice.total_amount, 0) - COALESCE(invoice.paid_amount, 0) - (${openingCreditNoteApplicationsSubquery}) - (${openingUnappliedCreditNotesSubquery})) AS amount`,
+          `SUM(GREATEST(0, (${openingReceivablesOutstandingExpr}))) AS amount`,
         ])
         .where('invoice.organization_id = :organizationId', { organizationId })
+        .andWhere('invoice.is_deleted = false')
         .andWhere('invoice.invoice_date < :startDate', { startDate })
-        .andWhere('invoice.payment_status IN (:...statuses)', {
-          statuses: [PaymentStatus.UNPAID, PaymentStatus.PARTIAL],
-        })
-        .setParameter('organizationId', organizationId);
+        .setParameter('organizationId', organizationId)
+        .setParameter('startDate', startDate);
       this.excludeProformaInvoice(openingReceivablesQuery);
 
       // Opening customer debit notes (for accounts receivable in Balance Sheet)
@@ -4854,6 +4874,7 @@ export class ReportsService {
           "SUM(CASE WHEN entry.credit_account = 'cash' THEN entry.amount ELSE 0 END) AS paid",
         ])
         .where('entry.organization_id = :organizationId', { organizationId })
+        .andWhere('entry.is_deleted = false')
         .andWhere('entry.entry_date < :startDate', { startDate })
         .andWhere(
           "(entry.debit_account = 'cash' OR entry.credit_account = 'cash')",
@@ -4867,6 +4888,7 @@ export class ReportsService {
           "SUM(CASE WHEN entry.credit_account = 'bank' THEN entry.amount ELSE 0 END) AS paid",
         ])
         .where('entry.organization_id = :organizationId', { organizationId })
+        .andWhere('entry.is_deleted = false')
         .andWhere('entry.entry_date < :startDate', { startDate })
         .andWhere(
           "(entry.debit_account = 'bank' OR entry.credit_account = 'bank')",
@@ -4961,6 +4983,7 @@ export class ReportsService {
           'SUM(entry.amount) AS amount',
         ])
         .where('entry.organization_id = :organizationId', { organizationId })
+        .andWhere('entry.is_deleted = false')
         .andWhere('entry.entry_date < :startDate', { startDate })
         .groupBy('entry.debit_account')
         .addGroupBy('entry.credit_account');
@@ -6462,6 +6485,7 @@ export class ReportsService {
         'entry.reference_number AS referenceNumber',
       ])
       .where('entry.organization_id = :organizationId', { organizationId })
+      .andWhere('entry.is_deleted = false')
       .andWhere("entry.credit_account = 'accounts_payable'")
       .andWhere('entry.entry_date <= :asOfDate', { asOfDate });
 
@@ -6984,19 +7008,19 @@ export class ReportsService {
         AND cn.status IN ('${CreditNoteStatus.DRAFT}', '${CreditNoteStatus.ISSUED}', '${CreditNoteStatus.APPLIED}')
       )`;
 
+      const openingPaidFromPaymentsCN = `(SELECT COALESCE(SUM(ip.amount), 0) FROM invoice_payments ip WHERE ip.invoice_id = invoice.id AND ip.organization_id = invoice.organization_id AND ip.payment_date < :startDate)`;
+      const openingOutstandingExprCN = `COALESCE(invoice.total_amount, 0) - (${openingPaidFromPaymentsCN}) - (${openingCreditNoteApplicationsSubquery}) - (${openingUnappliedCreditNotesSubquery})`;
       const openingInvoicesQueryWithCN = this.salesInvoicesRepository
         .createQueryBuilder('invoice')
         .select([
-          `SUM(COALESCE(invoice.total_amount, 0) - COALESCE(invoice.paid_amount, 0) - (${openingCreditNoteApplicationsSubquery}) - (${openingUnappliedCreditNotesSubquery})) AS outstanding`,
+          `SUM(GREATEST(0, (${openingOutstandingExprCN}))) AS outstanding`,
         ])
         .where('invoice.organization_id = :organizationId', {
           organizationId,
         })
         .andWhere('invoice.invoice_date < :startDate', { startDate })
-        .andWhere('invoice.payment_status IN (:...statuses)', {
-          statuses: [PaymentStatus.UNPAID, PaymentStatus.PARTIAL],
-        })
-        .setParameter('organizationId', organizationId);
+        .setParameter('organizationId', organizationId)
+        .setParameter('startDate', startDate);
       this.excludeProformaInvoice(openingInvoicesQueryWithCN);
 
       if (filters?.['paymentStatus']) {
@@ -7042,20 +7066,18 @@ export class ReportsService {
           })
           .getQuery();
 
+      const periodPaidFromPayments = `(SELECT COALESCE(SUM(ip.amount), 0) FROM invoice_payments ip WHERE ip.invoice_id = invoice.id AND ip.organization_id = invoice.organization_id AND ip.payment_date <= :asOfDate)`;
+      const periodOutstandingExpr = `COALESCE(invoice.total_amount, 0) - (${periodPaidFromPayments}) - (${periodCreditNoteApplicationsSubquery})`;
       const periodInvoicesQuery = this.salesInvoicesRepository
         .createQueryBuilder('invoice')
-        .select([
-          `SUM(COALESCE(invoice.total_amount, 0) - COALESCE(invoice.paid_amount, 0) - (${periodCreditNoteApplicationsSubquery})) AS outstanding`,
-        ])
+        .select([`SUM(GREATEST(0, (${periodOutstandingExpr}))) AS outstanding`])
         .where('invoice.organization_id = :organizationId', {
           organizationId,
         })
         .andWhere('invoice.invoice_date >= :startDate', { startDate })
         .andWhere('invoice.invoice_date <= :asOfDate', { asOfDate })
-        .andWhere('invoice.payment_status IN (:...statuses)', {
-          statuses: [PaymentStatus.UNPAID, PaymentStatus.PARTIAL],
-        })
-        .setParameter('organizationId', organizationId);
+        .setParameter('organizationId', organizationId)
+        .setParameter('asOfDate', asOfDate);
       this.excludeProformaInvoice(periodInvoicesQuery);
 
       if (filters?.['paymentStatus']) {
@@ -7314,6 +7336,7 @@ export class ReportsService {
         'entry.reference_number AS referenceNumber',
       ])
       .where('entry.organization_id = :organizationId', { organizationId })
+      .andWhere('entry.is_deleted = false')
       .andWhere('entry.entry_date >= :startDate', { startDate })
       .andWhere('entry.entry_date <= :endDate', { endDate })
       .andWhere('CAST(entry.vat_amount AS DECIMAL) > 0')
@@ -9111,6 +9134,7 @@ export class ReportsService {
             .where('entry.organization_id = :organizationId', {
               organizationId,
             })
+            .andWhere('entry.is_deleted = false')
             .andWhere('entry.entry_date < :startDate', { startDate });
 
           const [accrualsAtStartRow, journalApAtStartRow] = await Promise.all([
@@ -9150,18 +9174,18 @@ export class ReportsService {
             AND cn.id NOT IN (SELECT DISTINCT cna2.credit_note_id FROM credit_note_applications cna2 WHERE cna2.organization_id = '${escapedOrgId}')
           )`;
 
+          const paidFromPaymentsStartEscaped = `(SELECT COALESCE(SUM(ip.amount), 0) FROM invoice_payments ip WHERE ip.invoice_id = invoice.id AND ip.organization_id = invoice.organization_id AND ip.payment_date < :startDate)`;
+          const receivablesAtStartOutstandingExpr = `COALESCE(invoice.total_amount, 0) - (${paidFromPaymentsStartEscaped}) - (${creditNoteApplicationsSubqueryStart}) - (${unappliedCreditNotesSubqueryStart})`;
           const receivablesAtStartQuery = this.salesInvoicesRepository
             .createQueryBuilder('invoice')
             .select([
-              `SUM(COALESCE(invoice.total_amount, 0) - COALESCE(invoice.paid_amount, 0) - (${creditNoteApplicationsSubqueryStart}) - (${unappliedCreditNotesSubqueryStart})) AS invoiceAmount`,
+              `SUM(GREATEST(0, (${receivablesAtStartOutstandingExpr}))) AS invoiceAmount`,
             ])
             .where('invoice.organization_id = :organizationId', {
               organizationId,
             })
+            .andWhere('invoice.is_deleted = false')
             .andWhere('invoice.invoice_date < :startDate', { startDate })
-            .andWhere('invoice.payment_status IN (:...statuses)', {
-              statuses: [PaymentStatus.UNPAID, PaymentStatus.PARTIAL],
-            })
             .setParameter('organizationId', organizationId)
             .setParameter('startDate', startDate);
           this.excludeProformaInvoice(receivablesAtStartQuery);
@@ -9189,6 +9213,7 @@ export class ReportsService {
             .where('entry.organization_id = :organizationId', {
               organizationId,
             })
+            .andWhere('entry.is_deleted = false')
             .andWhere('entry.entry_date < :startDate', { startDate });
 
           const [
@@ -9692,6 +9717,7 @@ export class ReportsService {
             .where('entry.organization_id = :organizationId', {
               organizationId,
             })
+            .andWhere('entry.is_deleted = false')
             .andWhere('entry.entry_date >= :startDate', { startDate })
             .andWhere('entry.entry_date <= :endDate', { endDate })
             .andWhere(
@@ -9759,12 +9785,13 @@ export class ReportsService {
 
       // Handle Sales Revenue
       else if (accountName === 'Sales Revenue' && accountType === 'Revenue') {
-        // Get invoices
+        // Get invoices (exclude soft-deleted so deleted invoices do not appear in account entries)
         const salesRevenueInvoicesQuery = this.salesInvoicesRepository
           .createQueryBuilder('invoice')
           .where('invoice.organization_id = :organizationId', {
             organizationId,
           })
+          .andWhere('invoice.is_deleted = false')
           .andWhere('invoice.invoice_date >= :startDate', { startDate })
           .andWhere('invoice.invoice_date <= :endDate', { endDate })
           .orderBy('invoice.invoice_date', 'ASC')
@@ -10113,6 +10140,7 @@ export class ReportsService {
         const journalEntries = await this.journalEntriesRepository
           .createQueryBuilder('entry')
           .where('entry.organization_id = :organizationId', { organizationId })
+          .andWhere('entry.is_deleted = false')
           .andWhere('entry.entry_date >= :startDate', { startDate })
           .andWhere('entry.entry_date <= :endDate', { endDate })
           .andWhere(
@@ -10159,15 +10187,34 @@ export class ReportsService {
         accountName === 'Accounts Receivable' &&
         accountType === 'Asset'
       ) {
-        // Get unpaid/partial invoices up to end date
-        // Note: Accounts Receivable closing balance includes ALL unpaid invoices up to endDate
-        // This matches the trial balance calculation which shows closing balance
+        // All invoice numbers (to exclude their auto-posted JEs from AR entries)
+        const allInvoiceNumbersQuery = this.salesInvoicesRepository
+          .createQueryBuilder('invoice')
+          .select('invoice.invoice_number')
+          .where('invoice.organization_id = :organizationId', {
+            organizationId,
+          })
+          .andWhere('invoice.is_deleted = false')
+          .andWhere('invoice.invoice_date <= :endDate', { endDate });
+        this.excludeProformaInvoice(allInvoiceNumbersQuery);
+        const allInvoiceNumbers =
+          (await allInvoiceNumbersQuery.getRawMany()) as Array<{
+            invoice_number: string | null;
+          }>;
+        const invoiceNumbersToExcludeFromJE = new Set(
+          allInvoiceNumbers
+            .map((r) => (r.invoice_number || '').trim())
+            .filter(Boolean),
+        );
+
+        // Get unpaid/partial invoices up to end date (for invoice rows and outstanding)
         const arInvoicesQuery = this.salesInvoicesRepository
           .createQueryBuilder('invoice')
           .leftJoinAndSelect('invoice.customer', 'customer')
           .where('invoice.organization_id = :organizationId', {
             organizationId,
           })
+          .andWhere('invoice.is_deleted = false')
           .andWhere('invoice.invoice_date <= :endDate', { endDate })
           .andWhere('invoice.payment_status IN (:...statuses)', {
             statuses: [PaymentStatus.UNPAID, PaymentStatus.PARTIAL],
@@ -10177,18 +10224,19 @@ export class ReportsService {
         this.excludeProformaInvoice(arInvoicesQuery);
         const invoices = await arInvoicesQuery.getMany();
 
+        const invoiceNumbersInList = new Set<string>();
         invoices.forEach((invoice) => {
           // Use totalAmount (includes VAT) to match trial balance calculation
-          // Trial balance shows Accounts Receivable with VAT included
-          const totalAmount = Number(
-            invoice.totalAmount ||
-              invoice.baseAmount + (invoice.vatAmount || 0) ||
-              invoice.amount,
-          );
-          const baseAmount = Number(invoice.baseAmount || invoice.amount);
+          const totalAmount =
+            Number(invoice.totalAmount) ||
+            Number(invoice.amount || 0) + Number(invoice.vatAmount || 0);
+          const baseAmount = Number(invoice.baseAmount || invoice.amount || 0);
           const vatAmount = Number(invoice.vatAmount || 0);
           const customerName =
             invoice.customer?.name ?? invoice.customerName ?? undefined;
+          if (invoice.invoiceNumber) {
+            invoiceNumbersInList.add(String(invoice.invoiceNumber).trim());
+          }
 
           entries.push({
             id: invoice.id,
@@ -10199,12 +10247,11 @@ export class ReportsService {
             customerName,
             debitAmount: totalAmount, // Include VAT to match trial balance
             creditAmount: 0,
-            amount: totalAmount, // Include VAT to match trial balance
+            amount: totalAmount,
             currency: invoice.currency,
             status: invoice.paymentStatus,
             entityId: invoice.id,
             entityType: 'invoice',
-            // Include VAT breakdown for display
             vatAmount: vatAmount > 0 ? vatAmount : undefined,
             baseAmount: baseAmount,
           });
@@ -10260,10 +10307,12 @@ export class ReportsService {
           });
         });
 
-        // Get journal entries for Accounts Receivable
+        // Get journal entries for Accounts Receivable. Exclude JEs whose reference is ANY
+        // invoice number (auto-posted invoice JEs), so we never show duplicate AR from JEs.
         const journalEntries = await this.journalEntriesRepository
           .createQueryBuilder('entry')
           .where('entry.organization_id = :organizationId', { organizationId })
+          .andWhere('entry.is_deleted = false')
           .andWhere('entry.entry_date >= :startDate', { startDate })
           .andWhere('entry.entry_date <= :endDate', { endDate })
           .andWhere(
@@ -10274,6 +10323,10 @@ export class ReportsService {
           .getMany();
 
         journalEntries.forEach((entry) => {
+          const ref = entry.referenceNumber ? String(entry.referenceNumber).trim() : '';
+          if (ref && invoiceNumbersToExcludeFromJE.has(ref)) {
+            return; // Skip auto-posted JEs for any invoice (paid or not)
+          }
           const amount = Number(entry.amount);
           if (entry.debitAccount === 'accounts_receivable') {
             entries.push({
@@ -10404,6 +10457,7 @@ export class ReportsService {
         const journalEntries = await this.journalEntriesRepository
           .createQueryBuilder('entry')
           .where('entry.organization_id = :organizationId', { organizationId })
+          .andWhere('entry.is_deleted = false')
           .andWhere('entry.entry_date >= :startDate', { startDate })
           .andWhere('entry.entry_date <= :endDate', { endDate })
           .andWhere(
@@ -10719,6 +10773,7 @@ export class ReportsService {
             .where('entry.organization_id = :organizationId', {
               organizationId,
             })
+            .andWhere('entry.is_deleted = false')
             .andWhere('entry.entry_date >= :startDate', { startDate })
             .andWhere('entry.entry_date <= :endDate', { endDate })
             .andWhere(

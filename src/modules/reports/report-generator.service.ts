@@ -7691,6 +7691,9 @@ export class ReportGeneratorService {
           paymentTerms: invoiceTemplate.paymentTerms,
           defaultNotes: invoiceTemplate.defaultNotes,
           termsAndConditions: invoiceTemplate.termsAndConditions,
+          termsAndConditionsList: (invoiceTemplate as any).termsAndConditionsList as
+            | string[]
+            | undefined,
           footerText: invoiceTemplate.footerText,
           showFooter: invoiceTemplate.showFooter ?? true,
           showItemDescription: invoiceTemplate.showItemDescription ?? true,
@@ -8709,17 +8712,27 @@ export class ReportGeneratorService {
           .trim();
         const hasNotes =
           effectiveNotes && effectiveNotes.trim().length > 0;
+        const termsList = (templateSettings as any).termsAndConditionsList as
+          | string[]
+          | undefined;
         const hasTerms =
           templateSettings.showTermsAndConditions &&
-          templateSettings.termsAndConditions &&
-          templateSettings.termsAndConditions.trim().length > 0;
-        // Normalize T&C: preserve newlines so each line appears on its own in the PDF
+          (Array.isArray(termsList) && termsList.length > 0
+            ? termsList.some((s) => String(s).trim().length > 0)
+            : templateSettings.termsAndConditions &&
+              templateSettings.termsAndConditions.trim().length > 0);
+        // Normalize T&C: use list if present (one line per item), else legacy string
         const effectiveTerms = hasTerms
-          ? (templateSettings.termsAndConditions || '')
-              .replace(/\r\n/g, '\n')
-              .replace(/\r/g, '\n')
-              .replace(/\n{3,}/g, '\n\n')
-              .trim()
+          ? Array.isArray(termsList) && termsList.length > 0
+            ? termsList
+                .map((s) => String(s).trim())
+                .filter(Boolean)
+                .join('\n')
+            : (templateSettings.termsAndConditions || '')
+                .replace(/\r\n/g, '\n')
+                .replace(/\r/g, '\n')
+                .replace(/\n{3,}/g, '\n\n')
+                .trim()
           : '';
 
         if (hasBankDetails || hasNotes || hasTerms) {

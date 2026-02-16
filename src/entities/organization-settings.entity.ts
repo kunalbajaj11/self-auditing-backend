@@ -65,6 +65,15 @@ export class OrganizationSettings extends AbstractEntity {
   @Column({ name: 'invoice_terms_conditions', type: 'text', nullable: true })
   invoiceTermsConditions?: string | null;
 
+  /** Terms & conditions as a list of items (each item is one condition). Used when invoiceTermsConditionsList is set. */
+  @Column({
+    name: 'invoice_terms_conditions_list',
+    type: 'jsonb',
+    nullable: true,
+    default: () => "'[]'",
+  })
+  invoiceTermsConditionsList?: string[] | null;
+
   @Column({ name: 'invoice_footer_text', type: 'text', nullable: true })
   invoiceFooterText?: string | null;
 
