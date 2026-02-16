@@ -83,7 +83,10 @@ export class ReportsService {
     return id.length > 0 ? id : null;
   }
 
-  /** Exclude non-tax invoices (proforma, quotations) from report queries; they are only shown on their dedicated pages. */
+  /**
+   * Exclude proforma and quotation from ALL report queries.
+   * Proforma/quotation must have zero impact on Trial Balance, ledgers, P&L, and any other report.
+   */
   private excludeProformaInvoice(qb: {
     andWhere: (cond: string, params?: object) => unknown;
   }): void {
@@ -2262,6 +2265,7 @@ export class ReportsService {
       this.excludeProformaFromInvoicePaymentQuery(openingInvoicePaymentsQuery);
 
       // Query journal entries for Cash separately (opening)
+      // Exclude invoice-payment JEs (Dr Cash Cr AR, ref INV-*): already counted in invoice_payments
       const openingCashJournalEntriesQuery = this.journalEntriesRepository
         .createQueryBuilder('entry')
         .select([
@@ -2273,9 +2277,13 @@ export class ReportsService {
         .andWhere('entry.entry_date < :startDate', { startDate })
         .andWhere(
           "(entry.debit_account = 'cash' OR entry.credit_account = 'cash')",
+        )
+        .andWhere(
+          "NOT (entry.reference_number LIKE 'INV-%' AND entry.credit_account = 'accounts_receivable' AND entry.debit_account = 'cash')",
         );
 
       // Query journal entries for Bank separately (opening)
+      // Exclude invoice-payment JEs (Dr Bank Cr AR, ref INV-*): already counted in invoice_payments
       const openingBankJournalEntriesQuery = this.journalEntriesRepository
         .createQueryBuilder('entry')
         .select([
@@ -2287,6 +2295,9 @@ export class ReportsService {
         .andWhere('entry.entry_date < :startDate', { startDate })
         .andWhere(
           "(entry.debit_account = 'bank' OR entry.credit_account = 'bank')",
+        )
+        .andWhere(
+          "NOT (entry.reference_number LIKE 'INV-%' AND entry.credit_account = 'accounts_receivable' AND entry.debit_account = 'bank')",
         );
 
       // Separate cash and bank payments for period
@@ -2317,6 +2328,7 @@ export class ReportsService {
       this.excludeProformaFromInvoicePaymentQuery(periodInvoicePaymentsQuery);
 
       // Query journal entries for Cash separately (period)
+      // Exclude invoice-payment JEs (Dr Cash Cr AR, ref INV-*): already counted in invoice_payments
       const periodCashJournalEntriesQuery = this.journalEntriesRepository
         .createQueryBuilder('entry')
         .select([
@@ -2329,9 +2341,13 @@ export class ReportsService {
         .andWhere('entry.entry_date <= :endDate', { endDate })
         .andWhere(
           "(entry.debit_account = 'cash' OR entry.credit_account = 'cash')",
+        )
+        .andWhere(
+          "NOT (entry.reference_number LIKE 'INV-%' AND entry.credit_account = 'accounts_receivable' AND entry.debit_account = 'cash')",
         );
 
       // Query journal entries for Bank separately (period)
+      // Exclude invoice-payment JEs (Dr Bank Cr AR, ref INV-*): already counted in invoice_payments
       const periodBankJournalEntriesQuery = this.journalEntriesRepository
         .createQueryBuilder('entry')
         .select([
@@ -2344,6 +2360,9 @@ export class ReportsService {
         .andWhere('entry.entry_date <= :endDate', { endDate })
         .andWhere(
           "(entry.debit_account = 'bank' OR entry.credit_account = 'bank')",
+        )
+        .andWhere(
+          "NOT (entry.reference_number LIKE 'INV-%' AND entry.credit_account = 'accounts_receivable' AND entry.debit_account = 'bank')",
         );
 
       // Split into batches to reduce concurrent connections (8 queries -> 3 batches)
@@ -8374,6 +8393,40 @@ export class ReportsService {
             });
           });
 
+          // Expenses WITHOUT accruals in period (so AP ledger matches TB and shows all supplier invoices)
+          const expensesWithoutAccruals = await this.expensesRepository
+            .createQueryBuilder('expense')
+            .leftJoin('expense.accrualDetail', 'accrualNo')
+            .where('expense.organization_id = :organizationId', {
+              organizationId,
+            })
+            .andWhere('expense.is_deleted = false')
+            .andWhere('expense.expense_date >= :startDate', { startDate })
+            .andWhere('expense.expense_date <= :endDate', { endDate })
+            .andWhere("(expense.type IS NULL OR expense.type != 'credit')")
+            .andWhere('accrualNo.id IS NULL')
+            .orderBy('expense.expense_date', 'ASC')
+            .getMany();
+
+          expensesWithoutAccruals.forEach((expense) => {
+            const totalAmount =
+              (parseFloat(expense.amount || '0') || 0) +
+              (parseFloat(expense.vatAmount || '0') || 0);
+            transactions.push({
+              date: expense.expenseDate,
+              description:
+                expense.description ||
+                `Expense: ${expense.invoiceNumber || expense.id}`,
+              referenceNumber: expense.invoiceNumber || undefined,
+              source: 'expense',
+              sourceId: expense.id,
+              debitAmount: 0,
+              creditAmount: totalAmount,
+              accountName: account.name,
+              accountCode: account.code,
+            });
+          });
+
           // Debit note applications to expenses (reduces AP)
           // Get applications within the date range for adding to transactions
           const debitNoteExpenseApplications =
@@ -8474,6 +8527,40 @@ export class ReportsService {
               .getMany();
 
           expensePaymentsForAccruals.forEach((payment) => {
+            transactions.push({
+              date: payment.paymentDate,
+              description: `Payment: ${
+                payment.expense?.description ||
+                payment.expense?.invoiceNumber ||
+                payment.id
+              }`,
+              referenceNumber: payment.expense?.invoiceNumber || payment.id,
+              source: 'expense_payment',
+              sourceId: payment.id,
+              debitAmount: parseFloat(payment.amount || '0') || 0,
+              creditAmount: 0,
+              accountName: account.name,
+              accountCode: account.code,
+            });
+          });
+
+          // Payments against expenses WITHOUT accruals (reduces AP)
+          const expensePaymentsWithoutAccruals =
+            await this.expensePaymentsRepository
+              .createQueryBuilder('payment')
+              .leftJoin('payment.expense', 'expense')
+              .leftJoin('expense.accrualDetail', 'accrualNo')
+              .where('payment.organization_id = :organizationId', {
+                organizationId,
+              })
+              .andWhere('payment.is_deleted = false')
+              .andWhere('payment.payment_date >= :startDate', { startDate })
+              .andWhere('payment.payment_date <= :endDate', { endDate })
+              .andWhere('accrualNo.id IS NULL')
+              .orderBy('payment.payment_date', 'ASC')
+              .getMany();
+
+          expensePaymentsWithoutAccruals.forEach((payment) => {
             transactions.push({
               date: payment.paymentDate,
               description: `Payment: ${
