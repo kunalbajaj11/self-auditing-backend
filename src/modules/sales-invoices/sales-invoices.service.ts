@@ -250,6 +250,63 @@ export class SalesInvoicesService {
         inv.totalAmount = (amount + vatAmount).toFixed(2);
       }
     });
+    // Heal inconsistent state: status = Cash/Bank received but paymentStatus = Unpaid (list view)
+    const receivedStatuses = [
+      InvoiceStatus.TAX_INVOICE_CASH_RECEIVED,
+      InvoiceStatus.TAX_INVOICE_BANK_RECEIVED,
+    ];
+    const toHeal = list.filter(
+      (inv) =>
+        receivedStatuses.includes(inv.status as InvoiceStatus) &&
+        inv.paymentStatus !== PaymentStatus.PAID,
+    );
+    if (toHeal.length > 0) {
+      const ids = toHeal.map((inv) => inv.id);
+      const sums = await this.paymentsRepository
+        .createQueryBuilder('p')
+        .select('p.invoice_id', 'invoiceId')
+        .addSelect('COALESCE(SUM(CAST(p.amount AS DECIMAL)), 0)', 'total')
+        .addSelect('MAX(p.payment_date)', 'lastDate')
+        .where('p.invoice_id IN (:...ids)', { ids })
+        .groupBy('p.invoice_id')
+        .getRawMany<{ invoiceId: string; total: string; lastDate: string | null }>();
+      const healedIds = new Set(sums.map((r) => r.invoiceId));
+      for (const row of sums) {
+        const inv = toHeal.find((i) => i.id === row.invoiceId);
+        if (!inv) continue;
+        const total = parseFloat(row.total);
+        if (total <= 0) continue;
+        const paidAmountStr = total.toFixed(2);
+        await this.invoicesRepository.update(
+          { id: inv.id, organization: { id: organizationId } },
+          {
+            paymentStatus: PaymentStatus.PAID,
+            paidAmount: paidAmountStr,
+            paidDate: row.lastDate ?? null,
+          },
+        );
+        inv.paymentStatus = PaymentStatus.PAID;
+        inv.paidAmount = paidAmountStr;
+        inv.paidDate = row.lastDate ?? null;
+      }
+      // Revert status for received-but-no-payments (e.g. set via edit)
+      for (const inv of toHeal) {
+        if (healedIds.has(inv.id)) continue;
+        await this.invoicesRepository.update(
+          { id: inv.id, organization: { id: organizationId } },
+          {
+            status: InvoiceStatus.TAX_INVOICE_RECEIVABLE,
+            paymentStatus: PaymentStatus.UNPAID,
+            paidAmount: '0',
+            paidDate: null,
+          },
+        );
+        inv.status = InvoiceStatus.TAX_INVOICE_RECEIVABLE;
+        inv.paymentStatus = PaymentStatus.UNPAID;
+        inv.paidAmount = '0';
+        inv.paidDate = null;
+      }
+    }
     return list;
   }
 
@@ -274,6 +331,8 @@ export class SalesInvoicesService {
       const vatAmount = parseFloat(invoice.vatAmount || '0');
       invoice.totalAmount = (amount + vatAmount).toFixed(2);
     }
+    // Heal inconsistent state: status = Cash/Bank received but paymentStatus = Unpaid
+    await this.syncPaymentStatusWhenStatusIsReceived(invoice);
     return invoice;
   }
 
@@ -594,6 +653,68 @@ export class SalesInvoicesService {
       );
     }
     return effective;
+  }
+
+  /**
+   * Sync payment_status and paid_amount when invoice status is Cash/Bank received
+   * but payment fields are out of date (e.g. set via edit without recording payment).
+   * If there are payments, set PAID; if none, revert status to Receivable.
+   */
+  private async syncPaymentStatusWhenStatusIsReceived(
+    invoice: SalesInvoice,
+  ): Promise<void> {
+    const status = invoice.status as InvoiceStatus;
+    if (
+      status !== InvoiceStatus.TAX_INVOICE_CASH_RECEIVED &&
+      status !== InvoiceStatus.TAX_INVOICE_BANK_RECEIVED
+    ) {
+      return;
+    }
+    if (invoice.paymentStatus === PaymentStatus.PAID) {
+      return;
+    }
+    const payments = invoice.payments ?? [];
+    const sumPaid = payments.reduce(
+      (acc, p) => acc + parseFloat(String(p.amount || 0)),
+      0,
+    );
+    const orgId = invoice.organization?.id;
+    if (!orgId) return;
+
+    if (sumPaid > 0) {
+      const paidAmountStr = sumPaid.toFixed(2);
+      const lastPayment = payments.reduce((latest, p) =>
+        (p.paymentDate && (!latest || p.paymentDate > latest.paymentDate))
+          ? p
+          : latest,
+      );
+      await this.invoicesRepository.update(
+        { id: invoice.id, organization: { id: orgId } },
+        {
+          paymentStatus: PaymentStatus.PAID,
+          paidAmount: paidAmountStr,
+          paidDate: lastPayment?.paymentDate ?? null,
+        },
+      );
+      invoice.paymentStatus = PaymentStatus.PAID;
+      invoice.paidAmount = paidAmountStr;
+      invoice.paidDate = lastPayment?.paymentDate ?? null;
+    } else {
+      // Status was set to received via edit but no payments; revert to receivable
+      await this.invoicesRepository.update(
+        { id: invoice.id, organization: { id: orgId } },
+        {
+          status: InvoiceStatus.TAX_INVOICE_RECEIVABLE,
+          paymentStatus: PaymentStatus.UNPAID,
+          paidAmount: '0',
+          paidDate: null,
+        },
+      );
+      invoice.status = InvoiceStatus.TAX_INVOICE_RECEIVABLE;
+      invoice.paymentStatus = PaymentStatus.UNPAID;
+      invoice.paidAmount = '0';
+      invoice.paidDate = null;
+    }
   }
 
   /**
@@ -2347,8 +2468,6 @@ ${lines}
 
     // Update allowed fields
     if (dto.status !== undefined) {
-      // Validate status transition
-      // Note: We already checked above that invoice is not in paid status, so we can safely update
       const newStatus = dto.status as InvoiceStatus;
       const paidStatuses = [
         InvoiceStatus.PAID,
@@ -2356,7 +2475,13 @@ ${lines}
         InvoiceStatus.TAX_INVOICE_CASH_RECEIVED,
       ];
 
-      // Prevent changing from paid status to non-paid status (redundant check but kept for clarity)
+      // Prevent setting status to paid/cash/bank received via edit — only recordPayment should set these
+      if (paidStatuses.includes(newStatus)) {
+        throw new BadRequestException(
+          'Cannot set status to Paid / Cash received / Bank received via edit. Use "Record Payment" to mark the invoice as paid.',
+        );
+      }
+
       const currentStatus = invoice.status as InvoiceStatus;
       if (
         paidStatuses.includes(currentStatus) &&
