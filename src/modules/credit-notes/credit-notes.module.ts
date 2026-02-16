@@ -10,6 +10,7 @@ import { Organization } from '../../entities/organization.entity';
 import { User } from '../../entities/user.entity';
 import { SalesInvoicesModule } from '../sales-invoices/sales-invoices.module';
 import { AuditLogsModule } from '../audit-logs/audit-logs.module';
+import { ReportsModule } from '../reports/reports.module';
 
 @Module({
   imports: [
@@ -23,6 +24,7 @@ import { AuditLogsModule } from '../audit-logs/audit-logs.module';
     forwardRef(() => SalesInvoicesModule),
     AuditLogsModule,
     SettingsModule,
+    ReportsModule,
   ],
   providers: [CreditNotesService],
   controllers: [CreditNotesController],

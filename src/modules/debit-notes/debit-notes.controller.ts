@@ -8,7 +8,9 @@ import {
   Body,
   Param,
   UseGuards,
+  Res,
 } from '@nestjs/common';
+import { Response } from 'express';
 import { DebitNotesService } from './debit-notes.service';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -37,6 +39,29 @@ export class DebitNotesController {
   @Roles(UserRole.ADMIN, UserRole.ACCOUNTANT)
   async list(@CurrentUser() user: AuthenticatedUser) {
     return this.debitNotesService.findAll(user?.organizationId as string);
+  }
+
+  @Get(':id/pdf')
+  @Roles(UserRole.ADMIN, UserRole.ACCOUNTANT)
+  async downloadPDF(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthenticatedUser,
+    @Res() res: Response,
+  ) {
+    const pdfBuffer = await this.debitNotesService.generateDebitNotePDF(
+      id,
+      user?.organizationId as string,
+    );
+    const debitNote = await this.debitNotesService.findById(
+      user?.organizationId as string,
+      id,
+    );
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="debit-note-${debitNote.debitNoteNumber}.pdf"`,
+    );
+    res.send(pdfBuffer);
   }
 
   @Get(':id')

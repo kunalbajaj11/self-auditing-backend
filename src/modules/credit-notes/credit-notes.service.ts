@@ -18,6 +18,7 @@ import { InvoiceStatus } from '../../common/enums/invoice-status.enum';
 import { AuditAction } from '../../common/enums/audit-action.enum';
 import { SalesInvoicesService } from '../sales-invoices/sales-invoices.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
+import { ReportGeneratorService } from '../reports/report-generator.service';
 
 @Injectable()
 export class CreditNotesService {
@@ -35,6 +36,7 @@ export class CreditNotesService {
     private readonly salesInvoicesService: SalesInvoicesService,
     private readonly auditLogsService: AuditLogsService,
     private readonly settingsService: SettingsService,
+    private readonly reportGeneratorService: ReportGeneratorService,
     private readonly dataSource: DataSource,
   ) {}
 
@@ -55,6 +57,50 @@ export class CreditNotesService {
       throw new NotFoundException('Credit note not found');
     }
     return creditNote;
+  }
+
+  /**
+   * Generate Credit Note PDF (single-page document with company, customer, amounts)
+   */
+  async generateCreditNotePDF(
+    id: string,
+    organizationId: string,
+  ): Promise<Buffer> {
+    const creditNote = await this.creditNotesRepository.findOne({
+      where: { id, organization: { id: organizationId }, isDeleted: false },
+      relations: ['organization', 'customer', 'invoice', 'user'],
+    });
+    if (!creditNote) {
+      throw new NotFoundException('Credit note not found');
+    }
+
+    const templateSettings =
+      await this.settingsService.getInvoiceTemplate(organizationId);
+    const logoBuffer =
+      await this.settingsService.getInvoiceLogoBuffer(organizationId);
+
+    const reportData = {
+      type: 'credit_note',
+      data: creditNote,
+      metadata: {
+        organizationName: creditNote.organization?.name,
+        currency: creditNote.currency || 'AED',
+        generatedAt: new Date(),
+        generatedByName: creditNote.user?.name,
+        organizationId: creditNote.organization?.id,
+        invoiceTemplate: {
+          logoBuffer: logoBuffer ?? undefined,
+          showCompanyDetails: templateSettings?.invoiceShowCompanyDetails ?? true,
+          showFooter: templateSettings?.invoiceShowFooter ?? true,
+          footerText: templateSettings?.invoiceFooterText,
+          headerText: templateSettings?.invoiceHeaderText,
+          colorScheme: templateSettings?.invoiceColorScheme || 'blue',
+          customColor: templateSettings?.invoiceCustomColor,
+        },
+      },
+    };
+
+    return this.reportGeneratorService.generatePDF(reportData);
   }
 
   async create(

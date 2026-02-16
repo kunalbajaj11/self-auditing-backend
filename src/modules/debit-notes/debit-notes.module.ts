@@ -15,6 +15,7 @@ import { SalesInvoicesModule } from '../sales-invoices/sales-invoices.module';
 import { ExpensesModule } from '../expenses/expenses.module';
 import { ExpensePaymentsModule } from '../expense-payments/expense-payments.module';
 import { AuditLogsModule } from '../audit-logs/audit-logs.module';
+import { ReportsModule } from '../reports/reports.module';
 
 @Module({
   imports: [
@@ -33,6 +34,7 @@ import { AuditLogsModule } from '../audit-logs/audit-logs.module';
     forwardRef(() => ExpensePaymentsModule),
     AuditLogsModule,
     SettingsModule,
+    ReportsModule,
   ],
   providers: [DebitNotesService],
   controllers: [DebitNotesController],

@@ -388,6 +388,18 @@ export class ReportGeneratorService {
           return;
         }
 
+        // Special handling for credit note
+        if (reportData.type === 'credit_note') {
+          this.generateCreditNotePDF(reportData).then(resolve).catch(reject);
+          return;
+        }
+
+        // Special handling for debit note
+        if (reportData.type === 'debit_note') {
+          this.generateDebitNotePDF(reportData).then(resolve).catch(reject);
+          return;
+        }
+
         // Use landscape for wide tables, portrait for summary reports
         const useLandscape = this.shouldUseLandscape(reportData.type);
         // A4 dimensions in points: 595.28 x 841.89 (210mm x 297mm)
@@ -10551,6 +10563,336 @@ export class ReportGeneratorService {
             align: 'center',
             width: contentWidth,
           });
+        }
+
+        doc.end();
+      } catch (error) {
+        reject(error);
+      }
+    });
+  }
+
+  /**
+   * Generate Credit Note PDF (single-page, company + customer + amounts)
+   */
+  private async generateCreditNotePDF(
+    reportData: ReportData,
+  ): Promise<Buffer> {
+    const metadata = reportData.metadata || {};
+    const invoiceTemplate = (metadata as any).invoiceTemplate || {};
+    const logoUrl = invoiceTemplate.logoUrl || metadata.logoUrl;
+    let logoBuffer: Buffer | null =
+      invoiceTemplate.logoBuffer || (metadata as any).logoBuffer || null;
+    if (
+      !logoBuffer &&
+      logoUrl &&
+      (logoUrl.startsWith('http://') || logoUrl.startsWith('https://'))
+    ) {
+      logoBuffer = await this.fetchImageAsBuffer(logoUrl);
+    }
+
+    return new Promise((resolve, reject) => {
+      try {
+        const cn = reportData.data as any;
+        const organization = cn.organization;
+        const customer = cn.customer;
+        const currency = metadata.currency || cn.currency || 'AED';
+
+        const doc = new PDFDocument({
+          margin: 56,
+          size: 'A4',
+          layout: 'portrait',
+        });
+        this.setupPdfFonts(doc);
+        const buffers: Buffer[] = [];
+        doc.on('data', buffers.push.bind(buffers));
+        doc.on('end', () => resolve(Buffer.concat(buffers)));
+        doc.on('error', reject);
+
+        const pageWidth = doc.page.width;
+        const margin = 56;
+        const contentWidth = pageWidth - 2 * margin;
+
+        const colors = {
+          primary: '#1976d2',
+          text: '#0f172a',
+          textLight: '#475569',
+          border: '#e2e8f0',
+          backgroundLight: '#f8fafc',
+        };
+
+        const formatAmount = (value: number | string): string => {
+          const num =
+            typeof value === 'string' ? parseFloat(value) : value;
+          if (Number.isNaN(num)) return '0.00';
+          return num.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+        };
+
+        doc.fillColor(colors.primary).rect(0, 0, pageWidth, 6).fill();
+
+        let currentY = 40;
+        if (logoBuffer) {
+          try {
+            const buf = logoBuffer.slice(0, 100).toString('utf-8').toLowerCase();
+            if (!buf.includes('<svg') && !buf.includes('<?xml')) {
+              doc.image(logoBuffer, margin, currentY, {
+                width: 80,
+                height: 80,
+                fit: [80, 80],
+              });
+            }
+          } catch {
+            // ignore
+          }
+        }
+
+        doc
+          .font((doc as any)._fontBold)
+          .fontSize(22)
+          .fillColor(colors.primary)
+          .text('CREDIT NOTE', margin, currentY, {
+            width: contentWidth,
+            align: 'right',
+          });
+        currentY += 90;
+
+        const leftW = contentWidth / 2 - 10;
+        const rightX = margin + contentWidth / 2 + 10;
+
+        if (organization) {
+          doc.font((doc as any)._fontBold).fontSize(10).fillColor(colors.text);
+          doc.text(organization.name || 'Company', margin, currentY);
+          doc.font((doc as any)._fontRegular).fontSize(9).fillColor(colors.textLight);
+          [organization.address, organization.phone, organization.contactEmail, organization.vatNumber]
+            .filter(Boolean)
+            .forEach((line, i) => {
+              doc.text(String(line), margin, currentY + 14 + i * 12);
+            });
+        }
+
+        doc.font((doc as any)._fontBold).fontSize(10).fillColor(colors.text);
+        doc.text('Bill To', rightX, currentY);
+        doc.font((doc as any)._fontRegular).fontSize(9).fillColor(colors.textLight);
+        const custName = cn.customerName || customer?.name || '—';
+        doc.text(custName, rightX, currentY + 14);
+        if (cn.customerTrn || customer?.customerTrn)
+          doc.text(`TRN: ${cn.customerTrn || customer?.customerTrn}`, rightX, currentY + 26);
+        if (cn.invoice?.invoiceNumber)
+          doc.text(`Related Invoice: ${cn.invoice.invoiceNumber}`, rightX, currentY + 38);
+
+        currentY += 90;
+
+        doc
+          .fillColor(colors.backgroundLight)
+          .rect(margin, currentY, contentWidth, 28)
+          .fill();
+        doc.strokeColor(colors.border).lineWidth(1).rect(margin, currentY, contentWidth, 28).stroke();
+        doc.font((doc as any)._fontRegular).fontSize(10).fillColor(colors.text);
+        doc.text(`Credit Note No: ${cn.creditNoteNumber}`, margin + 10, currentY + 8);
+        doc.text(`Date: ${cn.creditNoteDate || ''}`, margin + 10, currentY + 20);
+        doc.text(`Reason: ${(cn.reason || '').replace(/_/g, ' ')}`, rightX, currentY + 8);
+        doc.text(`Status: ${(cn.status || '').replace(/_/g, ' ')}`, rightX, currentY + 20);
+        currentY += 40;
+
+        const amt = parseFloat(cn.amount || '0');
+        const vat = parseFloat(cn.vatAmount || '0');
+        const total = parseFloat(cn.totalAmount || '0');
+        const rowH = 22;
+        doc.fillColor(colors.primary).rect(margin, currentY, contentWidth, rowH).fill();
+        doc.font((doc as any)._fontBold).fontSize(9).fillColor('#fff');
+        doc.text('Description', margin + 10, currentY + 6);
+        doc.text('Amount', margin + contentWidth - 100, currentY + 6, { align: 'right', width: 90 });
+        currentY += rowH;
+        doc.font((doc as any)._fontRegular).fontSize(9).fillColor(colors.text);
+        doc.strokeColor(colors.border).lineWidth(0.5).rect(margin, currentY, contentWidth, rowH).stroke();
+        doc.text('Amount', margin + 10, currentY + 6);
+        doc.text(`${formatAmount(amt)} ${currency}`, margin + contentWidth - 100, currentY + 6, { align: 'right', width: 90 });
+        currentY += rowH;
+        doc.strokeColor(colors.border).lineWidth(0.5).rect(margin, currentY, contentWidth, rowH).stroke();
+        doc.text('VAT', margin + 10, currentY + 6);
+        doc.text(`${formatAmount(vat)} ${currency}`, margin + contentWidth - 100, currentY + 6, { align: 'right', width: 90 });
+        currentY += rowH;
+        doc.strokeColor(colors.border).lineWidth(0.5).rect(margin, currentY, contentWidth, rowH).stroke();
+        doc.font((doc as any)._fontBold);
+        doc.text('Total', margin + 10, currentY + 6);
+        doc.text(`${formatAmount(total)} ${currency}`, margin + contentWidth - 100, currentY + 6, { align: 'right', width: 90 });
+        currentY += rowH + 16;
+
+        if (cn.description || cn.notes) {
+          doc.font((doc as any)._fontBold).fontSize(10).fillColor(colors.text);
+          doc.text('Notes', margin, currentY);
+          doc.font((doc as any)._fontRegular).fontSize(9).fillColor(colors.textLight);
+          const notesText = [cn.description, cn.notes].filter(Boolean).join('\n');
+          doc.text(notesText || '—', margin, currentY + 14, { width: contentWidth });
+        }
+
+        doc.end();
+      } catch (error) {
+        reject(error);
+      }
+    });
+  }
+
+  /**
+   * Generate Debit Note PDF (single-page, company + customer/vendor + amounts)
+   */
+  private async generateDebitNotePDF(reportData: ReportData): Promise<Buffer> {
+    const metadata = reportData.metadata || {};
+    const invoiceTemplate = (metadata as any).invoiceTemplate || {};
+    const logoUrl = invoiceTemplate.logoUrl || metadata.logoUrl;
+    let logoBuffer: Buffer | null =
+      invoiceTemplate.logoBuffer || (metadata as any).logoBuffer || null;
+    if (
+      !logoBuffer &&
+      logoUrl &&
+      (logoUrl.startsWith('http://') || logoUrl.startsWith('https://'))
+    ) {
+      logoBuffer = await this.fetchImageAsBuffer(logoUrl);
+    }
+
+    return new Promise((resolve, reject) => {
+      try {
+        const dn = reportData.data as any;
+        const organization = dn.organization;
+        const customer = dn.customer;
+        const vendor = dn.vendor;
+        const currency = metadata.currency || dn.currency || 'AED';
+
+        const doc = new PDFDocument({
+          margin: 56,
+          size: 'A4',
+          layout: 'portrait',
+        });
+        this.setupPdfFonts(doc);
+        const buffers: Buffer[] = [];
+        doc.on('data', buffers.push.bind(buffers));
+        doc.on('end', () => resolve(Buffer.concat(buffers)));
+        doc.on('error', reject);
+
+        const pageWidth = doc.page.width;
+        const margin = 56;
+        const contentWidth = pageWidth - 2 * margin;
+
+        const colors = {
+          primary: '#1976d2',
+          text: '#0f172a',
+          textLight: '#475569',
+          border: '#e2e8f0',
+          backgroundLight: '#f8fafc',
+        };
+
+        const formatAmount = (value: number | string): string => {
+          const num =
+            typeof value === 'string' ? parseFloat(value) : value;
+          if (Number.isNaN(num)) return '0.00';
+          return num.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+        };
+
+        doc.fillColor(colors.primary).rect(0, 0, pageWidth, 6).fill();
+
+        let currentY = 40;
+        if (logoBuffer) {
+          try {
+            const buf = logoBuffer.slice(0, 100).toString('utf-8').toLowerCase();
+            if (!buf.includes('<svg') && !buf.includes('<?xml')) {
+              doc.image(logoBuffer, margin, currentY, {
+                width: 80,
+                height: 80,
+                fit: [80, 80],
+              });
+            }
+          } catch {
+            // ignore
+          }
+        }
+
+        doc
+          .font((doc as any)._fontBold)
+          .fontSize(22)
+          .fillColor(colors.primary)
+          .text('DEBIT NOTE', margin, currentY, {
+            width: contentWidth,
+            align: 'right',
+          });
+        currentY += 90;
+
+        const leftW = contentWidth / 2 - 10;
+        const rightX = margin + contentWidth / 2 + 10;
+
+        if (organization) {
+          doc.font((doc as any)._fontBold).fontSize(10).fillColor(colors.text);
+          doc.text(organization.name || 'Company', margin, currentY);
+          doc.font((doc as any)._fontRegular).fontSize(9).fillColor(colors.textLight);
+          [organization.address, organization.phone, organization.contactEmail, organization.vatNumber]
+            .filter(Boolean)
+            .forEach((line, i) => {
+              doc.text(String(line), margin, currentY + 14 + i * 12);
+            });
+        }
+
+        const partyLabel = vendor || dn.vendorId ? 'Vendor' : 'Customer';
+        const partyName =
+          dn.vendorName ||
+          vendor?.name ||
+          dn.customerName ||
+          customer?.name ||
+          '—';
+        const partyTrn = dn.vendorTrn || vendor?.vendorTrn || dn.customerTrn || customer?.customerTrn;
+
+        doc.font((doc as any)._fontBold).fontSize(10).fillColor(colors.text);
+        doc.text(partyLabel, rightX, currentY);
+        doc.font((doc as any)._fontRegular).fontSize(9).fillColor(colors.textLight);
+        doc.text(partyName, rightX, currentY + 14);
+        if (partyTrn) doc.text(`TRN: ${partyTrn}`, rightX, currentY + 26);
+        if (dn.invoice?.invoiceNumber)
+          doc.text(`Related Invoice: ${dn.invoice.invoiceNumber}`, rightX, currentY + 38);
+        if (dn.expense?.id)
+          doc.text(`Related Expense: ${dn.expense.id}`, rightX, currentY + 50);
+
+        currentY += 95;
+
+        doc
+          .fillColor(colors.backgroundLight)
+          .rect(margin, currentY, contentWidth, 28)
+          .fill();
+        doc.strokeColor(colors.border).lineWidth(1).rect(margin, currentY, contentWidth, 28).stroke();
+        doc.font((doc as any)._fontRegular).fontSize(10).fillColor(colors.text);
+        doc.text(`Debit Note No: ${dn.debitNoteNumber}`, margin + 10, currentY + 8);
+        doc.text(`Date: ${dn.debitNoteDate || ''}`, margin + 10, currentY + 20);
+        doc.text(`Reason: ${(dn.reason || '').replace(/_/g, ' ')}`, rightX, currentY + 8);
+        doc.text(`Status: ${(dn.status || '').replace(/_/g, ' ')}`, rightX, currentY + 20);
+        currentY += 40;
+
+        const amt = parseFloat(dn.amount || '0');
+        const vat = parseFloat(dn.vatAmount || '0');
+        const total = parseFloat(dn.totalAmount || '0');
+        const rowH = 22;
+        doc.fillColor(colors.primary).rect(margin, currentY, contentWidth, rowH).fill();
+        doc.font((doc as any)._fontBold).fontSize(9).fillColor('#fff');
+        doc.text('Description', margin + 10, currentY + 6);
+        doc.text('Amount', margin + contentWidth - 100, currentY + 6, { align: 'right', width: 90 });
+        currentY += rowH;
+        doc.font((doc as any)._fontRegular).fontSize(9).fillColor(colors.text);
+        doc.strokeColor(colors.border).lineWidth(0.5).rect(margin, currentY, contentWidth, rowH).stroke();
+        doc.text('Amount', margin + 10, currentY + 6);
+        doc.text(`${formatAmount(amt)} ${currency}`, margin + contentWidth - 100, currentY + 6, { align: 'right', width: 90 });
+        currentY += rowH;
+        doc.strokeColor(colors.border).lineWidth(0.5).rect(margin, currentY, contentWidth, rowH).stroke();
+        doc.text('VAT', margin + 10, currentY + 6);
+        doc.text(`${formatAmount(vat)} ${currency}`, margin + contentWidth - 100, currentY + 6, { align: 'right', width: 90 });
+        currentY += rowH;
+        doc.strokeColor(colors.border).lineWidth(0.5).rect(margin, currentY, contentWidth, rowH).stroke();
+        doc.font((doc as any)._fontBold);
+        doc.text('Total', margin + 10, currentY + 6);
+        doc.text(`${formatAmount(total)} ${currency}`, margin + contentWidth - 100, currentY + 6, { align: 'right', width: 90 });
+        currentY += rowH + 16;
+
+        if (dn.description || dn.notes) {
+          doc.font((doc as any)._fontBold).fontSize(10).fillColor(colors.text);
+          doc.text('Notes', margin, currentY);
+          doc.font((doc as any)._fontRegular).fontSize(9).fillColor(colors.textLight);
+          const notesText = [dn.description, dn.notes].filter(Boolean).join('\n');
+          doc.text(notesText || '—', margin, currentY + 14, { width: contentWidth });
         }
 
         doc.end();

@@ -8,7 +8,9 @@ import {
   Body,
   Param,
   UseGuards,
+  Res,
 } from '@nestjs/common';
+import { Response } from 'express';
 import { CreditNotesService } from './credit-notes.service';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -38,6 +40,29 @@ export class CreditNotesController {
   @Roles(UserRole.ADMIN, UserRole.ACCOUNTANT)
   async list(@CurrentUser() user: AuthenticatedUser) {
     return this.creditNotesService.findAll(user?.organizationId as string);
+  }
+
+  @Get(':id/pdf')
+  @Roles(UserRole.ADMIN, UserRole.ACCOUNTANT)
+  async downloadPDF(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthenticatedUser,
+    @Res() res: Response,
+  ) {
+    const pdfBuffer = await this.creditNotesService.generateCreditNotePDF(
+      id,
+      user?.organizationId as string,
+    );
+    const creditNote = await this.creditNotesService.findById(
+      user?.organizationId as string,
+      id,
+    );
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="credit-note-${creditNote.creditNoteNumber}.pdf"`,
+    );
+    res.send(pdfBuffer);
   }
 
   @Get(':id')
