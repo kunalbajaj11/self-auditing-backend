@@ -325,12 +325,10 @@ export class SalesInvoicesService {
     if (!invoice) {
       throw new NotFoundException('Invoice not found');
     }
-    // Ensure totalAmount is always set (DB column may be generated or missing)
-    if (invoice.totalAmount == null || invoice.totalAmount === '') {
-      const amount = parseFloat(invoice.amount || '0');
-      const vatAmount = parseFloat(invoice.vatAmount || '0');
-      invoice.totalAmount = (amount + vatAmount).toFixed(2);
-    }
+    // Ensure totalAmount reflects amount + vatAmount (discount is already in amount); DB column may be stale
+    const amount = parseFloat(invoice.amount || '0');
+    const vatAmount = parseFloat(invoice.vatAmount || '0');
+    invoice.totalAmount = (amount + vatAmount).toFixed(2);
     // Heal inconsistent state: status = Cash/Bank received but paymentStatus = Unpaid
     await this.syncPaymentStatusWhenStatusIsReceived(invoice);
     return invoice;

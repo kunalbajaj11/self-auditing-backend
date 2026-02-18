@@ -7620,11 +7620,15 @@ export class ReportGeneratorService {
     // Generate QR code for UAE e-invoicing (supplier TRN, invoice#, date, total with VAT)
     const invoiceForQr = reportData.data;
     const orgForQr = invoiceForQr?.organization;
+    // Use amount + vatAmount so discount is applied (totalAmount may be stale)
+    const qrTotal =
+      parseFloat(invoiceForQr?.amount || '0') +
+      parseFloat(invoiceForQr?.vatAmount || '0');
     const qrPayload = [
       orgForQr?.vatNumber || '',
       invoiceForQr?.invoiceNumber || '',
       (invoiceForQr?.invoiceDate || '').replace(/-/g, ''),
-      parseFloat(invoiceForQr?.totalAmount || '0').toFixed(2),
+      qrTotal.toFixed(2),
       parseFloat(invoiceForQr?.vatAmount || '0').toFixed(2),
     ].join('|');
     let qrBuffer: Buffer | null = null;
@@ -8564,18 +8568,19 @@ export class ReportGeneratorService {
           (invoice as any).discountAmount || '0',
         );
         const totalVat = parseFloat(invoice.vatAmount || '0');
-        const subtotal = parseFloat(invoice.amount || '0');
-        const totalAmount = parseFloat(invoice.totalAmount || '0');
+        // invoice.amount is stored as taxable base (subtotal - discount); show pre-discount as "Subtotal" when discount exists
+        const taxableBase = parseFloat(invoice.amount || '0');
+        const subtotalDisplay =
+          discountAmount > 0 ? taxableBase + discountAmount : taxableBase;
+        // Always derive final total from amount + VAT so discount is applied (invoice.totalAmount may be stale)
+        const totalAmount = taxableBase + totalVat;
 
         const totalsBoxY = currentY;
         const boxInternalPadding = 8;
         let totalsBoxHeight = 62;
         if (discountAmount > 0) totalsBoxHeight += 12;
 
-        const totalNumeric =
-          typeof totalAmount === 'string'
-            ? parseFloat(totalAmount || '0')
-            : totalAmount || 0;
+        const totalNumeric = totalAmount;
         const amountInWords = this.numberToWords(Math.floor(totalNumeric));
         if (!isNaN(totalNumeric) && amountWordsBoxWidth > 60) {
           doc
@@ -8630,7 +8635,7 @@ export class ReportGeneratorService {
         doc.fontSize(9).font((doc as any)._fontBold).fillColor(colors.text);
         doc.text('Subtotal:', totalsLabelX, totalsY);
         doc.text(
-          `${formatAmount(subtotal)} ${currency}`,
+          `${formatAmount(subtotalDisplay)} ${currency}`,
           totalsValueX,
           totalsY,
           { width: totalsValueWidth, align: 'right' },
@@ -8649,7 +8654,7 @@ export class ReportGeneratorService {
           totalsY += 14;
         }
 
-        const taxBase = subtotal - discountAmount;
+        const taxBase = taxableBase;
         // Prefer VAT rate from line items (so "VAT @ 5%" matches itemized 5%, not a derived 6.7%)
         const taxableRates = lineItems
           .filter(

@@ -84,8 +84,9 @@ export class ReportsService {
   }
 
   /**
-   * Exclude proforma and quotation from ALL report queries.
-   * Proforma/quotation must have zero impact on Trial Balance, ledgers, P&L, and any other report.
+   * Exclude proforma, quotation, and draft from ALL report queries.
+   * Proforma/quotation/draft must have zero impact on Trial Balance, ledgers, P&L, and any other report.
+   * Only tax invoices (receivable/bank/cash received, overdue) affect TB.
    */
   private excludeProformaInvoice(qb: {
     andWhere: (cond: string, params?: object) => unknown;
@@ -96,12 +97,13 @@ export class ReportsService {
         InvoiceStatus.QUOTATION,
         InvoiceStatus.QUOTATION_CONVERTED_TO_PROFORMA,
         InvoiceStatus.PROFORMA_CONVERTED_TO_INVOICE,
+        InvoiceStatus.DRAFT,
       ],
     });
   }
 
   /**
-   * Exclude invoice payments against proforma invoices from report aggregates (e.g. Trial Balance cash).
+   * Exclude invoice payments against proforma/quotation/draft from report aggregates (e.g. Trial Balance cash).
    * Joins payment -> invoice and filters so only tax-invoice payments count.
    */
   private excludeProformaFromInvoicePaymentQuery(qb: {
@@ -115,6 +117,7 @@ export class ReportsService {
         InvoiceStatus.QUOTATION,
         InvoiceStatus.QUOTATION_CONVERTED_TO_PROFORMA,
         InvoiceStatus.PROFORMA_CONVERTED_TO_INVOICE,
+        InvoiceStatus.DRAFT,
       ],
     });
   }
@@ -1927,8 +1930,10 @@ export class ReportsService {
 
       // Calculate receivables from actual payments (invoice_payments), not invoice.paid_amount,
       // so AR drops to 0 once payment is recorded even if invoice row lags. Payments up to endDate/startDate.
+      // Use amount+vat_amount when total_amount is null (entity has insert:false, update:false so DB may not set it).
+      const invoiceTotalExpr = `COALESCE(invoice.total_amount, (COALESCE(invoice.amount, 0) + COALESCE(invoice.vat_amount, 0)))`;
       const paidFromPaymentsSubqueryEnd = `(SELECT COALESCE(SUM(ip.amount), 0) FROM invoice_payments ip WHERE ip.invoice_id = invoice.id AND ip.organization_id = invoice.organization_id AND ip.payment_date <= :endDate)`;
-      const outstandingExprEnd = `COALESCE(invoice.total_amount, 0) - (${paidFromPaymentsSubqueryEnd}) - (${creditNoteApplicationsSubqueryEnd}) - (${unappliedCreditNotesSubqueryEnd})`;
+      const outstandingExprEnd = `(${invoiceTotalExpr}) - (${paidFromPaymentsSubqueryEnd}) - (${creditNoteApplicationsSubqueryEnd}) - (${unappliedCreditNotesSubqueryEnd})`;
       const receivablesAtEndQuery = this.salesInvoicesRepository
         .createQueryBuilder('invoice')
         .select([`SUM(GREATEST(0, (${outstandingExprEnd}))) AS invoiceAmount`])
@@ -1940,7 +1945,7 @@ export class ReportsService {
       this.excludeProformaInvoice(receivablesAtEndQuery);
 
       const paidFromPaymentsSubqueryStart = `(SELECT COALESCE(SUM(ip.amount), 0) FROM invoice_payments ip WHERE ip.invoice_id = invoice.id AND ip.organization_id = invoice.organization_id AND ip.payment_date < :startDate)`;
-      const outstandingExprStart = `COALESCE(invoice.total_amount, 0) - (${paidFromPaymentsSubqueryStart}) - (${creditNoteApplicationsSubqueryStart}) - (${unappliedCreditNotesSubqueryStart})`;
+      const outstandingExprStart = `(${invoiceTotalExpr}) - (${paidFromPaymentsSubqueryStart}) - (${creditNoteApplicationsSubqueryStart}) - (${unappliedCreditNotesSubqueryStart})`;
       const receivablesAtStartQuery = this.salesInvoicesRepository
         .createQueryBuilder('invoice')
         .select([
@@ -2022,7 +2027,9 @@ export class ReportsService {
       // closingAR = openingAR + periodDebit - periodCredit
       const invoicesTotalPeriodQuery = this.salesInvoicesRepository
         .createQueryBuilder('invoice')
-        .select(['SUM(COALESCE(invoice.total_amount, 0)) AS total'])
+        .select([
+          `SUM(COALESCE(invoice.total_amount, (COALESCE(invoice.amount, 0) + COALESCE(invoice.vat_amount, 0)))) AS total`,
+        ])
         .where('invoice.organization_id = :organizationId', { organizationId })
         .andWhere('invoice.is_deleted = false')
         .andWhere('invoice.invoice_date >= :startDate', { startDate })
