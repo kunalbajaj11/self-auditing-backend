@@ -8042,13 +8042,22 @@ export class ReportGeneratorService {
 
         let invoiceContentH = 18 + colHeaderGap;
         const invoiceNumber = invoice.invoiceNumber || '';
+        const statusLower = invoice.status?.toLowerCase();
         const invoiceNumberLabel =
-          invoice.status?.toLowerCase() === 'proforma_invoice'
+          statusLower === 'proforma_invoice'
             ? 'PROFORMA INVOICE NO.'
-            : 'INVOICE NUMBER';
+            : statusLower === 'quotation'
+              ? 'QUOTATION NO.'
+              : 'INVOICE NUMBER';
         invoiceContentH += measureLabelValue(invoiceNumberLabel, invoiceNumber, columnWidth) + lineGap;
+        const invoiceDateLabel =
+          statusLower === 'proforma_invoice'
+            ? 'PROFORMA INVOICE DATE'
+            : statusLower === 'quotation'
+              ? 'QUOTATION DATE'
+              : 'INVOICE DATE';
         invoiceContentH += measureLabelValue(
-          invoice.status?.toLowerCase() === 'proforma_invoice' ? 'PROFORMA INVOICE DATE' : 'INVOICE DATE',
+          invoiceDateLabel,
           this.formatDateForInvoice(invoice.invoiceDate || ''),
           columnWidth,
         ) + lineGap;
@@ -8195,10 +8204,16 @@ export class ReportGeneratorService {
         // Column 2 - INVOICE DETAILS
         let invoiceY = boxY + 10;
         doc.fontSize(8).font((doc as any)._fontBold).fillColor(colors.text);
-        doc.text('INVOICE DETAILS', invoiceX, invoiceY, { width: columnWidth });
+        const detailsSectionTitle =
+          statusLower === 'quotation'
+            ? 'QUOTATION DETAILS'
+            : statusLower === 'proforma_invoice'
+              ? 'PROFORMA INVOICE DETAILS'
+              : 'INVOICE DETAILS';
+        doc.text(detailsSectionTitle, invoiceX, invoiceY, { width: columnWidth });
         invoiceY += colHeaderGap;
 
-        // invoiceNumberLabel, invoiceNumber already set in measurement block above
+        // invoiceNumberLabel, invoiceDateLabel, invoiceNumber already set in measurement block above
         let h = drawLabelValue(
           invoiceNumberLabel,
           invoiceNumber,
@@ -8208,10 +8223,6 @@ export class ReportGeneratorService {
         );
         invoiceY += h + lineGap;
 
-        const invoiceDateLabel =
-          invoice.status?.toLowerCase() === 'proforma_invoice'
-            ? 'PROFORMA INVOICE DATE'
-            : 'INVOICE DATE';
         h = drawLabelValue(
           invoiceDateLabel,
           this.formatDateForInvoice(invoice.invoiceDate || ''),
@@ -8576,10 +8587,15 @@ export class ReportGeneratorService {
           (invoice as any).discountAmount || '0',
         );
         const totalVat = parseFloat(invoice.vatAmount || '0');
-        // invoice.amount is stored as taxable base (subtotal - discount); show pre-discount as "Subtotal" when discount exists
+        // invoice.amount is stored as taxable base (subtotal - discount)
         const taxableBase = parseFloat(invoice.amount || '0');
+        // Subtotal must match the line items table total when we have line items (quotation/proforma/tax invoice)
         const subtotalDisplay =
-          discountAmount > 0 ? taxableBase + discountAmount : taxableBase;
+          lineItems.length > 0
+            ? sumAmount
+            : discountAmount > 0
+              ? taxableBase + discountAmount
+              : taxableBase;
         // Always derive final total from amount + VAT so discount is applied (invoice.totalAmount may be stale)
         const totalAmount = taxableBase + totalVat;
 
