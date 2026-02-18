@@ -1855,6 +1855,86 @@ export class SalesInvoicesService {
   }
 
   /**
+   * Generate Payment Receipt PDF for a payment received against an invoice.
+   * If paymentId is omitted, uses the most recent payment for the invoice.
+   */
+  async generatePaymentReceiptPDF(
+    invoiceId: string,
+    organizationId: string,
+    paymentId?: string,
+  ): Promise<Buffer> {
+    const invoice = await this.invoicesRepository.findOne({
+      where: { id: invoiceId, organization: { id: organizationId } },
+      relations: ['organization', 'customer'],
+    });
+    if (!invoice) {
+      throw new NotFoundException('Invoice not found');
+    }
+
+    let payment: InvoicePayment;
+    if (paymentId) {
+      const found = await this.paymentsRepository.findOne({
+        where: {
+          id: paymentId,
+          invoice: { id: invoiceId },
+          organization: { id: organizationId },
+        },
+        relations: ['invoice'],
+      });
+      if (!found) {
+        throw new NotFoundException('Payment not found');
+      }
+      payment = found;
+    } else {
+      const payments = await this.paymentsRepository.find({
+        where: {
+          invoice: { id: invoiceId },
+          organization: { id: organizationId },
+        },
+        order: { paymentDate: 'DESC', createdAt: 'DESC' },
+        take: 1,
+      });
+      if (!payments.length) {
+        throw new BadRequestException(
+          'No payments found for this invoice. Record a payment first.',
+        );
+      }
+      payment = payments[0];
+    }
+
+    const templateSettings =
+      await this.settingsService.getInvoiceTemplate(organizationId);
+    const logoBuffer =
+      await this.settingsService.getInvoiceLogoBuffer(organizationId);
+
+    const reportData = {
+      type: 'payment_receipt',
+      data: { invoice, payment },
+      metadata: {
+        currency: invoice.currency || 'AED',
+        organizationName: invoice.organization?.name,
+        vatNumber: invoice.organization?.vatNumber,
+        address: invoice.organization?.address,
+        phone: invoice.organization?.phone,
+        email: invoice.organization?.contactEmail,
+        invoiceTemplate: {
+          logoBuffer: logoBuffer ?? undefined,
+          logoUrl: templateSettings.invoiceLogoUrl ?? undefined,
+          headerText:
+            templateSettings.invoiceHeaderText ?? invoice.organization?.name,
+          colorScheme: templateSettings.invoiceColorScheme ?? 'blue',
+          customColor: templateSettings.invoiceCustomColor,
+          showCompanyDetails: templateSettings.invoiceShowCompanyDetails ?? true,
+          showVatDetails: templateSettings.invoiceShowVatDetails ?? true,
+          showFooter: templateSettings.invoiceShowFooter ?? true,
+          footerText: templateSettings.invoiceFooterText,
+        },
+      },
+    };
+    return this.reportGeneratorService.generatePDF(reportData);
+  }
+
+  /**
    * Export invoice in XML (UBL 2.1 / PINT AE compatible) or JSON for UAE e-invoicing
    */
   async exportToEInvoice(

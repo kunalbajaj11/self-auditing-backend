@@ -400,6 +400,14 @@ export class ReportGeneratorService {
           return;
         }
 
+        // Special handling for payment receipt (customer payment received against invoice)
+        if (reportData.type === 'payment_receipt') {
+          this.generatePaymentReceiptPDF(reportData)
+            .then(resolve)
+            .catch(reject);
+          return;
+        }
+
         // Use landscape for wide tables, portrait for summary reports
         const useLandscape = this.shouldUseLandscape(reportData.type);
         // A4 dimensions in points: 595.28 x 841.89 (210mm x 297mm)
@@ -10703,25 +10711,61 @@ export class ReportGeneratorService {
         const vat = parseFloat(cn.vatAmount || '0');
         const total = parseFloat(cn.totalAmount || '0');
         const rowH = 22;
-        doc.fillColor(colors.primary).rect(margin, currentY, contentWidth, rowH).fill();
-        doc.font((doc as any)._fontBold).fontSize(9).fillColor('#fff');
-        doc.text('Description', margin + 10, currentY + 6);
-        doc.text('Amount', margin + contentWidth - 100, currentY + 6, { align: 'right', width: 90 });
-        currentY += rowH;
-        doc.font((doc as any)._fontRegular).fontSize(9).fillColor(colors.text);
-        doc.strokeColor(colors.border).lineWidth(0.5).rect(margin, currentY, contentWidth, rowH).stroke();
-        doc.text('Amount', margin + 10, currentY + 6);
-        doc.text(`${formatAmount(amt)} ${currency}`, margin + contentWidth - 100, currentY + 6, { align: 'right', width: 90 });
-        currentY += rowH;
-        doc.strokeColor(colors.border).lineWidth(0.5).rect(margin, currentY, contentWidth, rowH).stroke();
-        doc.text('VAT', margin + 10, currentY + 6);
-        doc.text(`${formatAmount(vat)} ${currency}`, margin + contentWidth - 100, currentY + 6, { align: 'right', width: 90 });
-        currentY += rowH;
-        doc.strokeColor(colors.border).lineWidth(0.5).rect(margin, currentY, contentWidth, rowH).stroke();
-        doc.font((doc as any)._fontBold);
-        doc.text('Total', margin + 10, currentY + 6);
-        doc.text(`${formatAmount(total)} ${currency}`, margin + contentWidth - 100, currentY + 6, { align: 'right', width: 90 });
-        currentY += rowH + 16;
+        const lineItems = (cn as any).lineItems as Array<{ itemName?: string; quantity?: string; unitPrice?: string; amount?: string; vatAmount?: string }> | undefined;
+
+        if (lineItems && lineItems.length > 0) {
+          const colW = contentWidth / 6;
+          doc.fillColor(colors.primary).rect(margin, currentY, contentWidth, rowH).fill();
+          doc.font((doc as any)._fontBold).fontSize(9).fillColor('#fff');
+          doc.text('Product / Description', margin + 10, currentY + 6);
+          doc.text('Rate', margin + 10 + colW * 1, currentY + 6);
+          doc.text('Qty', margin + 10 + colW * 2, currentY + 6);
+          doc.text('Amount', margin + contentWidth - colW * 2, currentY + 6, { align: 'right', width: colW - 4 });
+          doc.text('VAT', margin + contentWidth - colW, currentY + 6, { align: 'right', width: colW - 4 });
+          currentY += rowH;
+          doc.font((doc as any)._fontRegular).fontSize(9).fillColor(colors.text);
+          for (const line of lineItems) {
+            const lineAmt = parseFloat(line.amount || '0');
+            const lineVat = parseFloat(line.vatAmount || '0');
+            doc.strokeColor(colors.border).lineWidth(0.5).rect(margin, currentY, contentWidth, rowH).stroke();
+            doc.text(String(line.itemName || '—').slice(0, 30), margin + 10, currentY + 6, { width: colW - 4 });
+            doc.text(formatAmount(line.unitPrice || '0'), margin + 10 + colW * 1, currentY + 6, { width: colW - 4 });
+            doc.text(String(line.quantity ?? '1'), margin + 10 + colW * 2, currentY + 6, { width: colW - 4 });
+            doc.text(`${formatAmount(lineAmt)} ${currency}`, margin + contentWidth - colW * 2, currentY + 6, { align: 'right', width: colW - 4 });
+            doc.text(`${formatAmount(lineVat)} ${currency}`, margin + contentWidth - colW, currentY + 6, { align: 'right', width: colW - 4 });
+            currentY += rowH;
+          }
+          doc.strokeColor(colors.border).lineWidth(0.5).rect(margin, currentY, contentWidth, rowH).stroke();
+          doc.font((doc as any)._fontBold);
+          doc.text('Subtotal', margin + 10, currentY + 6);
+          doc.text(`${formatAmount(amt)} ${currency}`, margin + contentWidth - colW * 2, currentY + 6, { align: 'right', width: colW - 4 });
+          doc.text(`${formatAmount(vat)} ${currency}`, margin + contentWidth - colW, currentY + 6, { align: 'right', width: colW - 4 });
+          currentY += rowH;
+          doc.strokeColor(colors.border).lineWidth(0.5).rect(margin, currentY, contentWidth, rowH).stroke();
+          doc.text('Total', margin + 10, currentY + 6);
+          doc.text(`${formatAmount(total)} ${currency}`, margin + contentWidth - colW, currentY + 6, { align: 'right', width: colW * 2 - 4 });
+          currentY += rowH + 16;
+        } else {
+          doc.fillColor(colors.primary).rect(margin, currentY, contentWidth, rowH).fill();
+          doc.font((doc as any)._fontBold).fontSize(9).fillColor('#fff');
+          doc.text('Description', margin + 10, currentY + 6);
+          doc.text('Amount', margin + contentWidth - 100, currentY + 6, { align: 'right', width: 90 });
+          currentY += rowH;
+          doc.font((doc as any)._fontRegular).fontSize(9).fillColor(colors.text);
+          doc.strokeColor(colors.border).lineWidth(0.5).rect(margin, currentY, contentWidth, rowH).stroke();
+          doc.text('Amount', margin + 10, currentY + 6);
+          doc.text(`${formatAmount(amt)} ${currency}`, margin + contentWidth - 100, currentY + 6, { align: 'right', width: 90 });
+          currentY += rowH;
+          doc.strokeColor(colors.border).lineWidth(0.5).rect(margin, currentY, contentWidth, rowH).stroke();
+          doc.text('VAT', margin + 10, currentY + 6);
+          doc.text(`${formatAmount(vat)} ${currency}`, margin + contentWidth - 100, currentY + 6, { align: 'right', width: 90 });
+          currentY += rowH;
+          doc.strokeColor(colors.border).lineWidth(0.5).rect(margin, currentY, contentWidth, rowH).stroke();
+          doc.font((doc as any)._fontBold);
+          doc.text('Total', margin + 10, currentY + 6);
+          doc.text(`${formatAmount(total)} ${currency}`, margin + contentWidth - 100, currentY + 6, { align: 'right', width: 90 });
+          currentY += rowH + 16;
+        }
 
         if (cn.description || cn.notes) {
           doc.font((doc as any)._fontBold).fontSize(10).fillColor(colors.text);
@@ -10898,6 +10942,290 @@ export class ReportGeneratorService {
           doc.font((doc as any)._fontRegular).fontSize(9).fillColor(colors.textLight);
           const notesText = [dn.description, dn.notes].filter(Boolean).join('\n');
           doc.text(notesText || '—', margin, currentY + 14, { width: contentWidth });
+        }
+
+        doc.end();
+      } catch (error) {
+        reject(error);
+      }
+    });
+  }
+
+  /**
+   * Generate Payment Receipt PDF (single-page). Matches invoice PDF layout:
+   * same margin, top bar, logo + title, separator, company box, Bill To | Receipt Details, footer.
+   */
+  private async generatePaymentReceiptPDF(reportData: ReportData): Promise<Buffer> {
+    const metadata = reportData.metadata || {};
+    const invoiceTemplate = (metadata as any).invoiceTemplate || {};
+    const logoUrl = invoiceTemplate.logoUrl || metadata.logoUrl;
+    let logoBuffer: Buffer | null =
+      invoiceTemplate.logoBuffer || (metadata as any).logoBuffer || null;
+    if (
+      !logoBuffer &&
+      logoUrl &&
+      (logoUrl.startsWith('http://') || logoUrl.startsWith('https://'))
+    ) {
+      logoBuffer = await this.fetchImageAsBuffer(logoUrl);
+    }
+
+    return new Promise((resolve, reject) => {
+      try {
+        const data = reportData.data as { invoice: any; payment: any };
+        const invoice = data.invoice;
+        const payment = data.payment;
+        const organization = invoice?.organization;
+        const customer = invoice?.customer;
+        const currency = metadata.currency || invoice?.currency || 'AED';
+
+        const doc = new PDFDocument({
+          margin: 20,
+          size: 'A4',
+          layout: 'portrait',
+        });
+        this.setupPdfFonts(doc);
+        (doc as any)._fontRegular = 'Helvetica';
+        (doc as any)._fontBold = 'Helvetica-Bold';
+        const buffers: Buffer[] = [];
+        doc.on('data', buffers.push.bind(buffers));
+        doc.on('end', () => resolve(Buffer.concat(buffers)));
+        doc.on('error', reject);
+
+        const pageWidth = doc.page.width;
+        const margin = 20;
+        const rightMarginExtra = 6;
+        const contentWidth = pageWidth - 2 * margin - rightMarginExtra;
+
+        const getColorScheme = () => {
+          const scheme = invoiceTemplate.colorScheme || 'blue';
+          const customColor = invoiceTemplate.customColor;
+          if (scheme === 'custom' && customColor) return customColor;
+          const colorMap: Record<string, string> = {
+            blue: '#1976d2',
+            green: '#2e7d32',
+            purple: '#7b1fa2',
+            orange: '#f57c00',
+            red: '#d32f2f',
+          };
+          return colorMap[scheme] || colorMap.blue;
+        };
+        const primaryColor = getColorScheme();
+        const colors = {
+          primary: primaryColor,
+          text: '#0f172a',
+          textLight: '#475569',
+          border: '#e2e8f0',
+          borderLight: '#f1f5f9',
+          backgroundLight: '#f8fafc',
+        };
+
+        const formatAmount = (value: number | string): string => {
+          const num = typeof value === 'string' ? parseFloat(value) : value;
+          if (Number.isNaN(num)) return '0.00';
+          return num.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+        };
+
+        doc.fillColor(colors.primary).rect(0, 0, pageWidth, 4).fill();
+        let currentY = 22;
+        let logoHeight = 0;
+        const logoSize = 56;
+        if (logoBuffer) {
+          try {
+            const buf = logoBuffer.slice(0, 100).toString('utf-8').toLowerCase();
+            if (!buf.includes('<svg') && !buf.includes('<?xml')) {
+              doc.image(logoBuffer, margin, currentY, {
+                width: logoSize,
+                height: logoSize,
+                fit: [logoSize, logoSize],
+              });
+              logoHeight = logoSize;
+            }
+          } catch {
+            // ignore
+          }
+        }
+        doc.fontSize(12).font((doc as any)._fontBold).fillColor(colors.primary);
+        doc.text('PAYMENT RECEIPT', margin, currentY, {
+          width: contentWidth,
+          align: 'right',
+        });
+        const titleHeight = 14;
+        currentY = Math.max(currentY + logoHeight, currentY + titleHeight) + 6;
+
+        doc.strokeColor(colors.border).lineWidth(1);
+        doc.moveTo(margin, currentY).lineTo(margin + contentWidth, currentY).stroke();
+        doc.strokeColor(colors.primary).lineWidth(0.5);
+        doc.moveTo(margin, currentY + 1).lineTo(margin + 160, currentY + 1).stroke();
+        currentY += 6;
+
+        const showCompanyDetails = invoiceTemplate.showCompanyDetails !== false;
+        if (showCompanyDetails) {
+          const companyBoxY = currentY;
+          const contentStartY = companyBoxY + 8;
+          const leftX = margin + 12;
+          const rightColumnWidth = contentWidth / 2 - 20;
+          const rightX = margin + contentWidth / 2 + 6;
+          const orgName = organization?.name || metadata.organizationName || '';
+          const orgAddress = organization?.address || metadata.address || '';
+          const orgPhone = organization?.phone || metadata.phone || '';
+          const orgEmail = organization?.contactEmail || metadata.email || '';
+          const showVat = invoiceTemplate.showVatDetails !== false;
+          const orgTrn = showVat ? organization?.vatNumber || metadata.vatNumber || '' : '';
+          let leftHeight = 0;
+          if (orgName) leftHeight += 12;
+          if (orgAddress) leftHeight += 10;
+          let rightHeight = 0;
+          if (orgPhone) rightHeight += 10;
+          if (orgEmail) rightHeight += 10;
+          if (orgTrn) rightHeight += 10;
+          const companyBoxHeight = Math.max(Math.max(leftHeight, rightHeight) + 14, 36);
+          doc.fillColor(colors.backgroundLight).rect(margin, companyBoxY, contentWidth, companyBoxHeight).fill();
+          doc.strokeColor(colors.border).lineWidth(0.5).rect(margin, companyBoxY, contentWidth, companyBoxHeight).stroke();
+          doc.fillColor(colors.primary).rect(margin, companyBoxY, 3, companyBoxHeight).fill();
+          let leftY = contentStartY;
+          if (orgName) {
+            doc.fontSize(9).font((doc as any)._fontBold).fillColor(colors.text);
+            doc.text(orgName, leftX, leftY);
+            leftY += 12;
+          }
+          doc.fontSize(8).font((doc as any)._fontRegular).fillColor(colors.text);
+          if (orgAddress) {
+            doc.text(orgAddress, leftX, leftY);
+            leftY += 10;
+          }
+          let rightY = contentStartY;
+          if (orgPhone) {
+            doc.text(`Phone: ${orgPhone}`, rightX, rightY, { width: rightColumnWidth, align: 'right' });
+            rightY += 10;
+          }
+          if (orgEmail) {
+            doc.text(`Email: ${orgEmail}`, rightX, rightY, { width: rightColumnWidth, align: 'right' });
+            rightY += 10;
+          }
+          if (orgTrn) {
+            doc.text(`TRN: ${orgTrn}`, rightX, rightY, { width: rightColumnWidth, align: 'right' });
+          }
+          currentY = companyBoxY + companyBoxHeight + 4;
+        } else {
+          currentY += 6;
+        }
+
+        const boxY = currentY;
+        const innerX = margin + 12;
+        const innerWidth = contentWidth - 24;
+        const columnGap = 12;
+        const columnWidth = (innerWidth - columnGap) / 2;
+        const billToX = innerX;
+        const receiptX = innerX + columnWidth + columnGap;
+        const colHeaderGap = 14;
+        const lineGap = 4;
+
+        const customerName = customer?.name || invoice?.customerName || '';
+        const customerAddress = customer?.address || '';
+        const customerPhone = customer?.phone || '';
+        const customerEmail = customer?.email || '';
+        const showVatDetails = invoiceTemplate.showVatDetails !== false;
+        const customerTrn = showVatDetails && (customer?.customerTrn || invoice?.customerTrn)
+          ? (customer?.customerTrn || invoice?.customerTrn)
+          : '';
+
+        const drawLabelValue = (
+          label: string,
+          value: string,
+          x: number,
+          y: number,
+          w: number,
+        ): number => {
+          const labelText = `${label}: `;
+          doc.fontSize(8).font((doc as any)._fontBold).fillColor(colors.text);
+          doc.text(labelText, x, y, { width: w });
+          const labelWidth = doc.widthOfString(labelText);
+          doc.fontSize(8).font((doc as any)._fontRegular).fillColor(colors.text);
+          doc.text(value, x + labelWidth, y, { width: w - labelWidth, ellipsis: false });
+          return doc.heightOfString(`${labelText}${value}`, { width: w });
+        };
+
+        let billToContentH = 18 + colHeaderGap;
+        if (customerName) billToContentH += doc.heightOfString(customerName, { width: columnWidth }) + lineGap;
+        if (customerAddress) billToContentH += doc.heightOfString(customerAddress, { width: columnWidth }) + lineGap;
+        if (customerPhone) billToContentH += 10 + lineGap;
+        if (customerEmail) billToContentH += 10 + lineGap;
+        if (customerTrn) billToContentH += 10 + lineGap;
+
+        const receiptLines = [
+          ['INVOICE NUMBER', invoice?.invoiceNumber || '—'],
+          ['PAYMENT DATE', payment?.paymentDate ? this.formatDateForInvoice(payment.paymentDate) : '—'],
+          ['PAYMENT METHOD', String(payment?.paymentMethod || '—').replace(/_/g, ' ').toUpperCase()],
+          ['REFERENCE', payment?.referenceNumber || '—'],
+          ['AMOUNT RECEIVED', `${formatAmount(parseFloat(payment?.amount || '0'))} ${currency}`],
+        ];
+        let receiptContentH = 18 + colHeaderGap;
+        doc.fontSize(8).font((doc as any)._fontRegular);
+        for (const [label, value] of receiptLines) {
+          receiptContentH += doc.heightOfString(`${label}: ${value}`, { width: columnWidth }) + lineGap;
+        }
+        const headerHeight = Math.ceil(Math.max(billToContentH, receiptContentH)) + 14;
+
+        doc.fillColor(colors.backgroundLight).rect(margin, boxY, contentWidth, headerHeight).fill();
+        doc.strokeColor(colors.border).lineWidth(1).rect(margin, boxY, contentWidth, headerHeight).stroke();
+        const sepX = receiptX - columnGap / 2;
+        doc.strokeColor(colors.borderLight).lineWidth(0.5);
+        doc.moveTo(sepX, boxY + 12).lineTo(sepX, boxY + headerHeight - 12).stroke();
+
+        let billToY = boxY + 10;
+        doc.fontSize(8).font((doc as any)._fontBold).fillColor(colors.text);
+        doc.text('BILL TO:', billToX, billToY, { width: columnWidth });
+        billToY += colHeaderGap;
+        if (customerName) {
+          doc.fontSize(8).font((doc as any)._fontBold).fillColor(colors.text);
+          doc.text(customerName, billToX, billToY, { width: columnWidth });
+          billToY += doc.heightOfString(customerName, { width: columnWidth }) + lineGap;
+        }
+        if (customerAddress) {
+          doc.fontSize(8).font((doc as any)._fontRegular).fillColor(colors.text);
+          doc.text(customerAddress, billToX, billToY, { width: columnWidth });
+          billToY += doc.heightOfString(customerAddress, { width: columnWidth }) + lineGap;
+        }
+        if (customerPhone) {
+          const h = drawLabelValue('Phone', customerPhone, billToX, billToY, columnWidth);
+          billToY += h + lineGap;
+        }
+        if (customerEmail) {
+          const h = drawLabelValue('Email', customerEmail, billToX, billToY, columnWidth);
+          billToY += h + lineGap;
+        }
+        if (customerTrn) {
+          const h = drawLabelValue('TRN', customerTrn, billToX, billToY, columnWidth);
+          billToY += h + lineGap;
+        }
+
+        let receiptY = boxY + 10;
+        doc.fontSize(8).font((doc as any)._fontBold).fillColor(colors.text);
+        doc.text('RECEIPT DETAILS', receiptX, receiptY, { width: columnWidth });
+        receiptY += colHeaderGap;
+        for (const [label, value] of receiptLines) {
+          const h = drawLabelValue(label, value, receiptX, receiptY, columnWidth);
+          receiptY += h + lineGap;
+        }
+
+        currentY = boxY + headerHeight + 8;
+
+        if (payment?.notes) {
+          doc.fontSize(9).font((doc as any)._fontBold).fillColor(colors.text);
+          doc.text('Notes', margin, currentY);
+          doc.fontSize(8).font((doc as any)._fontRegular).fillColor(colors.textLight);
+          doc.text(payment.notes, margin, currentY + 12, { width: contentWidth });
+          currentY += doc.heightOfString(payment.notes, { width: contentWidth }) + 16;
+        }
+
+        if (invoiceTemplate.showFooter !== false && invoiceTemplate.footerText) {
+          doc.fontSize(8).fillColor(colors.textLight);
+          doc.text(
+            invoiceTemplate.footerText,
+            margin,
+            doc.page.height - margin - 20,
+            { width: contentWidth, align: 'center' },
+          );
         }
 
         doc.end();

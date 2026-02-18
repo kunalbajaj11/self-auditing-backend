@@ -183,6 +183,34 @@ export class SalesInvoicesController {
     res.send(pdfBuffer);
   }
 
+  @Get(':id/payment-receipt/pdf')
+  @UseGuards(JwtAuthGuard, RolesGuard, TenantGuard)
+  @Roles(UserRole.ADMIN, UserRole.ACCOUNTANT, UserRole.EMPLOYEE)
+  async downloadPaymentReceiptPDF(
+    @Param('id') id: string,
+    @Query('paymentId') paymentId: string | undefined,
+    @CurrentUser() user: AuthenticatedUser,
+    @Res() res: Response,
+  ) {
+    const pdfBuffer =
+      await this.salesInvoicesService.generatePaymentReceiptPDF(
+        id,
+        user?.organizationId as string,
+        paymentId,
+      );
+
+    const invoice = await this.salesInvoicesService.findById(
+      user?.organizationId as string,
+      id,
+    );
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="payment-receipt-${invoice.invoiceNumber}.pdf"`,
+    );
+    res.send(pdfBuffer);
+  }
+
   @Post()
   @UseGuards(JwtAuthGuard, RolesGuard, TenantGuard)
   @Roles(UserRole.ADMIN, UserRole.ACCOUNTANT)

@@ -7,6 +7,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
 import { CreditNote } from '../../entities/credit-note.entity';
 import { CreditNoteApplication } from '../../entities/credit-note-application.entity';
+import { CreditNoteLineItem } from '../../entities/credit-note-line-item.entity';
 import { NumberingSequenceType } from '../../entities/numbering-sequence.entity';
 import { SettingsService } from '../settings/settings.service';
 import { SalesInvoice } from '../../entities/sales-invoice.entity';
@@ -27,6 +28,8 @@ export class CreditNotesService {
     private readonly creditNotesRepository: Repository<CreditNote>,
     @InjectRepository(CreditNoteApplication)
     private readonly creditNoteApplicationsRepository: Repository<CreditNoteApplication>,
+    @InjectRepository(CreditNoteLineItem)
+    private readonly creditNoteLineItemsRepository: Repository<CreditNoteLineItem>,
     @InjectRepository(SalesInvoice)
     private readonly invoicesRepository: Repository<SalesInvoice>,
     @InjectRepository(Organization)
@@ -51,10 +54,15 @@ export class CreditNotesService {
   async findById(organizationId: string, id: string): Promise<CreditNote> {
     const creditNote = await this.creditNotesRepository.findOne({
       where: { id, organization: { id: organizationId }, isDeleted: false },
-      relations: ['customer', 'invoice', 'applications'],
+      relations: ['customer', 'invoice', 'applications', 'lineItems'],
     });
     if (!creditNote) {
       throw new NotFoundException('Credit note not found');
+    }
+    if (creditNote.lineItems?.length) {
+      creditNote.lineItems.sort(
+        (a, b) => (a.lineNumber || 0) - (b.lineNumber || 0),
+      );
     }
     return creditNote;
   }
@@ -68,10 +76,15 @@ export class CreditNotesService {
   ): Promise<Buffer> {
     const creditNote = await this.creditNotesRepository.findOne({
       where: { id, organization: { id: organizationId }, isDeleted: false },
-      relations: ['organization', 'customer', 'invoice', 'user'],
+      relations: ['organization', 'customer', 'invoice', 'user', 'lineItems'],
     });
     if (!creditNote) {
       throw new NotFoundException('Credit note not found');
+    }
+    if (creditNote.lineItems?.length) {
+      creditNote.lineItems.sort(
+        (a, b) => (a.lineNumber || 0) - (b.lineNumber || 0),
+      );
     }
 
     const templateSettings =
@@ -125,14 +138,32 @@ export class CreditNotesService {
       NumberingSequenceType.CREDIT_NOTE,
     );
 
+    let amount: number;
+    let vatAmount: number;
+    const lineItemsDto = Array.isArray(dto.lineItems) ? dto.lineItems : [];
+
+    if (lineItemsDto.length > 0) {
+      amount = lineItemsDto.reduce(
+        (sum: number, li: any) => sum + parseFloat(li.amount || '0'),
+        0,
+      );
+      vatAmount = lineItemsDto.reduce(
+        (sum: number, li: any) => sum + parseFloat(li.vatAmount || '0'),
+        0,
+      );
+    } else {
+      amount = parseFloat(dto.amount);
+      vatAmount = parseFloat(String(dto.vatAmount || 0));
+    }
+
     const creditNote = this.creditNotesRepository.create({
       organization,
       user,
       creditNoteNumber,
       creditNoteDate: dto.creditNoteDate,
       reason: dto.reason,
-      amount: dto.amount.toString(),
-      vatAmount: (dto.vatAmount || 0).toString(),
+      amount: amount.toString(),
+      vatAmount: vatAmount.toString(),
       currency: dto.currency || 'AED',
       description: dto.description,
       notes: dto.notes,
@@ -145,6 +176,23 @@ export class CreditNotesService {
 
     const saved = await this.creditNotesRepository.save(creditNote);
 
+    if (lineItemsDto.length > 0) {
+      const lineEntities = lineItemsDto.map((li: any, index: number) =>
+        this.creditNoteLineItemsRepository.create({
+          creditNote: { id: saved.id },
+          organization: { id: organizationId },
+          itemName: li.itemName || 'Item',
+          quantity: String(li.quantity ?? 1),
+          unitPrice: String(li.unitPrice ?? 0),
+          vatRate: String(li.vatRate ?? 5),
+          amount: String(li.amount ?? 0),
+          vatAmount: String(li.vatAmount ?? 0),
+          lineNumber: li.lineNumber ?? index + 1,
+        }),
+      );
+      await this.creditNoteLineItemsRepository.save(lineEntities);
+    }
+
     // If credit note is linked to an invoice, update the invoice's payment status
     if (saved.invoice?.id) {
       await this.salesInvoicesService.updatePaymentStatus(
@@ -153,7 +201,7 @@ export class CreditNotesService {
       );
     }
 
-    return saved;
+    return this.findById(organizationId, saved.id);
   }
 
   /**
@@ -379,11 +427,42 @@ export class CreditNotesService {
     if (dto.reason !== undefined) {
       creditNote.reason = dto.reason;
     }
-    if (dto.amount !== undefined) {
-      creditNote.amount = dto.amount.toString();
-    }
-    if (dto.vatAmount !== undefined) {
-      creditNote.vatAmount = dto.vatAmount.toString();
+    const lineItemsDto = Array.isArray(dto.lineItems) ? dto.lineItems : [];
+    if (lineItemsDto.length > 0) {
+      const amount = lineItemsDto.reduce(
+        (sum: number, li: any) => sum + parseFloat(li.amount || '0'),
+        0,
+      );
+      const vatAmount = lineItemsDto.reduce(
+        (sum: number, li: any) => sum + parseFloat(li.vatAmount || '0'),
+        0,
+      );
+      creditNote.amount = amount.toString();
+      creditNote.vatAmount = vatAmount.toString();
+      await this.creditNoteLineItemsRepository.delete({
+        creditNote: { id: creditNoteId },
+      });
+      const lineEntities = lineItemsDto.map((li: any, index: number) =>
+        this.creditNoteLineItemsRepository.create({
+          creditNote: { id: creditNoteId },
+          organization: { id: organizationId },
+          itemName: li.itemName || 'Item',
+          quantity: String(li.quantity ?? 1),
+          unitPrice: String(li.unitPrice ?? 0),
+          vatRate: String(li.vatRate ?? 5),
+          amount: String(li.amount ?? 0),
+          vatAmount: String(li.vatAmount ?? 0),
+          lineNumber: li.lineNumber ?? index + 1,
+        }),
+      );
+      await this.creditNoteLineItemsRepository.save(lineEntities);
+    } else {
+      if (dto.amount !== undefined) {
+        creditNote.amount = dto.amount.toString();
+      }
+      if (dto.vatAmount !== undefined) {
+        creditNote.vatAmount = dto.vatAmount.toString();
+      }
     }
     if (dto.description !== undefined) {
       creditNote.description = dto.description;

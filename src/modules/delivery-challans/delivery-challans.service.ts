@@ -298,13 +298,6 @@ export class DeliveryChallansService {
     });
     if (!so) throw new NotFoundException('Sales order not found');
 
-    const selected = dto.lineItems?.length
-      ? dto.lineItems
-      : so.lineItems.map((li) => ({
-          salesOrderLineItemId: li.id,
-          quantity: parseFloat(li.orderedQuantity || '0'),
-        }));
-
     const soLineItems = await this.salesOrderLineItemsRepository.find({
       where: {
         organization: { id: organizationId } as any,
@@ -312,7 +305,27 @@ export class DeliveryChallansService {
         isDeleted: false,
       },
       relations: ['product', 'organization', 'salesOrder'],
+      order: { lineNumber: 'ASC' },
     });
+
+    let selected: Array<{ salesOrderLineItemId?: string; quantity: number }>;
+    if (dto.lineItems?.length) {
+      selected = dto.lineItems;
+    } else if (so.lineItems?.length) {
+      selected = so.lineItems.map((li) => ({
+        salesOrderLineItemId: li.id,
+        quantity: parseFloat(li.orderedQuantity || '0'),
+      }));
+    } else if (soLineItems.length > 0) {
+      selected = soLineItems.map((li) => ({
+        salesOrderLineItemId: li.id,
+        quantity: parseFloat(li.orderedQuantity || '0'),
+      }));
+    } else {
+      throw new BadRequestException(
+        'Sales order has no line items. Add items to the sales order first.',
+      );
+    }
 
     const inputLineItems = selected.map((sel) => {
       const li = sel.salesOrderLineItemId

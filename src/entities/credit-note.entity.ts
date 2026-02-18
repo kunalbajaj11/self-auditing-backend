@@ -15,6 +15,7 @@ import { Customer } from '../modules/customers/customer.entity';
 import { CreditNoteStatus } from '../common/enums/credit-note-status.enum';
 import { CreditNoteReason } from '../common/enums/credit-note-reason.enum';
 import { CreditNoteApplication } from './credit-note-application.entity';
+import { CreditNoteLineItem } from './credit-note-line-item.entity';
 
 @Entity({ name: 'credit_notes' })
 @Unique(['organization', 'creditNoteNumber'])
@@ -138,4 +139,11 @@ export class CreditNote extends AbstractEntity {
     (application) => application.creditNote,
   )
   applications: CreditNoteApplication[];
+
+  @OneToMany(
+    () => CreditNoteLineItem,
+    (lineItem) => lineItem.creditNote,
+    { cascade: false },
+  )
+  lineItems: CreditNoteLineItem[];
 }

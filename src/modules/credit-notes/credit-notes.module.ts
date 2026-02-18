@@ -4,6 +4,7 @@ import { CreditNotesService } from './credit-notes.service';
 import { CreditNotesController } from './credit-notes.controller';
 import { CreditNote } from '../../entities/credit-note.entity';
 import { CreditNoteApplication } from '../../entities/credit-note-application.entity';
+import { CreditNoteLineItem } from '../../entities/credit-note-line-item.entity';
 import { SettingsModule } from '../settings/settings.module';
 import { SalesInvoice } from '../../entities/sales-invoice.entity';
 import { Organization } from '../../entities/organization.entity';
@@ -17,6 +18,7 @@ import { ReportsModule } from '../reports/reports.module';
     TypeOrmModule.forFeature([
       CreditNote,
       CreditNoteApplication,
+      CreditNoteLineItem,
       SalesInvoice,
       Organization,
       User,
