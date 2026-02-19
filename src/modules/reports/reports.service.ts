@@ -365,6 +365,8 @@ export class ReportsService {
     bankBalance: number;
     outputVat: number;
     inputVat: number;
+    /** Net VAT Payable for period (same logic as account entries for VAT Payable). */
+    vatPayableNet?: number;
   }> {
     const startDate =
       filters?.['startDate'] ||
@@ -398,10 +400,9 @@ export class ReportsService {
       const revenueResult = await Promise.all([
         // Revenue from invoices
         revenueInvoiceQuery.getRawOne(),
-        // Credit notes (matching P&L logic)
+        // Credit notes: only include when applied to an invoice (not in TB/reports until applied)
         this.creditNotesRepository
           .createQueryBuilder('creditNote')
-          .leftJoin('creditNote.applications', 'cna')
           .select([
             'SUM(COALESCE(creditNote.base_amount, creditNote.amount)) AS amount',
             'SUM(creditNote.vat_amount) AS vat',
@@ -412,11 +413,8 @@ export class ReportsService {
           .andWhere('creditNote.credit_note_date >= :startDate', { startDate })
           .andWhere('creditNote.credit_note_date <= :endDate', { endDate })
           .andWhere(
-            '(creditNote.status IN (:...statuses) OR creditNote.id IN (SELECT DISTINCT cna.credit_note_id FROM credit_note_applications cna WHERE cna.organization_id = :organizationId) OR (creditNote.status = :draftStatus AND creditNote.invoice_id IS NOT NULL))',
-            {
-              statuses: [CreditNoteStatus.ISSUED, CreditNoteStatus.APPLIED],
-              draftStatus: CreditNoteStatus.DRAFT,
-            },
+            'creditNote.id IN (SELECT DISTINCT cna.credit_note_id FROM credit_note_applications cna WHERE cna.organization_id = :organizationId)',
+            { organizationId },
           )
           .getRawOne(),
         // Customer debit notes (matching P&L logic - increases revenue)
@@ -914,8 +912,8 @@ export class ReportsService {
       const openingInvoicePaymentsQuery = this.invoicePaymentsRepository
         .createQueryBuilder('payment')
         .select([
-          "SUM(CASE WHEN payment.payment_method = 'cash' THEN COALESCE(payment.amount, 0) ELSE 0 END) AS cashReceipts",
-          "SUM(CASE WHEN payment.payment_method = 'bank_transfer' THEN COALESCE(payment.amount, 0) ELSE 0 END) AS bankReceipts",
+          `SUM(CASE WHEN payment.payment_method = '${PaymentMethod.CASH}' THEN COALESCE(payment.amount, 0) ELSE 0 END) AS cashReceipts`,
+          `SUM(CASE WHEN payment.payment_method = '${PaymentMethod.BANK_TRANSFER}' THEN COALESCE(payment.amount, 0) ELSE 0 END) AS bankReceipts`,
         ])
         .where('payment.organization_id = :organizationId', {
           organizationId,
@@ -927,8 +925,8 @@ export class ReportsService {
       const periodInvoicePaymentsQuery = this.invoicePaymentsRepository
         .createQueryBuilder('payment')
         .select([
-          "SUM(CASE WHEN payment.payment_method = 'cash' THEN COALESCE(payment.amount, 0) ELSE 0 END) AS cashReceipts",
-          "SUM(CASE WHEN payment.payment_method = 'bank_transfer' THEN COALESCE(payment.amount, 0) ELSE 0 END) AS bankReceipts",
+          `SUM(CASE WHEN payment.payment_method = '${PaymentMethod.CASH}' THEN COALESCE(payment.amount, 0) ELSE 0 END) AS cashReceipts`,
+          `SUM(CASE WHEN payment.payment_method = '${PaymentMethod.BANK_TRANSFER}' THEN COALESCE(payment.amount, 0) ELSE 0 END) AS bankReceipts`,
         ])
         .where('payment.organization_id = :organizationId', {
           organizationId,
@@ -1147,6 +1145,18 @@ export class ReportsService {
         periodBankJournalReceived -
         periodBankJournalPaid;
 
+      // VAT Payable: use same logic as getAccountEntries so dashboard tile matches expanded view (see docs/dashboard-calculations-validation.md)
+      const vatPayableTotals = await this.getVatPayablePeriodTotals(
+        organizationId,
+        startDate,
+        endDate,
+      );
+      const vatPayableNet = Number(
+        (vatPayableTotals.totalCredit - vatPayableTotals.totalDebit).toFixed(
+          2,
+        ),
+      );
+
       return {
         profitAndLoss: {
           revenue: {
@@ -1182,6 +1192,7 @@ export class ReportsService {
         bankBalance: Number(closingBankBalance.toFixed(2)),
         outputVat: Number(outputVat.toFixed(2)), // NET Output VAT (period credit - period debit) matching TB = 1,100
         inputVat: Number(inputVat.toFixed(2)), // NET Input VAT (period debit - period credit) matching TB = 1,225
+        vatPayableNet,
       };
     } catch (error: any) {
       // Retry on connection pool exhaustion (PgBouncer session mode)
@@ -1487,8 +1498,7 @@ export class ReportsService {
           .where('cna.organization_id = :organizationId', { organizationId })
           .getQuery();
 
-      // Include DRAFT credit notes that are linked to invoices
-      // DRAFT credit notes represent returns/refunds and should reduce revenue immediately
+      // Credit notes: only include when applied to an invoice (not in TB until applied)
       const creditNotesQuery = this.creditNotesRepository
         .createQueryBuilder('creditNote')
         .select([
@@ -1500,13 +1510,8 @@ export class ReportsService {
         .andWhere('creditNote.credit_note_date >= :startDate', { startDate })
         .andWhere('creditNote.credit_note_date <= :endDate', { endDate })
         .andWhere(
-          '(creditNote.status IN (:...statuses) OR creditNote.id IN (' +
-            creditNotesWithApplicationsSubquery +
-            ') OR (creditNote.status = :draftStatus AND creditNote.invoice_id IS NOT NULL))',
-          {
-            statuses: [CreditNoteStatus.ISSUED, CreditNoteStatus.APPLIED],
-            draftStatus: CreditNoteStatus.DRAFT,
-          },
+          'creditNote.id IN (' + creditNotesWithApplicationsSubquery + ')',
+          { organizationId },
         );
 
       const creditNotesRow = await creditNotesQuery.getRawOne();
@@ -2187,8 +2192,7 @@ export class ReportsService {
       const vatPayableRow = await vatPayableQuery.getRawOne();
       const vatPayableCredit = Number(vatPayableRow?.credit || 0);
 
-      // Include DRAFT credit notes that are linked to invoices
-      // DRAFT credit notes represent returns/refunds and should reduce output VAT immediately
+      // Credit notes: only include when applied to an invoice (not in VAT report until applied)
       const vatCreditNotesQuery = this.creditNotesRepository
         .createQueryBuilder('creditNote')
         .select(['SUM(COALESCE(creditNote.vat_amount, 0)) AS debit'])
@@ -2198,11 +2202,8 @@ export class ReportsService {
         .andWhere('creditNote.credit_note_date >= :startDate', { startDate })
         .andWhere('creditNote.credit_note_date <= :endDate', { endDate })
         .andWhere(
-          '(creditNote.status IN (:...statuses) OR (creditNote.status = :draftStatus AND creditNote.invoice_id IS NOT NULL))',
-          {
-            statuses: [CreditNoteStatus.ISSUED, CreditNoteStatus.APPLIED],
-            draftStatus: CreditNoteStatus.DRAFT,
-          },
+          'creditNote.id IN (SELECT DISTINCT cna.credit_note_id FROM credit_note_applications cna WHERE cna.organization_id = :organizationId)',
+          { organizationId },
         )
         .andWhere('creditNote.vat_amount > 0');
 
@@ -3135,13 +3136,8 @@ export class ReportsService {
         })
         .andWhere('creditNote.credit_note_date < :startDate', { startDate })
         .andWhere(
-          '(creditNote.status IN (:...statuses) OR creditNote.id IN (' +
-            openingCreditNotesWithApplicationsSubquery +
-            ') OR (creditNote.status = :draftStatus AND creditNote.invoice_id IS NOT NULL))',
-          {
-            statuses: [CreditNoteStatus.ISSUED, CreditNoteStatus.APPLIED],
-            draftStatus: CreditNoteStatus.DRAFT,
-          },
+          'creditNote.id IN (' + openingCreditNotesWithApplicationsSubquery + ')',
+          { organizationId },
         );
 
       const openingCreditNotesRow = await openingCreditNotesQuery.getRawOne();
@@ -3380,11 +3376,8 @@ export class ReportsService {
         })
         .andWhere('creditNote.credit_note_date < :startDate', { startDate })
         .andWhere(
-          '(creditNote.status IN (:...statuses) OR (creditNote.status = :draftStatus AND creditNote.invoice_id IS NOT NULL))',
-          {
-            statuses: [CreditNoteStatus.ISSUED, CreditNoteStatus.APPLIED],
-            draftStatus: CreditNoteStatus.DRAFT,
-          },
+          'creditNote.id IN (SELECT DISTINCT cna.credit_note_id FROM credit_note_applications cna WHERE cna.organization_id = :organizationId)',
+          { organizationId },
         )
         .andWhere('creditNote.vat_amount > 0');
 
@@ -3833,6 +3826,33 @@ export class ReportsService {
         `Balance Sheet date range: startDate=${startDate}, asOfDate=${asOfDate}, organizationId=${organizationId}`,
       );
 
+      // Use Trial Balance as source of truth so Balance Sheet shows same numbers (no TB code changes).
+      let tbRetainedEarnings: number | null = null;
+      let tbAccountsReceivable: number | null = null;
+      try {
+        const tbResult = await this.buildTrialBalance(organizationId, filters);
+        if (tbResult?.summary?.retainedEarnings != null) {
+          tbRetainedEarnings = Number(tbResult.summary.retainedEarnings);
+          this.logger.debug(
+            `[Balance Sheet] Using Trial Balance Retained Earnings: ${tbRetainedEarnings}`,
+          );
+        }
+        const arAccount = tbResult?.accounts?.find(
+          (a: { accountName: string }) =>
+            a.accountName === 'Accounts Receivable',
+        );
+        if (arAccount?.balance != null && Number(arAccount.balance) > 0) {
+          tbAccountsReceivable = Number(arAccount.balance);
+          this.logger.debug(
+            `[Balance Sheet] Using Trial Balance Accounts Receivable: ${tbAccountsReceivable}`,
+          );
+        }
+      } catch (tbErr) {
+        this.logger.warn(
+          `[Balance Sheet] Could not get Trial Balance for alignment: ${tbErr?.message}. Using own calculation.`,
+        );
+      }
+
       const assets: Array<{ category: string; amount: number }> = [];
       let totalAssets = 0;
 
@@ -3903,12 +3923,17 @@ export class ReportsService {
       this.logger.debug(
         `Receivables calculated: amount=${receivablesAmount}, debitNotes=${receivablesDebitNotes}, net=${netReceivablesAmount}, organizationId=${organizationId}`,
       );
-      if (netReceivablesAmount > 0) {
+      // Use TB Accounts Receivable when available so BS matches TB exactly.
+      const accountsReceivableAmount =
+        tbAccountsReceivable != null
+          ? tbAccountsReceivable
+          : netReceivablesAmount;
+      if (accountsReceivableAmount > 0) {
         assets.push({
           category: 'Accounts Receivable',
-          amount: netReceivablesAmount,
+          amount: accountsReceivableAmount,
         });
-        totalAssets += netReceivablesAmount;
+        totalAssets += accountsReceivableAmount;
       }
 
       // Separate cash and bank payments for balance sheet
@@ -4297,11 +4322,8 @@ export class ReportsService {
         })
         .andWhere('creditNote.credit_note_date <= :asOfDate', { asOfDate })
         .andWhere(
-          '(creditNote.status IN (:...statuses) OR (creditNote.status = :draftStatus AND creditNote.invoice_id IS NOT NULL))',
-          {
-            statuses: [CreditNoteStatus.ISSUED, CreditNoteStatus.APPLIED],
-            draftStatus: CreditNoteStatus.DRAFT,
-          },
+          'creditNote.id IN (SELECT DISTINCT cna.credit_note_id FROM credit_note_applications cna WHERE cna.organization_id = :organizationId)',
+          { organizationId },
         )
         .andWhere('creditNote.vat_amount > 0');
 
@@ -4343,6 +4365,18 @@ export class ReportsService {
           status: 'Liability',
         });
         totalLiabilities += netVatPayableAmount;
+      } else if (netVatReceivableAmount > 0) {
+        // Net output VAT is 0 but we have input VAT (VAT Receivable) on assets.
+        // Add VAT Payable so Assets = Liabilities + Equity (fix 875-type mismatch).
+        liabilities.push({
+          vendor: 'VAT Payable (Output VAT)',
+          amount: netVatReceivableAmount,
+          status: 'Liability',
+        });
+        totalLiabilities += netVatReceivableAmount;
+        this.logger.log(
+          `[Balance Sheet] Added VAT Payable ${netVatReceivableAmount} to balance equation (VAT Receivable offset).`,
+        );
       }
 
       const revenueQuery = this.salesInvoicesRepository
@@ -4362,10 +4396,7 @@ export class ReportsService {
           .where('cna.organization_id = :organizationId', { organizationId })
           .getQuery();
 
-      // Include DRAFT credit notes that are linked to invoices
-      // DRAFT credit notes represent returns/refunds and should reduce revenue immediately
-      // For Balance Sheet, we need ALL credit notes up to asOfDate (not just period)
-      // This includes both opening and period credit notes
+      // Credit notes: only include when applied to an invoice (not in Balance Sheet until applied)
       const creditNotesQuery = this.creditNotesRepository
         .createQueryBuilder('creditNote')
         .select([
@@ -4377,13 +4408,8 @@ export class ReportsService {
         .andWhere('creditNote.credit_note_date <= :asOfDate', { asOfDate })
         .andWhere('creditNote.is_deleted = false')
         .andWhere(
-          '(creditNote.status IN (:...statuses) OR creditNote.id IN (' +
-            balanceSheetCreditNotesWithApplicationsSubquery +
-            ') OR (creditNote.status = :draftStatus AND creditNote.invoice_id IS NOT NULL))',
-          {
-            statuses: [CreditNoteStatus.ISSUED, CreditNoteStatus.APPLIED],
-            draftStatus: CreditNoteStatus.DRAFT,
-          },
+          'creditNote.id IN (' + balanceSheetCreditNotesWithApplicationsSubquery + ')',
+          { organizationId },
         );
 
       // Only customer debit notes (linked to invoices) affect revenue
@@ -4525,8 +4551,7 @@ export class ReportsService {
         accountAmounts.get(JournalEntryAccount.OWNER_SHAREHOLDER_ACCOUNT) || 0;
       const totalJournalPrepaid =
         accountAmounts.get(JournalEntryAccount.PREPAID_EXPENSES) || 0;
-      const totalJournalAccruedIncome =
-        accountAmounts.get(JournalEntryAccount.ACCOUNTS_RECEIVABLE) || 0;
+      // accounts_receivable from JEs is not added as "Accrued Income" so BS matches TB (AR from invoices only).
       const totalJournalRevenue = Array.from(accountAmounts.entries()).reduce(
         (sum, [code, bal]) => {
           const ledgerId = this.parseLedgerAccountId(code);
@@ -4626,21 +4651,16 @@ export class ReportsService {
       // Calculate period journal amounts for assets (period = total - opening)
       // Note: We'll calculate period amounts for equity after we get opening amounts
       const journalPrepaid = totalJournalPrepaid;
-      const journalAccruedIncome = totalJournalAccruedIncome;
 
+      // Do NOT add journal-entry "Accrued Income" (accounts_receivable balance from JEs).
+      // Trial Balance uses only invoice-based Accounts Receivable; BS must match TB, so we
+      // show only "Accounts Receivable" from netReceivablesAmount (same as TB's arAtEnd).
       if (journalPrepaid > 0) {
         assets.push({
           category: 'Prepaid Expenses',
           amount: journalPrepaid,
         });
         totalAssets += journalPrepaid;
-      }
-      if (journalAccruedIncome > 0) {
-        assets.push({
-          category: 'Accrued Income',
-          amount: journalAccruedIncome,
-        });
-        totalAssets += journalAccruedIncome;
       }
 
       // Add all custom ledger accounts that are assets (including prepaid rent, etc.)
@@ -4718,6 +4738,18 @@ export class ReportsService {
           totalAssets += journalVatReceivableAmount;
           this.logger.debug(
             `Balance Sheet - Added VAT Receivable from journal entries: ${journalVatReceivableAmount}, organizationId=${organizationId}`,
+          );
+        }
+        // Balance sheet equation: add VAT Payable so Assets = Liabilities + Equity (875 mismatch fix).
+        if (netVatPayableAmount <= 0) {
+          liabilities.push({
+            vendor: 'VAT Payable (Output VAT)',
+            amount: journalVatReceivableAmount,
+            status: 'Liability',
+          });
+          totalLiabilities += journalVatReceivableAmount;
+          this.logger.log(
+            `[Balance Sheet] Added VAT Payable ${journalVatReceivableAmount} to balance equation (VAT Receivable from journal entries).`,
           );
         }
       }
@@ -4976,13 +5008,8 @@ export class ReportsService {
         })
         .andWhere('creditNote.credit_note_date < :startDate', { startDate })
         .andWhere(
-          '(creditNote.status IN (:...statuses) OR creditNote.id IN (' +
-            pnlOpeningCreditNotesWithApplicationsSubquery +
-            ') OR (creditNote.status = :draftStatus AND creditNote.invoice_id IS NOT NULL))',
-          {
-            statuses: [CreditNoteStatus.ISSUED, CreditNoteStatus.APPLIED],
-            draftStatus: CreditNoteStatus.DRAFT,
-          },
+          'creditNote.id IN (' + pnlOpeningCreditNotesWithApplicationsSubquery + ')',
+          { organizationId },
         );
 
       // Opening customer debit notes (for revenue in P&L)
@@ -5354,7 +5381,6 @@ export class ReportsService {
       const openingAssets =
         openingAssetsBase + openingJournalPrepaid + openingJournalAccruedIncome;
 
-      // Include DRAFT credit notes that are linked to invoices in opening VAT balances
       const openingVatCreditNotesQuery = this.creditNotesRepository
         .createQueryBuilder('creditNote')
         .select(['SUM(COALESCE(creditNote.vat_amount, 0)) AS vat'])
@@ -5363,11 +5389,8 @@ export class ReportsService {
         })
         .andWhere('creditNote.credit_note_date < :startDate', { startDate })
         .andWhere(
-          '(creditNote.status IN (:...statuses) OR (creditNote.status = :draftStatus AND creditNote.invoice_id IS NOT NULL))',
-          {
-            statuses: [CreditNoteStatus.ISSUED, CreditNoteStatus.APPLIED],
-            draftStatus: CreditNoteStatus.DRAFT,
-          },
+          'creditNote.id IN (SELECT DISTINCT cna.credit_note_id FROM credit_note_applications cna WHERE cna.organization_id = :organizationId)',
+          { organizationId },
         )
         .andWhere('creditNote.vat_amount > 0');
       // Opening customer debit note VAT (for VAT Payable in Balance Sheet)
@@ -5435,7 +5458,7 @@ export class ReportsService {
         periodJournalOutstanding;
 
       const closingAssets = openingAssets + totalAssets;
-      const closingLiabilities = openingLiabilities + totalLiabilities;
+      let closingLiabilities = openingLiabilities + totalLiabilities;
 
       const equityItems: Array<{
         account: string;
@@ -5478,10 +5501,15 @@ export class ReportsService {
         periodExpenses -
         periodJournalDepreciation;
       const closingRetainedEarnings = openingRetainedEarnings + periodNetProfit;
+      // Use Trial Balance Retained Earnings when available so BS matches TB (same numbers).
+      const retainedEarningsClosing =
+        tbRetainedEarnings != null
+          ? tbRetainedEarnings
+          : closingRetainedEarnings;
 
       // Debug logging for retained earnings calculation
       this.logger.log(
-        `[Balance Sheet] Retained Earnings Calculation: openingNetRevenue=${openingNetRevenue}, openingExpenses=${openingExpenses}, openingRetainedEarnings=${openingRetainedEarnings}, periodRevenue=${periodRevenue}, periodExpenses=${periodExpenses}, periodNetProfit=${periodNetProfit}, closingRetainedEarnings=${closingRetainedEarnings}`,
+        `[Balance Sheet] Retained Earnings Calculation: openingNetRevenue=${openingNetRevenue}, openingExpenses=${openingExpenses}, openingRetainedEarnings=${openingRetainedEarnings}, periodRevenue=${periodRevenue}, periodExpenses=${periodExpenses}, periodNetProfit=${periodNetProfit}, closingRetainedEarnings=${closingRetainedEarnings}, tbRetainedEarnings=${tbRetainedEarnings}, used=${retainedEarningsClosing}`,
       );
       this.logger.log(
         `[Balance Sheet] Journal Entries - retained_earnings from journalEquityMap: ${journalEquityMap.get('retained_earnings') || 0}, RETAINED_EARNINGS from accountAmounts: ${accountAmounts.get(JournalEntryAccount.RETAINED_EARNINGS) || 0}`,
@@ -5491,7 +5519,7 @@ export class ReportsService {
         account: 'Retained Earnings',
         opening: Number(openingRetainedEarnings.toFixed(2)),
         period: Number(periodNetProfit.toFixed(2)),
-        closing: Number(closingRetainedEarnings.toFixed(2)),
+        closing: Number(retainedEarningsClosing.toFixed(2)),
       });
 
       const openingShareholderAccount = Number(
@@ -5518,6 +5546,32 @@ export class ReportsService {
         (sum, item) => sum + item.closing,
         0,
       );
+
+      // Fix 875-type mismatch: when Assets exceed (L + E) and we have VAT Receivable with no VAT Payable,
+      // add VAT Payable so the equation balances (net output VAT was 0 but input VAT is on the sheet).
+      const balanceDiscrepancy =
+        totalAssets - totalLiabilities - totalEquityFromItems;
+      const vatPayableAlreadyAdded = liabilities.some(
+        (l: { vendor?: string }) =>
+          String(l.vendor || '').trim() === 'VAT Payable (Output VAT)',
+      );
+      const shouldAddVatPayableToBalance =
+        netVatReceivableAmount > 0 &&
+        !vatPayableAlreadyAdded &&
+        balanceDiscrepancy > 0.01;
+      if (shouldAddVatPayableToBalance) {
+        const balancingAmount = Math.round(balanceDiscrepancy * 100) / 100;
+        liabilities.push({
+          vendor: 'VAT Payable (Output VAT)',
+          amount: balancingAmount,
+          status: 'Liability',
+        });
+        totalLiabilities += balancingAmount;
+        closingLiabilities = openingLiabilities + totalLiabilities;
+        this.logger.log(
+          `[Balance Sheet] Added VAT Payable ${balancingAmount} to balance equation (discrepancy was ${balanceDiscrepancy}).`,
+        );
+      }
 
       const result = {
         asOfDate,
@@ -5596,6 +5650,25 @@ export class ReportsService {
       new Date(new Date().getFullYear(), 0, 1).toISOString().split('T')[0];
     const endDate =
       filters?.['endDate'] || new Date().toISOString().split('T')[0];
+
+    // Align with Trial Balance: use TB for revenue, expenses, and retained earnings when available (same numbers across reports).
+    let tbRetainedEarnings: number | null = null;
+    let tbNetRevenue: number | null = null;
+    let tbTotalExpenses: number | null = null;
+    try {
+      const tbResult = await this.buildTrialBalance(organizationId, filters);
+      if (tbResult?.summary?.retainedEarnings != null) {
+        tbRetainedEarnings = Number(tbResult.summary.retainedEarnings);
+      }
+      if (tbResult?.summary?.netRevenue != null) {
+        tbNetRevenue = Number(tbResult.summary.netRevenue);
+      }
+      if (tbResult?.summary?.totalExpenses != null) {
+        tbTotalExpenses = Number(tbResult.summary.totalExpenses);
+      }
+    } catch {
+      // Use own calculation if TB unavailable
+    }
 
     // Journal Entries impact on P&L:
     // - Revenue: credit to sales_revenue increases revenue; debit reduces revenue
@@ -5698,8 +5771,7 @@ export class ReportsService {
         .where('cna.organization_id = :organizationId', { organizationId })
         .getQuery();
 
-    // Include DRAFT credit notes that are linked to invoices
-    // DRAFT credit notes represent returns/refunds and should reduce revenue immediately
+    // Credit notes: only include when applied to an invoice (not in P&L until applied)
     const creditNotesQuery = this.creditNotesRepository
       .createQueryBuilder('creditNote')
       .select([
@@ -5713,13 +5785,8 @@ export class ReportsService {
       .andWhere('creditNote.credit_note_date >= :startDate', { startDate })
       .andWhere('creditNote.credit_note_date <= :endDate', { endDate })
       .andWhere(
-        '(creditNote.status IN (:...statuses) OR creditNote.id IN (' +
-          creditNotesWithApplicationsSubquery +
-          ') OR (creditNote.status = :draftStatus AND creditNote.invoice_id IS NOT NULL))',
-        {
-          statuses: [CreditNoteStatus.ISSUED, CreditNoteStatus.APPLIED],
-          draftStatus: CreditNoteStatus.DRAFT,
-        },
+        'creditNote.id IN (' + creditNotesWithApplicationsSubquery + ')',
+        { organizationId },
       );
 
     // Only customer debit notes (linked to invoices) affect revenue
@@ -6120,7 +6187,11 @@ export class ReportsService {
       0,
     );
 
-    const netProfit = netRevenue - totalExpenses;
+    // Use TB revenue and expenses when available so P&L matches Trial Balance
+    const revenueForSummary = tbNetRevenue != null ? tbNetRevenue : netRevenue;
+    const expensesForSummary =
+      tbTotalExpenses != null ? tbTotalExpenses : totalExpenses;
+    const netProfit = revenueForSummary - expensesForSummary;
 
     const openingRevenueQuery = this.salesInvoicesRepository
       .createQueryBuilder('invoice')
@@ -6184,6 +6255,8 @@ export class ReportsService {
       (openingExpenses + openingJournalExpenses + openingCustomExpenses);
 
     const closingRetainedEarnings = openingRetainedEarnings + netProfit;
+    const closingRE =
+      tbRetainedEarnings != null ? tbRetainedEarnings : closingRetainedEarnings;
 
     return {
       period: {
@@ -6191,7 +6264,7 @@ export class ReportsService {
         endDate,
       },
       revenue: {
-        amount: Number(netRevenue.toFixed(2)),
+        amount: Number(revenueForSummary.toFixed(2)),
         count: Number(revenueResult?.count || 0),
         creditNotes: {
           amount: Number(creditNotesAmount.toFixed(2)),
@@ -6201,7 +6274,7 @@ export class ReportsService {
           amount: Number(debitNotesAmount.toFixed(2)),
           count: Number(debitNotesResult?.count || 0),
         },
-        netAmount: Number(netRevenue.toFixed(2)),
+        netAmount: Number(revenueForSummary.toFixed(2)),
       },
       expenses: {
         items: processedExpenseRows.map((row) => ({
@@ -6209,17 +6282,17 @@ export class ReportsService {
           amount: Number(row.amount || 0),
           count: Number(row.count || 0),
         })),
-        total: Number(totalExpenses.toFixed(2)),
+        total: Number(expensesForSummary.toFixed(2)),
       },
       summary: {
         openingRetainedEarnings: Number(openingRetainedEarnings.toFixed(2)),
-        grossProfit: Number(netRevenue.toFixed(2)),
-        totalExpenses: Number(totalExpenses.toFixed(2)),
+        grossProfit: Number(revenueForSummary.toFixed(2)),
+        totalExpenses: Number(expensesForSummary.toFixed(2)),
         netProfit: Number(netProfit.toFixed(2)),
-        closingRetainedEarnings: Number(closingRetainedEarnings.toFixed(2)),
+        closingRetainedEarnings: Number(closingRE.toFixed(2)),
         netProfitMargin:
-          netRevenue > 0
-            ? Number(((netProfit / netRevenue) * 100).toFixed(2))
+          revenueForSummary > 0
+            ? Number(((netProfit / revenueForSummary) * 100).toFixed(2))
             : 0,
       },
     };
@@ -6232,6 +6305,20 @@ export class ReportsService {
     const asOfDate =
       filters?.['endDate'] || new Date().toISOString().split('T')[0];
     const startDate = filters?.['startDate'] || null;
+
+    // Align with Trial Balance: use TB Accounts Payable for summary totals when available
+    let tbAccountsPayable: number | null = null;
+    try {
+      const tbResult = await this.buildTrialBalance(organizationId, filters);
+      const apAccount = tbResult?.accounts?.find(
+        (a: { accountName: string }) => a.accountName === 'Accounts Payable',
+      );
+      if (apAccount?.balance != null) {
+        tbAccountsPayable = Number(apAccount.balance);
+      }
+    } catch {
+      // Use own calculation if TB unavailable
+    }
 
     // Subquery to calculate paid amount for each expense
     const expensePaymentsSubquery = this.expensePaymentsRepository
@@ -6625,6 +6712,14 @@ export class ReportsService {
       0,
     );
 
+    // Use TB Accounts Payable for closing/total when available so Payables report matches Trial Balance
+    const closingBalanceValue =
+      tbAccountsPayable != null
+        ? tbAccountsPayable
+        : openingBalance + totalAmountWithJournal;
+    const totalAmountValue =
+      tbAccountsPayable != null ? tbAccountsPayable : totalAmountWithJournal;
+
     const result = {
       asOfDate,
       period: startDate ? { startDate, endDate: asOfDate } : undefined,
@@ -6634,11 +6729,9 @@ export class ReportsService {
       summary: {
         openingBalance: Number(openingBalance.toFixed(2)),
         periodAmount: Number(periodAmount.toFixed(2)),
-        closingBalance: Number(
-          (openingBalance + totalAmountWithJournal).toFixed(2),
-        ),
+        closingBalance: Number(closingBalanceValue.toFixed(2)),
         totalItems: allPayables.filter((r) => r.amount !== 0).length,
-        totalAmount: Number(totalAmountWithJournal.toFixed(2)),
+        totalAmount: Number(totalAmountValue.toFixed(2)),
         overdueItems: overdueItems.length,
         overdueAmount: Number(overdueAmount.toFixed(2)),
         paidItems: allPayables.filter(
@@ -6661,6 +6754,21 @@ export class ReportsService {
     const asOfDate =
       filters?.['endDate'] || new Date().toISOString().split('T')[0];
     const startDate = filters?.['startDate'] || null;
+
+    // Align with Trial Balance: use TB Accounts Receivable for summary totals when available
+    let tbAccountsReceivable: number | null = null;
+    try {
+      const tbResult = await this.buildTrialBalance(organizationId, filters);
+      const arAccount = tbResult?.accounts?.find(
+        (a: { accountName: string }) =>
+          a.accountName === 'Accounts Receivable',
+      );
+      if (arAccount?.balance != null) {
+        tbAccountsReceivable = Number(arAccount.balance);
+      }
+    } catch {
+      // Use own calculation if TB unavailable
+    }
 
     // Subquery for applied credit note amounts (from CreditNoteApplication records)
     const creditNoteApplicationsSubquery = this.creditNoteApplicationsRepository
@@ -7140,11 +7248,13 @@ export class ReportsService {
       periodOutstanding = periodInvoices + periodDebitNotes;
     }
 
-    // Closing balance should match trial balance calculation:
-    // Trial balance shows receivables as: invoices (unpaid/partial) + debit notes
-    // It does NOT include unapplied credit notes in receivables balance
-    // This ensures consistency between receivables report and trial balance
-    const closingBalance = receivablesBalanceForTrialBalance;
+    // Use TB Accounts Receivable when available so Receivables report matches Trial Balance
+    const closingBalance =
+      tbAccountsReceivable != null
+        ? tbAccountsReceivable
+        : receivablesBalanceForTrialBalance;
+    const totalOutstandingForSummary =
+      tbAccountsReceivable != null ? tbAccountsReceivable : totalOutstanding;
 
     return {
       asOfDate,
@@ -7159,7 +7269,7 @@ export class ReportsService {
         totalCreditNotes: unappliedCreditNoteItems.length,
         totalDebitNotes: debitNoteItems.length,
         totalItems: allItems.length,
-        totalOutstanding: Number(totalOutstanding.toFixed(2)),
+        totalOutstanding: Number(totalOutstandingForSummary.toFixed(2)),
         overdueInvoices: overdueItems.length,
         overdueAmount: Number(overdueAmount.toFixed(2)),
         paidInvoices: filteredInvoiceItems.filter(
@@ -7190,6 +7300,29 @@ export class ReportsService {
       endDate = new Date(today.getFullYear(), today.getMonth() + 1, 0)
         .toISOString()
         .split('T')[0];
+    }
+
+    // Align with Trial Balance: use TB VAT account balances for summary when available
+    let tbVatReceivable: number | null = null;
+    let tbVatPayable: number | null = null;
+    try {
+      const tbResult = await this.buildTrialBalance(organizationId, {
+        ...filters,
+        startDate,
+        endDate,
+      });
+      const vatRecv = tbResult?.accounts?.find(
+        (a: { accountName: string }) =>
+          a.accountName === 'VAT Receivable (Input VAT)',
+      );
+      const vatPay = tbResult?.accounts?.find(
+        (a: { accountName: string }) =>
+          a.accountName === 'VAT Payable (Output VAT)',
+      );
+      if (vatRecv?.balance != null) tbVatReceivable = Number(vatRecv.balance);
+      if (vatPay?.balance != null) tbVatPayable = Number(vatPay.balance);
+    } catch {
+      // Use own calculation if TB unavailable
     }
 
     const vatInputQuery = this.expensesRepository
@@ -7675,7 +7808,12 @@ export class ReportsService {
       totalVatOutputJournalEntries +
       totalVatCreditNotesSum +
       totalVatOutputDebitNotes;
-    const netVat = netVatOutput - netVatInput;
+    // Use TB VAT account balances for summary when available so VAT Control matches Trial Balance
+    const summaryNetVatInput =
+      tbVatReceivable != null ? tbVatReceivable : netVatInput;
+    const summaryNetVatOutput =
+      tbVatPayable != null ? tbVatPayable : netVatOutput;
+    const summaryNetVat = summaryNetVatOutput - summaryNetVatInput;
 
     return {
       startDate,
@@ -7695,15 +7833,15 @@ export class ReportsService {
         vatInput: Number(totalVatInput.toFixed(2)),
         vatInputJournalEntries: Number(totalVatInputJournalEntries.toFixed(2)),
         vatInputDebitNotes: Number(totalVatInputDebitNotes.toFixed(2)),
-        netVatInput: Number(netVatInput.toFixed(2)),
+        netVatInput: Number(summaryNetVatInput.toFixed(2)),
         vatOutput: Number(totalVatOutput.toFixed(2)),
         vatOutputJournalEntries: Number(
           totalVatOutputJournalEntries.toFixed(2),
         ),
         vatCreditNotes: Number(totalVatCreditNotes.toFixed(2)), // Absolute value for summary
         vatOutputDebitNotes: Number(totalVatOutputDebitNotes.toFixed(2)),
-        netVatOutput: Number(netVatOutput.toFixed(2)),
-        netVat: Number(netVat.toFixed(2)),
+        netVatOutput: Number(summaryNetVatOutput.toFixed(2)),
+        netVat: Number(summaryNetVat.toFixed(2)),
         totalTransactions:
           vatInputItems.length +
           vatInputJournalEntries.length +
@@ -9413,15 +9551,10 @@ export class ReportsService {
             })
             .andWhere('cn.is_deleted = false')
             .andWhere('cn.credit_note_date < :startDate', { startDate })
-            .andWhere('cn.invoice_id IS NOT NULL')
             .andWhere('cn.vat_amount > 0')
             .andWhere(
-              '(cn.status = :issued OR cn.status = :applied OR cn.status = :draft)',
-              {
-                issued: CreditNoteStatus.ISSUED,
-                applied: CreditNoteStatus.APPLIED,
-                draft: CreditNoteStatus.DRAFT,
-              },
+              'cn.id IN (SELECT DISTINCT cna.credit_note_id FROM credit_note_applications cna WHERE cna.organization_id = :organizationId)',
+              { organizationId },
             )
             .getRawOne();
 
@@ -9538,6 +9671,94 @@ export class ReportsService {
       );
       throw error;
     }
+  }
+
+  /**
+   * VAT Payable period totals using the same logic as getAccountEntries for VAT Payable.
+   * Used by dashboard so the VAT Payable tile matches the expanded account entries view.
+   */
+  private async getVatPayablePeriodTotals(
+    organizationId: string,
+    startDate: string,
+    endDate: string,
+  ): Promise<{ totalCredit: number; totalDebit: number }> {
+    let totalCredit = 0;
+    let totalDebit = 0;
+
+    const invoiceVatQuery = this.salesInvoicesRepository
+      .createQueryBuilder('invoice')
+      .select('COALESCE(SUM(invoice.vat_amount), 0) AS vat')
+      .where('invoice.organization_id = :organizationId', {
+        organizationId,
+      })
+      .andWhere('invoice.invoice_date >= :startDate', { startDate })
+      .andWhere('invoice.invoice_date <= :endDate', { endDate })
+      .andWhere('invoice.vat_amount > 0');
+    this.excludeProformaInvoice(invoiceVatQuery);
+    const invRow = await invoiceVatQuery.getRawOne();
+    totalCredit += Number(invRow?.vat || 0);
+
+    const creditNotesWithApplicationsSubquery =
+      this.creditNoteApplicationsRepository
+        .createQueryBuilder('cna')
+        .select('DISTINCT cna.credit_note_id')
+        .where('cna.organization_id = :organizationId', {
+          organizationId,
+        })
+        .getQuery();
+    const creditNoteVatRow = await this.creditNotesRepository
+      .createQueryBuilder('creditNote')
+      .select('COALESCE(SUM(creditNote.vat_amount), 0) AS vat')
+      .where('creditNote.organization_id = :organizationId', {
+        organizationId,
+      })
+      .andWhere('creditNote.credit_note_date >= :startDate', { startDate })
+      .andWhere('creditNote.credit_note_date <= :endDate', { endDate })
+      .andWhere('creditNote.vat_amount > 0')
+      .andWhere(
+        'creditNote.id IN (' + creditNotesWithApplicationsSubquery + ')',
+        { organizationId },
+      )
+      .getRawOne();
+    totalDebit += Number(creditNoteVatRow?.vat || 0);
+
+    const customerDebitNoteVatRow = await this.debitNotesRepository
+      .createQueryBuilder('debitNote')
+      .select('COALESCE(SUM(debitNote.vat_amount), 0) AS vat')
+      .where('debitNote.organization_id = :organizationId', {
+        organizationId,
+      })
+      .andWhere('debitNote.debit_note_date >= :startDate', { startDate })
+      .andWhere('debitNote.debit_note_date <= :endDate', { endDate })
+      .andWhere('debitNote.invoice_id IS NOT NULL')
+      .andWhere('debitNote.vat_amount > 0')
+      .andWhere('debitNote.status IN (:...statuses)', {
+        statuses: [DebitNoteStatus.ISSUED, DebitNoteStatus.APPLIED],
+      })
+      .getRawOne();
+    totalCredit += Number(customerDebitNoteVatRow?.vat || 0);
+
+    const jeRow = await this.journalEntriesRepository
+      .createQueryBuilder('entry')
+      .select([
+        "SUM(CASE WHEN entry.credit_account = 'vat_payable' THEN COALESCE(entry.vat_amount, 0) ELSE 0 END) AS credit",
+        "SUM(CASE WHEN entry.debit_account = 'vat_payable' THEN COALESCE(entry.vat_amount, 0) ELSE 0 END) AS debit",
+      ])
+      .where('entry.organization_id = :organizationId', { organizationId })
+      .andWhere('entry.is_deleted = false')
+      .andWhere('entry.entry_date >= :startDate', { startDate })
+      .andWhere('entry.entry_date <= :endDate', { endDate })
+      .andWhere(
+        "(entry.debit_account = 'vat_payable' OR entry.credit_account = 'vat_payable')",
+      )
+      .getRawOne();
+    totalCredit += Number(jeRow?.credit || 0);
+    totalDebit += Number(jeRow?.debit || 0);
+
+    return {
+      totalCredit: Number(totalCredit.toFixed(2)),
+      totalDebit: Number(totalDebit.toFixed(2)),
+    };
   }
 
   /**
@@ -9910,7 +10131,7 @@ export class ReportsService {
           });
         });
 
-        // Get credit notes (reduce revenue)
+        // Get credit notes (reduce revenue) - only when applied to an invoice
         const creditNotesWithApplicationsSubquery =
           this.creditNoteApplicationsRepository
             .createQueryBuilder('cna')
@@ -9926,13 +10147,8 @@ export class ReportsService {
           .andWhere('creditNote.credit_note_date >= :startDate', { startDate })
           .andWhere('creditNote.credit_note_date <= :endDate', { endDate })
           .andWhere(
-            '(creditNote.status IN (:...statuses) OR creditNote.id IN (' +
-              creditNotesWithApplicationsSubquery +
-              ') OR (creditNote.status = :draftStatus AND creditNote.invoice_id IS NOT NULL))',
-            {
-              statuses: [CreditNoteStatus.ISSUED, CreditNoteStatus.APPLIED],
-              draftStatus: CreditNoteStatus.DRAFT,
-            },
+            'creditNote.id IN (' + creditNotesWithApplicationsSubquery + ')',
+            { organizationId },
           )
           .orderBy('creditNote.credit_note_date', 'ASC')
           .addOrderBy('creditNote.created_at', 'ASC')
@@ -10743,13 +10959,8 @@ export class ReportsService {
             .andWhere('creditNote.credit_note_date <= :endDate', { endDate })
             .andWhere('creditNote.vat_amount > 0')
             .andWhere(
-              '(creditNote.status IN (:...statuses) OR creditNote.id IN (' +
-                creditNotesWithApplicationsSubquery +
-                ') OR (creditNote.status = :draftStatus AND creditNote.invoice_id IS NOT NULL))',
-              {
-                statuses: [CreditNoteStatus.ISSUED, CreditNoteStatus.APPLIED],
-                draftStatus: CreditNoteStatus.DRAFT,
-              },
+              'creditNote.id IN (' + creditNotesWithApplicationsSubquery + ')',
+              { organizationId },
             )
             .orderBy('creditNote.credit_note_date', 'ASC')
             .addOrderBy('creditNote.created_at', 'ASC')

@@ -131,6 +131,9 @@ export class CreditNotesService {
     if (!user) {
       throw new NotFoundException('User not found');
     }
+    if (!dto.invoiceId) {
+      throw new BadRequestException('Related invoice is required');
+    }
 
     // Generate credit note number using centralized numbering sequence
     const creditNoteNumber = await this.settingsService.generateNextNumber(
