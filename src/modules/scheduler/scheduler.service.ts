@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, In, LessThan, LessThanOrEqual } from 'typeorm';
+import { Repository, In, IsNull, LessThan, LessThanOrEqual } from 'typeorm';
 import { Notification } from '../../entities/notification.entity';
 import { Accrual } from '../../entities/accrual.entity';
 import { SalesInvoice } from '../../entities/sales-invoice.entity';
@@ -19,8 +19,12 @@ import { User } from '../../entities/user.entity';
 import { UserRole } from '../../common/enums/user-role.enum';
 import { Organization } from '../../entities/organization.entity';
 import { OrganizationStatus } from '../../common/enums/organization-status.enum';
+import { Report } from '../../entities/report.entity';
 import { SettingsService } from '../settings/settings.service';
 import { ForexRateService } from '../forex/forex-rate.service';
+
+/** Report history retention: soft-delete report records older than this. */
+const REPORT_RETENTION_YEARS = 1;
 
 @Injectable()
 export class SchedulerService {
@@ -42,6 +46,8 @@ export class SchedulerService {
     private readonly usersRepository: Repository<User>,
     @InjectRepository(Organization)
     private readonly organizationsRepository: Repository<Organization>,
+    @InjectRepository(Report)
+    private readonly reportsRepository: Repository<Report>,
     private readonly notificationsService: NotificationsService,
     private readonly emailService: EmailService,
     private readonly settingsService: SettingsService,
@@ -675,6 +681,32 @@ export class SchedulerService {
           `Failed to update exchange rates for organization ${organization.id}: ${error.message}`,
         );
       }
+    }
+  }
+
+  /** Run daily at 3 AM: soft-delete report history records older than 1 year. */
+  @Cron('0 3 * * *')
+  async deleteOldReportHistory() {
+    const cutoff = new Date();
+    cutoff.setFullYear(cutoff.getFullYear() - REPORT_RETENTION_YEARS);
+    cutoff.setHours(0, 0, 0, 0);
+
+    try {
+      const result = await this.reportsRepository.softDelete({
+        createdAt: LessThan(cutoff),
+        deletedAt: IsNull(),
+      });
+      const deleted = result.affected ?? 0;
+      if (deleted > 0) {
+        this.logger.log(
+          `Report history cleanup: soft-deleted ${deleted} report(s) older than ${REPORT_RETENTION_YEARS} year(s) (before ${cutoff.toISOString()})`,
+        );
+      }
+    } catch (error: any) {
+      this.logger.error(
+        `Report history cleanup failed: ${error?.message || error}`,
+        error?.stack,
+      );
     }
   }
 }

@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   Post,
@@ -212,6 +213,16 @@ export class ReportsController {
     res.setHeader('Content-Type', contentType);
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     res.send(buffer);
+  }
+
+  @Delete(':id')
+  @Roles(UserRole.ADMIN, UserRole.ACCOUNTANT)
+  async deleteReport(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    await this.reportsService.delete(id, user?.organizationId as string);
+    return { success: true, message: 'Report removed from history' };
   }
 
   @Post('schedule')

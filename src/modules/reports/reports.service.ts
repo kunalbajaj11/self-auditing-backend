@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
 import { Expense } from '../../entities/expense.entity';
@@ -141,23 +141,33 @@ export class ReportsService {
   async listHistory(
     organizationId: string,
     filters: ReportHistoryFilterDto,
-  ): Promise<Report[]> {
+  ): Promise<{ items: Report[]; total: number; page: number; limit: number }> {
+    const page = Math.max(1, parseInt(String(filters.page), 10) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(String(filters.limit), 10) || 10));
+    const skip = (page - 1) * limit;
+
     this.logger.log(
-      `Listing report history: organizationId=${organizationId}, filters=${JSON.stringify(filters)}`,
+      `Listing report history: organizationId=${organizationId}, filters=${JSON.stringify(filters)}, page=${page}, limit=${limit}`,
     );
     try {
-      const query = this.reportsRepository
+      const baseQuery = this.reportsRepository
         .createQueryBuilder('report')
-        .where('report.organization_id = :organizationId', { organizationId });
+        .where('report.organization_id = :organizationId', { organizationId })
+        .andWhere('report.deleted_at IS NULL');
       if (filters.type) {
-        query.andWhere('report.type = :type', { type: filters.type });
+        baseQuery.andWhere('report.type = :type', { type: filters.type });
       }
-      query.orderBy('report.created_at', 'DESC');
-      const results = await query.getMany();
+      baseQuery.orderBy('report.created_at', 'DESC');
+
+      const [items, total] = await baseQuery
+        .skip(skip)
+        .take(limit)
+        .getManyAndCount();
+
       this.logger.debug(
-        `Report history retrieved: count=${results.length}, organizationId=${organizationId}`,
+        `Report history retrieved: items=${items.length}, total=${total}, organizationId=${organizationId}`,
       );
-      return results;
+      return { items, total, page, limit };
     } catch (error) {
       this.logger.error(
         `Error listing report history: organizationId=${organizationId}, error=${error.message}`,
@@ -189,6 +199,18 @@ export class ReportsService {
       );
       throw error;
     }
+  }
+
+  /**
+   * Soft-delete a report by id. Only allowed if the report belongs to the given organization.
+   */
+  async delete(id: string, organizationId: string): Promise<void> {
+    const report = await this.findById(id, organizationId);
+    if (!report) {
+      throw new NotFoundException('Report not found');
+    }
+    await this.reportsRepository.softDelete(report.id);
+    this.logger.debug(`Report soft-deleted: id=${id}, organizationId=${organizationId}`);
   }
 
   async getFilterOptions(organizationId: string): Promise<{
@@ -4696,63 +4718,8 @@ export class ReportsService {
         }
       });
 
-      // Add VAT Receivable from journal entries
-      const journalVatReceivableQuery = this.journalEntriesRepository
-        .createQueryBuilder('entry')
-        .select(['SUM(COALESCE(entry.vat_amount, 0)) AS vatAmount'])
-        .where('entry.organization_id = :organizationId', { organizationId })
-        .andWhere('entry.is_deleted = false')
-        .andWhere('entry.entry_date <= :asOfDate', { asOfDate })
-        .andWhere('CAST(entry.vat_amount AS DECIMAL) > 0')
-        .andWhere(
-          "(entry.vat_tax_type IS NULL OR entry.vat_tax_type != 'reverse_charge')",
-        );
-
-      const journalVatReceivableRow =
-        await journalVatReceivableQuery.getRawOne();
-      const journalVatReceivableAmount = Number(
-        journalVatReceivableRow?.vatamount ||
-          journalVatReceivableRow?.vatAmount ||
-          0,
-      );
-
-      if (journalVatReceivableAmount > 0) {
-        // Check if VAT Receivable already exists in assets (from expenses)
-        const existingVatReceivableIndex = assets.findIndex(
-          (asset) => asset.category === 'VAT Receivable (Input VAT)',
-        );
-        if (existingVatReceivableIndex >= 0) {
-          // Add journal entry VAT to existing VAT Receivable
-          assets[existingVatReceivableIndex].amount +=
-            journalVatReceivableAmount;
-          totalAssets += journalVatReceivableAmount;
-          this.logger.debug(
-            `Balance Sheet - Added journal entry VAT to existing VAT Receivable: ${journalVatReceivableAmount}, organizationId=${organizationId}`,
-          );
-        } else {
-          // Add new VAT Receivable entry
-          assets.push({
-            category: 'VAT Receivable (Input VAT)',
-            amount: journalVatReceivableAmount,
-          });
-          totalAssets += journalVatReceivableAmount;
-          this.logger.debug(
-            `Balance Sheet - Added VAT Receivable from journal entries: ${journalVatReceivableAmount}, organizationId=${organizationId}`,
-          );
-        }
-        // Balance sheet equation: add VAT Payable so Assets = Liabilities + Equity (875 mismatch fix).
-        if (netVatPayableAmount <= 0) {
-          liabilities.push({
-            vendor: 'VAT Payable (Output VAT)',
-            amount: journalVatReceivableAmount,
-            status: 'Liability',
-          });
-          totalLiabilities += journalVatReceivableAmount;
-          this.logger.log(
-            `[Balance Sheet] Added VAT Payable ${journalVatReceivableAmount} to balance equation (VAT Receivable from journal entries).`,
-          );
-        }
-      }
+      // VAT Receivable (Input VAT) on Balance Sheet uses only expense VAT and supplier debit
+      // note deductions, so it matches the account entries modal (no journal-entry VAT here).
 
       // Add Accounts Payable from journal entries to liabilities (vendor-wise, like Payables report)
       // We include VAT in the payable (amount + vat_amount) to match Trial Balance logic.
@@ -6808,9 +6775,24 @@ export class ReportsService {
       .andWhere('dna.organization_id = :organizationId', { organizationId })
       .getQuery();
 
+    // Paid amount from invoice_payments (as of asOfDate) so table matches Trial Balance summary.
+    // Use a subquery join so paid is computed per invoice without correlated-subquery issues.
+    const paidSubquery = this.invoicePaymentsRepository
+      .createQueryBuilder('ip')
+      .select('ip.invoice_id', 'invoice_id')
+      .addSelect('COALESCE(SUM(ip.amount), 0)', 'paid')
+      .where('ip.organization_id = :organizationId', { organizationId })
+      .andWhere('ip.payment_date <= :asOfDate', { asOfDate })
+      .groupBy('ip.invoice_id');
+
     const query = this.salesInvoicesRepository
       .createQueryBuilder('invoice')
       .leftJoin('invoice.customer', 'customer')
+      .leftJoin(
+        `(${paidSubquery.getQuery()})`,
+        'paid_totals',
+        'paid_totals.invoice_id = invoice.id',
+      )
       .select([
         'invoice.id AS invoiceId',
         'invoice.invoice_number AS invoiceNumber',
@@ -6820,7 +6802,7 @@ export class ReportsService {
         'invoice.total_amount AS total',
         'invoice.invoice_date AS invoiceDate',
         'invoice.due_date AS dueDate',
-        'invoice.paid_amount AS paidAmount',
+        'COALESCE(paid_totals.paid, 0) AS paidAmount',
         'invoice.paid_date AS paidDate',
         'invoice.status AS status',
         'invoice.payment_status AS paymentStatus',
@@ -6829,7 +6811,9 @@ export class ReportsService {
         `(${debitNoteApplicationsSubquery}) AS appliedDebitAmount`,
       ])
       .where('invoice.organization_id = :organizationId', { organizationId })
-      .setParameter('organizationId', organizationId);
+      .andWhere('invoice.is_deleted = false')
+      .setParameter('organizationId', organizationId)
+      .setParameter('asOfDate', asOfDate);
     this.excludeProformaInvoice(query);
 
     if (filters?.['paymentStatus']) {
@@ -6839,13 +6823,10 @@ export class ReportsService {
       query.andWhere('invoice.payment_status IN (:...statuses)', {
         statuses,
       });
-    } else {
-      // Default: Only include unpaid/partial invoices to match trial balance logic
-      // This ensures consistency between receivables report and trial balance
-      query.andWhere('invoice.payment_status IN (:...statuses)', {
-        statuses: [PaymentStatus.UNPAID, PaymentStatus.PARTIAL],
-      });
     }
+    // When no paymentStatus filter: include all invoices with invoice_date <= endDate.
+    // Outstanding is computed from invoice_payments (above), so we show every invoice
+    // that has outstanding > 0 and the table will match the Trial Balance summary.
 
     if (filters?.['status']) {
       const statuses = Array.isArray(filters.status)
@@ -7358,8 +7339,12 @@ export class ReportsService {
 
       const baseAmount = amount;
       const grossAmount = amount + vatAmount;
+      const vatRateNum = baseAmount > 0 ? (vatAmount / baseAmount) * 100 : 0;
+      // If computed rate is 100% (amount equals VAT), treat as data quality issue - show N/A
       const vatRate =
-        baseAmount > 0 ? ((vatAmount / baseAmount) * 100).toFixed(2) : '0';
+        baseAmount > 0 && Math.abs(vatRateNum - 100) < 0.01
+          ? null
+          : Number(vatRateNum.toFixed(2));
       const vendorName = expense.vendorname || expense.vendorName || 'N/A';
       const trn = expense.trn || null;
 
@@ -7370,7 +7355,7 @@ export class ReportsService {
         vendorName: vendorName,
         amount: Number(baseAmount.toFixed(2)),
         grossAmount: Number(grossAmount.toFixed(2)),
-        vatRate: Number(vatRate),
+        vatRate: vatRate,
         vatAmount: Number(vatAmount.toFixed(2)),
         trn: trn,
         type: 'expense',
@@ -7762,12 +7747,8 @@ export class ReportsService {
       };
     });
 
-    // VAT Input: expenses + supplier debit notes + journal entries (reduces VAT Receivable)
+    // VAT Input: expenses + supplier debit notes only (exclude journal entries so it matches BS VAT Receivable / expense VAT only)
     const totalVatInput = vatInputItems.reduce(
-      (sum, item) => sum + item.vatAmount,
-      0,
-    );
-    const totalVatInputJournalEntries = vatInputJournalEntries.reduce(
       (sum, item) => sum + item.vatAmount,
       0,
     );
@@ -7775,10 +7756,9 @@ export class ReportsService {
       (sum, item) => sum + Math.abs(item.vatAmount), // use absolute since items are negative for display
       0,
     );
-    const netVatInput =
-      totalVatInput + totalVatInputJournalEntries - totalVatInputDebitNotes;
+    const netVatInput = totalVatInput - totalVatInputDebitNotes;
     this.logger.debug(
-      `VAT Control Account - VAT Input calculation: totalVatInput=${totalVatInput}, totalVatInputJournalEntries=${totalVatInputJournalEntries}, totalVatInputDebitNotes=${totalVatInputDebitNotes}, netVatInput=${netVatInput}`,
+      `VAT Control Account - VAT Input calculation: totalVatInput=${totalVatInput}, totalVatInputDebitNotes=${totalVatInputDebitNotes}, netVatInput=${netVatInput}`,
     );
 
     // VAT Output: invoices - credit notes + customer debit notes + journal entries (increases VAT Payable)
@@ -7818,11 +7798,7 @@ export class ReportsService {
     return {
       startDate,
       endDate,
-      vatInputItems: [
-        ...vatInputItems,
-        ...vatInputJournalEntries,
-        ...vatInputDebitNoteItems,
-      ],
+      vatInputItems: [...vatInputItems, ...vatInputDebitNoteItems],
       vatOutputItems: [
         ...vatOutputItems,
         ...vatOutputJournalEntries,
@@ -7831,7 +7807,6 @@ export class ReportsService {
       ],
       summary: {
         vatInput: Number(totalVatInput.toFixed(2)),
-        vatInputJournalEntries: Number(totalVatInputJournalEntries.toFixed(2)),
         vatInputDebitNotes: Number(totalVatInputDebitNotes.toFixed(2)),
         netVatInput: Number(summaryNetVatInput.toFixed(2)),
         vatOutput: Number(totalVatOutput.toFixed(2)),
@@ -7844,14 +7819,12 @@ export class ReportsService {
         netVat: Number(summaryNetVat.toFixed(2)),
         totalTransactions:
           vatInputItems.length +
-          vatInputJournalEntries.length +
           vatOutputItems.length +
           vatOutputJournalEntries.length +
           vatCreditNoteItems.length +
           vatOutputDebitNoteItems.length +
           vatInputDebitNoteItems.length,
         inputTransactions: vatInputItems.length,
-        inputJournalEntryTransactions: vatInputJournalEntries.length,
         inputDebitNoteTransactions: vatInputDebitNoteItems.length,
         outputTransactions: vatOutputItems.length,
         outputJournalEntryTransactions: vatOutputJournalEntries.length,
@@ -9674,8 +9647,8 @@ export class ReportsService {
   }
 
   /**
-   * VAT Payable period totals using the same logic as getAccountEntries for VAT Payable.
-   * Used by dashboard so the VAT Payable tile matches the expanded account entries view.
+   * VAT Payable period totals (invoices, credit notes, customer debit notes only; no journal entries).
+   * Same logic as getAccountEntries for VAT Payable. Used by dashboard so the tile matches the account entries view.
    */
   private async getVatPayablePeriodTotals(
     organizationId: string,
@@ -9738,22 +9711,7 @@ export class ReportsService {
       .getRawOne();
     totalCredit += Number(customerDebitNoteVatRow?.vat || 0);
 
-    const jeRow = await this.journalEntriesRepository
-      .createQueryBuilder('entry')
-      .select([
-        "SUM(CASE WHEN entry.credit_account = 'vat_payable' THEN COALESCE(entry.vat_amount, 0) ELSE 0 END) AS credit",
-        "SUM(CASE WHEN entry.debit_account = 'vat_payable' THEN COALESCE(entry.vat_amount, 0) ELSE 0 END) AS debit",
-      ])
-      .where('entry.organization_id = :organizationId', { organizationId })
-      .andWhere('entry.is_deleted = false')
-      .andWhere('entry.entry_date >= :startDate', { startDate })
-      .andWhere('entry.entry_date <= :endDate', { endDate })
-      .andWhere(
-        "(entry.debit_account = 'vat_payable' OR entry.credit_account = 'vat_payable')",
-      )
-      .getRawOne();
-    totalCredit += Number(jeRow?.credit || 0);
-    totalDebit += Number(jeRow?.debit || 0);
+    // VAT Payable is from invoices, credit notes, and customer debit notes only; do not include journal entries.
 
     return {
       totalCredit: Number(totalCredit.toFixed(2)),
@@ -10617,6 +10575,42 @@ export class ReportsService {
           });
         });
 
+        // Get credit note applications in period (reduce AR – period credit in TB)
+        const creditNoteApplications =
+          await this.creditNoteApplicationsRepository
+            .createQueryBuilder('cna')
+            .leftJoinAndSelect('cna.creditNote', 'creditNote')
+            .leftJoinAndSelect('cna.invoice', 'invoice')
+            .leftJoinAndSelect('invoice.customer', 'customer')
+            .where('cna.organization_id = :organizationId', { organizationId })
+            .andWhere('cna.applied_date >= :startDate', { startDate })
+            .andWhere('cna.applied_date <= :endDate', { endDate })
+            .orderBy('cna.applied_date', 'ASC')
+            .addOrderBy('cna.created_at', 'ASC')
+            .getMany();
+
+        creditNoteApplications.forEach((cna) => {
+          const appliedAmount = Number(cna.appliedAmount);
+          const customerName =
+            cna.invoice?.customer?.name ??
+            cna.invoice?.customerName ??
+            undefined;
+          entries.push({
+            id: cna.id,
+            type: 'Credit Note',
+            date: cna.appliedDate,
+            referenceNumber: cna.creditNote?.creditNoteNumber || undefined,
+            description: cna.notes || undefined,
+            customerName,
+            debitAmount: 0,
+            creditAmount: appliedAmount,
+            amount: appliedAmount,
+            currency: cna.invoice?.currency,
+            entityId: cna.creditNote?.id,
+            entityType: 'credit_note_application',
+          });
+        });
+
         // Get journal entries for Accounts Receivable. Exclude JEs whose reference is ANY
         // invoice number (auto-posted invoice JEs), so we never show duplicate AR from JEs.
         const journalEntries = await this.journalEntriesRepository
@@ -10904,7 +10898,7 @@ export class ReportsService {
             });
           });
         } else if (isVatPayable) {
-          // VAT Payable (Output VAT) - from invoices, credit notes, customer debit notes, and journal entries
+          // VAT Payable (Output VAT) - from invoices, credit notes, and customer debit notes only (no journal entries)
 
           // Get VAT from invoices (output VAT)
           const vatPayableInvoicesQuery = this.salesInvoicesRepository
@@ -11021,12 +11015,43 @@ export class ReportsService {
         // Get journal entries for VAT accounts (or other accounts)
         let accountCode: string | null = null;
 
-        if (isVatReceivable || isVatPayable) {
-          // For VAT accounts, use the journal entry account code directly
-          accountCode = isVatReceivable
-            ? JournalEntryAccount.VAT_RECEIVABLE
-            : JournalEntryAccount.VAT_PAYABLE;
+        if (isVatReceivable) {
+          accountCode = JournalEntryAccount.VAT_RECEIVABLE;
+        } else if (isVatPayable) {
+          // VAT Payable: invoices, credit notes, customer debit notes only; do not include journal entries
+          accountCode = null;
         } else {
+          // Retained Earnings: system-calculated from P&L (revenue - expenses). No transaction-level entries.
+          // Show a summary entry so the modal explains where the balance comes from.
+          if (
+            accountType === 'Equity' &&
+            (accountName === 'Retained Earnings' ||
+              accountName.includes('Retained Earnings'))
+          ) {
+            const tbResult = await this.buildTrialBalance(organizationId, {
+              startDate,
+              endDate,
+            });
+            const closingBalance = Number(
+              tbResult?.summary?.retainedEarnings ?? 0,
+            );
+            if (closingBalance !== 0) {
+              entries.push({
+                id: 'retained-earnings-summary',
+                type: 'Retained Earnings (system-calculated)',
+                date: endDate,
+                referenceNumber: undefined,
+                description:
+                  'Closing balance from Profit & Loss (revenue minus expenses). No individual transactions post to this account.',
+                debitAmount: closingBalance < 0 ? Math.abs(closingBalance) : 0,
+                creditAmount: closingBalance > 0 ? closingBalance : 0,
+                amount: Math.abs(closingBalance),
+                entityId: undefined,
+                entityType: 'summary',
+              });
+            }
+          }
+
           // For other accounts, check if it's a ledger account or standard account
           // First normalize account name (remove "(Input VAT)" or "(Output VAT)" suffix)
           const normalizedAccountName = accountName

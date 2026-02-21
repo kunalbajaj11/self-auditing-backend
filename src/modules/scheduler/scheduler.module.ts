@@ -12,6 +12,7 @@ import { Expense } from '../../entities/expense.entity';
 import { ReconciliationRecord } from '../../entities/reconciliation-record.entity';
 import { User } from '../../entities/user.entity';
 import { Organization } from '../../entities/organization.entity';
+import { Report } from '../../entities/report.entity';
 
 @Module({
   imports: [
@@ -24,6 +25,7 @@ import { Organization } from '../../entities/organization.entity';
       ReconciliationRecord,
       User,
       Organization,
+      Report,
     ]),
     NotificationsModule,
     SettingsModule,
