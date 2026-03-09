@@ -272,6 +272,19 @@ export class ReportsService {
     }
   }
 
+  /**
+   * Normalize date filter to YYYY-MM-DD so DB date comparison is consistent.
+   * Clients may send ISO strings (e.g. from date pickers); we use date-only to avoid timezone shifts.
+   */
+  private normalizeDateFilter(value: unknown): string | undefined {
+    if (value == null) return undefined;
+    const s = typeof value === 'string' ? value : String(value);
+    if (s.length >= 10 && /^\d{4}-\d{2}-\d{2}/.test(s)) {
+      return s.substring(0, 10);
+    }
+    return s.length >= 10 ? s.substring(0, 10) : undefined;
+  }
+
   async generate(
     organizationId: string,
     userId: string,
@@ -282,6 +295,17 @@ export class ReportsService {
     data: any;
     summary?: any;
   }> {
+    // Normalize date filters to YYYY-MM-DD so report queries use calendar dates consistently
+    if (dto.filters) {
+      if (dto.filters.startDate != null) {
+        const normalized = this.normalizeDateFilter(dto.filters.startDate);
+        if (normalized) dto.filters.startDate = normalized;
+      }
+      if (dto.filters.endDate != null) {
+        const normalized = this.normalizeDateFilter(dto.filters.endDate);
+        if (normalized) dto.filters.endDate = normalized;
+      }
+    }
     this.logger.log(
       `Generating report: type=${dto.type}, organizationId=${organizationId}, userId=${userId}, filters=${JSON.stringify(dto.filters)}`,
     );
@@ -1339,7 +1363,9 @@ export class ReportsService {
         .andWhere('expense.is_deleted = false')
         .andWhere('expense.expense_date >= :startDate', { startDate })
         .andWhere('expense.expense_date <= :endDate', { endDate })
-        .andWhere("(expense.type IS NULL OR expense.type != 'credit')")
+        .andWhere(
+          "(expense.type IS NULL OR (expense.type != 'credit' AND expense.type != 'fixed_assets'))",
+        )
         .groupBy('category.name');
 
       if (filters?.['type']) {
@@ -1456,6 +1482,43 @@ export class ReportsService {
           );
         }
       });
+
+      // Fixed assets: part of Balance Sheet, not P&L expense. Add as Asset account in TB.
+      const fixedAssetsPeriodQuery = this.expensesRepository
+        .createQueryBuilder('expense')
+        .select([
+          'SUM(COALESCE(expense.base_amount, expense.amount) + COALESCE(expense.vat_amount, 0)) AS amount',
+        ])
+        .where('expense.organization_id = :organizationId', { organizationId })
+        .andWhere('expense.is_deleted = false')
+        .andWhere('expense.expense_date >= :startDate', { startDate })
+        .andWhere('expense.expense_date <= :endDate', { endDate })
+        .andWhere("expense.type = 'fixed_assets'");
+      const fixedAssetsOpeningQuery = this.expensesRepository
+        .createQueryBuilder('expense')
+        .select([
+          'SUM(COALESCE(expense.base_amount, expense.amount) + COALESCE(expense.vat_amount, 0)) AS amount',
+        ])
+        .where('expense.organization_id = :organizationId', { organizationId })
+        .andWhere('expense.is_deleted = false')
+        .andWhere('expense.expense_date < :startDate', { startDate })
+        .andWhere("expense.type = 'fixed_assets'");
+      const [fixedAssetsPeriodRow, fixedAssetsOpeningRow] = await Promise.all([
+        fixedAssetsPeriodQuery.getRawOne(),
+        fixedAssetsOpeningQuery.getRawOne(),
+      ]);
+      const fixedAssetsPeriod = Number(fixedAssetsPeriodRow?.amount || 0);
+      const fixedAssetsOpening = Number(fixedAssetsOpeningRow?.amount || 0);
+      const fixedAssetsClosing = fixedAssetsOpening + fixedAssetsPeriod;
+      if (fixedAssetsClosing > 0 || fixedAssetsPeriod > 0) {
+        accounts.push({
+          accountName: 'Fixed Assets',
+          accountType: 'Asset',
+          debit: fixedAssetsPeriod,
+          credit: 0,
+          balance: fixedAssetsClosing,
+        });
+      }
 
       // Handle debit notes for categories that don't have expenses in this period
       // (e.g., if a debit note is for a category with no expenses in the period)
@@ -3049,7 +3112,9 @@ export class ReportsService {
         .where('expense.organization_id = :organizationId', { organizationId })
         .andWhere('expense.is_deleted = false')
         .andWhere('expense.expense_date < :startDate', { startDate })
-        .andWhere("(expense.type IS NULL OR expense.type != 'credit')")
+        .andWhere(
+          "(expense.type IS NULL OR (expense.type != 'credit' AND expense.type != 'fixed_assets'))",
+        )
         .groupBy('category.name');
 
       if (filters?.['type']) {
@@ -4624,7 +4689,9 @@ export class ReportsService {
         .where('expense.organization_id = :organizationId', { organizationId })
         .andWhere('expense.is_deleted = false')
         .andWhere('expense.expense_date <= :asOfDate', { asOfDate })
-        .andWhere("(expense.type IS NULL OR expense.type != 'credit')");
+        .andWhere(
+          "(expense.type IS NULL OR (expense.type != 'credit' AND expense.type != 'fixed_assets'))",
+        );
 
       if (filters?.['type']) {
         const types = Array.isArray(filters.type)
@@ -4635,6 +4702,26 @@ export class ReportsService {
 
       const expensesRow = await expensesQuery.getRawOne();
       const totalExpensesRaw = Number(expensesRow?.amount || 0);
+
+      // Fixed assets: expenses with type fixed_assets belong on Balance Sheet, not P&L
+      const fixedAssetsQuery = this.expensesRepository
+        .createQueryBuilder('expense')
+        .select([
+          'SUM(COALESCE(expense.base_amount, expense.amount) + COALESCE(expense.vat_amount, 0)) AS amount',
+        ])
+        .where('expense.organization_id = :organizationId', { organizationId })
+        .andWhere('expense.is_deleted = false')
+        .andWhere('expense.expense_date <= :asOfDate', { asOfDate })
+        .andWhere("expense.type = 'fixed_assets'");
+      const fixedAssetsRow = await fixedAssetsQuery.getRawOne();
+      const fixedAssetsAmount = Number(fixedAssetsRow?.amount || 0);
+      if (fixedAssetsAmount > 0) {
+        assets.push({
+          category: 'Fixed Assets',
+          amount: fixedAssetsAmount,
+        });
+        totalAssets += fixedAssetsAmount;
+      }
 
       // Get supplier debit notes (linked to expenses) to reduce expenses
       // Supplier debit notes reduce expenses, which increases retained earnings
@@ -5977,7 +6064,9 @@ export class ReportsService {
       .andWhere('expense.is_deleted = false')
       .andWhere('expense.expense_date >= :startDate', { startDate })
       .andWhere('expense.expense_date <= :endDate', { endDate })
-      .andWhere("(expense.type IS NULL OR expense.type != 'credit')")
+      .andWhere(
+        "(expense.type IS NULL OR (expense.type != 'credit' AND expense.type != 'fixed_assets'))",
+      )
       .groupBy('category.name')
       .orderBy('MAX(expense.created_at)', 'DESC');
 
@@ -6174,7 +6263,9 @@ export class ReportsService {
       .where('expense.organization_id = :organizationId', { organizationId })
       .andWhere('expense.is_deleted = false')
       .andWhere('expense.expense_date < :startDate', { startDate })
-      .andWhere("(expense.type IS NULL OR expense.type != 'credit')");
+      .andWhere(
+        "(expense.type IS NULL OR (expense.type != 'credit' AND expense.type != 'fixed_assets'))",
+      );
 
     if (filters?.['type']) {
       const types = Array.isArray(filters.type) ? filters.type : [filters.type];

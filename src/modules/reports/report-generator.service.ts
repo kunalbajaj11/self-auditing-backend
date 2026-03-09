@@ -10494,7 +10494,7 @@ export class ReportGeneratorService {
           currentY += rowH;
           doc.strokeColor(colors.border).lineWidth(0.5).rect(margin, currentY, contentWidth, rowH).stroke();
           doc.text('Total', margin + 10, currentY + 6);
-          doc.text(`${formatAmount(total)} ${currency}`, margin + contentWidth - colW, currentY + 6, { align: 'right', width: colW * 2 - 4 });
+          doc.text(`${formatAmount(total)} ${currency}`, margin + contentWidth - colW * 2, currentY + 6, { align: 'right', width: colW * 2 - 4 });
           currentY += rowH + 16;
         } else {
           doc.fillColor(colors.primary).rect(margin, currentY, contentWidth, rowH).fill();
