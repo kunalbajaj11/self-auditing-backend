@@ -55,6 +55,8 @@ export class ReconciliationReportService {
         });
         doc.on('error', reject);
 
+        const currency = record.organization?.currency || 'AED';
+
         // Header
         doc.fontSize(16).font('Helvetica-Bold');
         doc.text(
@@ -92,11 +94,11 @@ export class ReconciliationReportService {
         doc.fontSize(10).font('Helvetica');
         const summaryY = doc.y;
         doc.text(
-          `Total Bank Credits: ${this.formatCurrency(record.totalBankCredits)}`,
+          `Total Bank Credits: ${this.formatCurrency(record.totalBankCredits, currency)}`,
           50,
         );
         doc.text(
-          `Total Bank Debits: ${this.formatCurrency(record.totalBankDebits)}`,
+          `Total Bank Debits: ${this.formatCurrency(record.totalBankDebits, currency)}`,
           50,
         );
         doc.text(`Matched Transactions: ${record.totalMatched}`, 50);
@@ -105,13 +107,13 @@ export class ReconciliationReportService {
 
         if (record.closingBalance) {
           doc.text(
-            `Closing Balance (Bank): ${this.formatCurrency(record.closingBalance)}`,
+            `Closing Balance (Bank): ${this.formatCurrency(record.closingBalance, currency)}`,
             50,
           );
         }
         if (record.systemClosingBalance) {
           doc.text(
-            `Closing Balance (System): ${this.formatCurrency(record.systemClosingBalance)}`,
+            `Closing Balance (System): ${this.formatCurrency(record.systemClosingBalance, currency)}`,
             50,
           );
         }
@@ -137,7 +139,7 @@ export class ReconciliationReportService {
 
           unmatchedBank.forEach((t) => {
             doc.text(
-              `${this.formatDate(t.transactionDate)} | ${t.description.substring(0, 40)} | ${this.formatCurrency(t.amount)} | ${t.type}`,
+              `${this.formatDate(t.transactionDate)} | ${t.description.substring(0, 40)} | ${this.formatCurrency(t.amount, currency)} | ${t.type}`,
               60,
             );
             doc.moveDown(0.15);
@@ -149,7 +151,7 @@ export class ReconciliationReportService {
 
           unmatchedSystem.forEach((t) => {
             doc.text(
-              `${this.formatDate(t.transactionDate)} | ${t.description.substring(0, 40)} | ${this.formatCurrency(t.amount)} | ${t.type}`,
+              `${this.formatDate(t.transactionDate)} | ${t.description.substring(0, 40)} | ${this.formatCurrency(t.amount, currency)} | ${t.type}`,
               60,
             );
             doc.moveDown(0.15);
@@ -290,10 +292,13 @@ export class ReconciliationReportService {
     return Buffer.from(buffer);
   }
 
-  private formatCurrency(value: string | number): string {
+  private formatCurrency(
+    value: string | number,
+    currency: string = 'AED',
+  ): string {
     const numValue = typeof value === 'string' ? parseFloat(value) : value;
-    if (isNaN(numValue)) return 'AED 0.00';
-    return `AED ${numValue.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}`;
+    if (isNaN(numValue)) return `${currency} 0.00`;
+    return `${currency} ${numValue.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}`;
   }
 
   private formatDate(dateString: string): string {
