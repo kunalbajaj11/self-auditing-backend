@@ -12,6 +12,8 @@ export interface ReportData {
   metadata?: {
     organizationName?: string;
     vatNumber?: string;
+    /** Region-aware label for {@link vatNumber} (e.g. TRN / VAT Number, GSTIN / GST Number). */
+    taxRegistrationLabel?: string;
     address?: string;
     phone?: string;
     email?: string;
@@ -632,7 +634,9 @@ export class ReportGeneratorService {
     doc.fontSize(9).font((doc as any)._fontRegular).fillColor('#666666');
     let yPos = 65;
     if (reportData.metadata?.vatNumber) {
-      doc.text(`TRN/VAT: ${reportData.metadata.vatNumber}`, leftTextX, yPos);
+      const taxRegLabel =
+        reportData.metadata.taxRegistrationLabel || 'TRN/VAT';
+      doc.text(`${taxRegLabel}: ${reportData.metadata.vatNumber}`, leftTextX, yPos);
       yPos += 12;
     }
     if (reportData.metadata?.address) {
@@ -1574,7 +1578,9 @@ export class ReportGeneratorService {
     }
 
     if (reportData.metadata?.vatNumber) {
-      lines.push(`VAT Number: ${reportData.metadata.vatNumber}`);
+      const taxRegLabel =
+        reportData.metadata.taxRegistrationLabel || 'VAT Number';
+      lines.push(`${taxRegLabel}: ${reportData.metadata.vatNumber}`);
     }
 
     if (reportData.metadata?.address) {
@@ -4649,7 +4655,9 @@ export class ReportGeneratorService {
 
     // Organization details
     if (reportData.metadata?.vatNumber) {
-      worksheet.addRow([`VAT Number: ${reportData.metadata.vatNumber}`]);
+      const taxRegLabel =
+        reportData.metadata.taxRegistrationLabel || 'VAT Number';
+      worksheet.addRow([`${taxRegLabel}: ${reportData.metadata.vatNumber}`]);
       try {
         worksheet.mergeCells(`A${rowNum}:D${rowNum}`);
       } catch {

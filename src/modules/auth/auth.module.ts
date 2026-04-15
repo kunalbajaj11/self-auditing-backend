@@ -10,6 +10,7 @@ import { JwtStrategy } from './jwt.strategy';
 import { AuditLogsModule } from '../audit-logs/audit-logs.module';
 import { LicenseKeysModule } from '../license-keys/license-keys.module';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { RegionConfigModule } from '../region-config/region-config.module';
 
 @Module({
   imports: [
@@ -27,6 +28,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
     AuditLogsModule,
     LicenseKeysModule,
     NotificationsModule,
+    RegionConfigModule,
   ],
   providers: [AuthService, JwtStrategy],
   controllers: [AuthController],

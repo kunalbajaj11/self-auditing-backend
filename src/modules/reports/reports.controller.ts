@@ -31,6 +31,8 @@ import { ReportHistoryFilterDto } from './dto/report-history-filter.dto';
 import { GenerateReportDto } from './dto/generate-report.dto';
 import { ScheduleReportDto } from './dto/schedule-report.dto';
 import { AccountEntriesDto } from './dto/account-entries.dto';
+import { RegionConfigService } from '../region-config/region-config.service';
+import { Region } from '../../common/enums/region.enum';
 
 @Controller('reports')
 @UseGuards(JwtAuthGuard, RolesGuard, TenantGuard)
@@ -40,11 +42,47 @@ export class ReportsController {
     private readonly reportGeneratorService: ReportGeneratorService,
     private readonly emailService: EmailService,
     private readonly settingsService: SettingsService,
+    private readonly regionConfigService: RegionConfigService,
     @InjectRepository(Organization)
     private readonly organizationsRepository: Repository<Organization>,
     @InjectRepository(User)
     private readonly usersRepository: Repository<User>,
   ) {}
+
+  private reportFileMetadata(
+    organization: Organization | null,
+    generatedByUser: User | null,
+    user: AuthenticatedUser,
+    reportData: { generatedAt: Date; data: unknown; summary?: unknown },
+    filters: Record<string, unknown>,
+    reportPeriod: { startDate?: string; endDate?: string } | undefined,
+    logoBuffer: Buffer | undefined,
+  ) {
+    const region = (organization?.region as Region) ?? Region.UAE;
+    const rc = this.regionConfigService.getConfig(region);
+    const taxRegistrationLabel = `${rc.trnLabel} / ${rc.vatNumberLabel}`;
+    const currency =
+      organization?.currency?.trim() ||
+      this.regionConfigService.getDefaultCurrency(region);
+
+    return {
+      organizationName: organization?.name,
+      vatNumber: organization?.vatNumber || undefined,
+      taxRegistrationLabel,
+      address: organization?.address || undefined,
+      phone: organization?.contactPerson || undefined,
+      email: organization?.contactEmail || undefined,
+      currency,
+      logoBuffer: logoBuffer || undefined,
+      generatedAt: reportData.generatedAt,
+      generatedBy: user?.userId,
+      generatedByName: generatedByUser?.name || 'System',
+      organizationId: organization?.id,
+      filters: filters || {},
+      reportPeriod,
+      summary: reportData.summary,
+    };
+  }
 
   @Get('history')
   @Roles(UserRole.ADMIN, UserRole.ACCOUNTANT)
@@ -159,23 +197,15 @@ export class ReportsController {
         }
       : undefined;
 
-    // Build metadata with all required fields
-    const metadata = {
-      organizationName: organization?.name,
-      vatNumber: organization?.vatNumber || undefined,
-      address: organization?.address || undefined,
-      phone: organization?.contactPerson || undefined, // Using contactPerson as phone placeholder
-      email: organization?.contactEmail || undefined,
-      currency: organization?.currency || 'AED',
-      logoBuffer: logoBuffer || undefined, // Organization logo for PDF header
-      generatedAt: reportData.generatedAt,
-      generatedBy: user?.userId,
-      generatedByName: generatedByUser?.name || 'System',
-      organizationId: organization?.id,
-      filters: report.filters || {},
+    const metadata = this.reportFileMetadata(
+      organization,
+      generatedByUser,
+      user,
+      reportData,
+      report.filters || {},
       reportPeriod,
-      summary: reportData.summary,
-    };
+      logoBuffer,
+    );
 
     switch (format) {
       case 'pdf':
@@ -268,22 +298,15 @@ export class ReportsController {
         user?.organizationId as string,
       );
 
-      const metadata = {
-        organizationName: organization?.name,
-        vatNumber: organization?.vatNumber || undefined,
-        address: organization?.address || undefined,
-        phone: organization?.contactPerson || undefined,
-        email: organization?.contactEmail || undefined,
-        currency: organization?.currency || 'AED',
-        logoBuffer: logoBuffer || undefined, // Organization logo for PDF header
-        generatedAt: reportData.generatedAt,
-        generatedBy: user?.userId,
-        generatedByName: generatedByUser?.name || 'System',
-        organizationId: organization?.id,
-        filters: dto.filters || {},
+      const metadata = this.reportFileMetadata(
+        organization,
+        generatedByUser,
+        user,
+        reportData,
+        dto.filters || {},
         reportPeriod,
-        summary: reportData.summary,
-      };
+        logoBuffer,
+      );
 
       let buffer: Buffer;
       switch (format) {

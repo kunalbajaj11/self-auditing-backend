@@ -7,10 +7,12 @@ import { TaxForm } from '../../entities/tax-form.entity';
 import { Organization } from '../../entities/organization.entity';
 import { Expense } from '../../entities/expense.entity';
 import { SalesInvoice } from '../../entities/sales-invoice.entity';
+import { RegionConfigModule } from '../region-config/region-config.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([TaxForm, Organization, Expense, SalesInvoice]),
+    RegionConfigModule,
   ],
   providers: [TaxFormsService, TaxFormGeneratorService],
   controllers: [TaxFormsController],

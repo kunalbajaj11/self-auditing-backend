@@ -295,7 +295,7 @@ export class OcrService {
     // Detect category if organizationId is provided
     let suggestedCategoryId: string | undefined;
     if (organizationId) {
-      const mockText = `Receipt from ${vendorName} for ${amount} AED`;
+      const mockText = `Receipt from ${vendorName}, total ${amount}`;
       const detectedCategory =
         await this.categoryDetectionService.detectCategory(
           mockText,
@@ -2126,7 +2126,7 @@ export class OcrService {
         /^(total|subtotal|amount|vat|tax)[\s:]/i,
         /^[\d]{1,2}[\/\-][\d]{1,2}[\/\-][\d]{2,4}$/, // Date patterns
         /^[A-Z]{2,3}\s*[\d,]+\.?\d*$/, // Currency codes with amounts
-        /^[\d,]+\.?\d*\s*(AED|USD|EUR|GBP|SAR)$/i, // Amounts with currency
+        /^[\d,]+\.?\d*\s*(AED|INR|USD|EUR|GBP|SAR|OMR|KWD|BHD|QAR)$/i, // Amounts with currency
         /^(qty|quantity|item|description|unit|price)[\s:]/i,
         /^TRN[\s:]/i,
         /^[A-Z0-9]{10,20}$/, // TRN numbers
@@ -2408,16 +2408,16 @@ export class OcrService {
     const highPriorityPatterns = [
       {
         pattern:
-          /(?:grand\s*)?total\s*(?:amount)?\s*[:\s]*(?:AED\s*)?([\d,]+\.?\d*)/gi,
+          /(?:grand\s*)?total\s*(?:amount)?\s*[:\s]*(?:(?:AED|INR|USD|EUR|GBP|SAR|OMR|KWD|BHD|QAR)\s*|₹\s*|Rs\.?\s*)?([\d,]+\.?\d*)/gi,
         priority: 10,
       },
       {
-        pattern: /(?:final\s*)?total\s*[:\s]*(?:AED\s*)?([\d,]+\.?\d*)/gi,
+        pattern: /(?:final\s*)?total\s*[:\s]*(?:(?:AED|INR|USD|EUR|GBP|SAR|OMR|KWD|BHD|QAR)\s*|₹\s*|Rs\.?\s*)?([\d,]+\.?\d*)/gi,
         priority: 9,
       },
       {
         pattern:
-          /total\s*(?:amount|due|payable)?\s*[:\s]*(?:AED\s*)?([\d,]+\.?\d*)/gi,
+          /total\s*(?:amount|due|payable)?\s*[:\s]*(?:(?:AED|INR|USD|EUR|GBP|SAR|OMR|KWD|BHD|QAR)\s*|₹\s*|Rs\.?\s*)?([\d,]+\.?\d*)/gi,
         priority: 8,
       },
       // Add pattern for "Total:" or "Total " followed by amount on same or next line
@@ -2444,7 +2444,7 @@ export class OcrService {
           const nextLine = allLines[i + 1].trim();
           // Match amount with optional currency
           const amountMatch = nextLine.match(
-            /^(?:AED\s*)?([\d,]+\.?\d*)\s*(?:AED)?$/i,
+            /^(?:(?:AED|INR|USD|EUR|GBP|SAR|OMR|KWD|BHD|QAR)\s*|₹\s*|Rs\.?\s*)?([\d,]+\.?\d*)\s*(?:(?:AED|INR|USD|EUR|GBP|SAR|OMR|KWD|BHD|QAR)|₹|Rs\.?)?$/i,
           );
           if (amountMatch) {
             const amount = parseFloat(amountMatch[1].replace(/,/g, ''));
@@ -2459,13 +2459,13 @@ export class OcrService {
           }
         }
       } else if (
-        /^(?:grand\s*)?total\s*(?:amount)?\s*[:\s]*(?:AED\s*)?([\d,]+\.?\d*)/i.test(
+        /^(?:grand\s*)?total\s*(?:amount)?\s*[:\s]*(?:(?:AED|INR|USD|EUR|GBP|SAR|OMR|KWD|BHD|QAR)\s*|₹\s*|Rs\.?\s*)?([\d,]+\.?\d*)/i.test(
           line,
         )
       ) {
         // Total and amount on same line
         const match = line.match(
-          /^(?:grand\s*)?total\s*(?:amount)?\s*[:\s]*(?:AED\s*)?([\d,]+\.?\d*)/i,
+          /^(?:grand\s*)?total\s*(?:amount)?\s*[:\s]*(?:(?:AED|INR|USD|EUR|GBP|SAR|OMR|KWD|BHD|QAR)\s*|₹\s*|Rs\.?\s*)?([\d,]+\.?\d*)/i,
         );
         if (match && match[1]) {
           const amount = parseFloat(match[1].replace(/,/g, ''));
@@ -2522,12 +2522,12 @@ export class OcrService {
     const amountPatterns = [
       {
         pattern:
-          /(?:^|\n)\s*amount\s*(?:due|payable)?\s*[:\s]*(?:AED\s*)?([\d,]+\.?\d*)/gi,
+          /(?:^|\n)\s*amount\s*(?:due|payable)?\s*[:\s]*(?:(?:AED|INR|USD|EUR|GBP|SAR|OMR|KWD|BHD|QAR)\s*|₹\s*|Rs\.?\s*)?([\d,]+\.?\d*)/gi,
         priority: 5,
       },
       {
         pattern:
-          /(?:^|\n)\s*pay\s*(?:amount|total)?\s*[:\s]*(?:AED\s*)?([\d,]+\.?\d*)/gi,
+          /(?:^|\n)\s*pay\s*(?:amount|total)?\s*[:\s]*(?:(?:AED|INR|USD|EUR|GBP|SAR|OMR|KWD|BHD|QAR)\s*|₹\s*|Rs\.?\s*)?([\d,]+\.?\d*)/gi,
         priority: 5,
       },
     ];
@@ -2602,10 +2602,10 @@ export class OcrService {
       // Fallback if matchAll fails
     }
 
-    // Priority 5: Currency patterns (AED, USD, etc.) - lower priority
+    // Priority 5: Currency patterns (GCC, INR, USD, etc.) - lower priority
     const currencyPatterns = [
-      /(?:AED|USD|\$|€|£|SAR)\s*([\d,]+\.?\d*)/gi,
-      /([\d,]+\.?\d*)\s*(?:AED|USD|SAR)/gi,
+      /(?:AED|INR|USD|\$|€|£|SAR|OMR|KWD|BHD|QAR|₹|Rs\.?)\s*([\d,]+\.?\d*)/gi,
+      /([\d,]+\.?\d*)\s*(?:AED|INR|USD|SAR|OMR|KWD|BHD|QAR|Rs\.?)/gi,
     ];
 
     for (const pattern of currencyPatterns) {
@@ -2695,7 +2695,7 @@ export class OcrService {
         // "Tax (5.00%)" or "VAT: 5.00"
         /(?:vat|tax)[\s:]*\(?(\d+\.?\d*)%\)?/i,
         // "Tax: AED 5.00" or "VAT 5.00"
-        /(?:vat|tax)[\s:]*AED?\s*([\d,]+\.?\d*)/i,
+        /(?:vat|tax|gst)[\s:]*(?:(?:AED|INR|USD|EUR|GBP|SAR)|₹|Rs\.?)?\s*([\d,]+\.?\d*)/i,
         // Look for tax amount on separate line after "Tax" keyword
         /(?:^|\n)\s*(?:vat|tax)\s*[:\s]*\n?\s*([\d,]+\.?\d*)/gi,
         // Percentage format: "Tax (0.00%)" - extract percentage and calculate
@@ -2988,7 +2988,7 @@ export class OcrService {
       const amountStr = parsed.amount.toString();
       // Remove exact total amount matches
       const totalPattern = new RegExp(
-        `(?:^|\\n)\\s*total\\s*[:\\s]*(?:AED\\s*)?${amountStr.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}.*?\\n`,
+        `(?:^|\\n)\\s*total\\s*[:\\s]*(?:(?:AED|INR|USD|EUR|GBP|SAR|OMR|KWD|BHD|QAR)\\s*|₹\\s*|Rs\\.?\\s*)?${amountStr.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}.*?\\n`,
         'gi',
       );
       description = description.replace(totalPattern, '');
@@ -2997,7 +2997,7 @@ export class OcrService {
     // Remove VAT/Tax lines
     const taxPatterns = [
       /(?:vat|tax)[\s:]*\(?[\d.]+%?\)?.*?\n/gi,
-      /(?:vat|tax)[\s:]*AED?\s*[\d,]+\.?\d*.*?\n/gi,
+      /(?:vat|tax|gst)[\s:]*(?:(?:AED|INR|USD|EUR|GBP|SAR)|₹|Rs\.?)?\s*[\d,]+\.?\d*.*?\n/gi,
     ];
     taxPatterns.forEach((pattern) => {
       description = description.replace(pattern, '');

@@ -11,21 +11,22 @@ import { EnterpriseLicenseGuard } from '../../common/guards/enterprise-license.g
 import { QueueModule } from '../queue/queue.module';
 import { AttachmentsModule } from '../attachments/attachments.module';
 import { OcrProcessor } from './ocr.processor';
-import { BullModule } from '@nestjs/bullmq';
+
+/** When true, do not register the BullMQ worker (avoids Redis at boot for local `npm start`). */
+const disableOcrWorker =
+  process.env.DISABLE_OCR_QUEUE_WORKER === 'true' ||
+  process.env.DISABLE_OCR_QUEUE_WORKER === '1';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Category, Organization, OcrJob]),
     QueueModule,
     AttachmentsModule,
-    BullModule.registerQueue({
-      name: 'ocr',
-    }),
   ],
   providers: [
     OcrService,
     OcrQueueService,
-    OcrProcessor,
+    ...(disableOcrWorker ? [] : [OcrProcessor]),
     CategoryDetectionService,
     EnterpriseLicenseGuard,
   ],

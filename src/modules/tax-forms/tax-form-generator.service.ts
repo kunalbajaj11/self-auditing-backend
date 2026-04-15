@@ -3,6 +3,7 @@ import { TaxForm, TaxFormType } from '../../entities/tax-form.entity';
 import { VATReturnData } from './tax-forms.service';
 import { Organization } from '../../entities/organization.entity';
 import { Region } from '../../common/enums/region.enum';
+import { RegionConfigService } from '../region-config/region-config.service';
 
 export interface FormGenerationOptions {
   format: 'pdf' | 'excel' | 'csv';
@@ -13,6 +14,15 @@ export interface FormGenerationOptions {
 @Injectable()
 export class TaxFormGeneratorService {
   private readonly logger = new Logger(TaxFormGeneratorService.name);
+
+  constructor(private readonly regionConfigService: RegionConfigService) {}
+
+  private taxRegistrationFieldLabel(organization: Organization): string {
+    const rc = this.regionConfigService.getConfig(
+      organization.region as Region,
+    );
+    return `${rc.trnLabel} / ${rc.vatNumberLabel}`;
+  }
 
   /**
    * Generate VAT return form
@@ -111,7 +121,7 @@ export class TaxFormGeneratorService {
     content += `========================================\n\n`;
     content += `Organization: ${data.organization.name}\n`;
     if (data.organization.vatNumber) {
-      content += `VAT Number: ${data.organization.vatNumber}\n`;
+      content += `${this.taxRegistrationFieldLabel(organization)}: ${data.organization.vatNumber}\n`;
     }
     content += `Period: ${data.period}\n`;
     content += `Generated: ${new Date().toISOString()}\n\n`;
@@ -178,7 +188,8 @@ export class TaxFormGeneratorService {
     let csv = `"${formTitle}"\n`;
     csv += `"Organization","${data.organization.name}"\n`;
     if (data.organization.vatNumber) {
-      csv += `"VAT Number","${data.organization.vatNumber}"\n`;
+      const label = this.taxRegistrationFieldLabel(organization);
+      csv += `"${label}","${data.organization.vatNumber}"\n`;
     }
     csv += `"Period","${data.period}"\n`;
     csv += `"Generated","${new Date().toISOString()}"\n\n`;

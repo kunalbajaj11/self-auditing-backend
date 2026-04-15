@@ -26,6 +26,9 @@ import { QueueService } from './queue.service';
         return {
           connection: {
             ...connection,
+            // Defer TCP connect until a queue command runs so `nest start` / `npm start`
+            // can reach HTTP listen when Redis is not up yet (local dev).
+            lazyConnect: true,
             // BullMQ requires maxRetriesPerRequest to be null
             maxRetriesPerRequest: null,
             retryStrategy: (times: number) => {

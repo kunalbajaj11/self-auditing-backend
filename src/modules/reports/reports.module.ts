@@ -22,6 +22,7 @@ import { Product } from '../products/product.entity';
 import { StockMovement } from '../inventory/entities/stock-movement.entity';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { SettingsModule } from '../settings/settings.module';
+import { RegionConfigModule } from '../region-config/region-config.module';
 
 @Module({
   imports: [
@@ -46,6 +47,7 @@ import { SettingsModule } from '../settings/settings.module';
     ]),
     NotificationsModule,
     SettingsModule,
+    RegionConfigModule,
   ],
   providers: [ReportsService, ReportGeneratorService],
   controllers: [ReportsController],

@@ -23,6 +23,8 @@ import { OrganizationStatus } from '../../common/enums/organization-status.enum'
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { EmailService } from '../notifications/email.service';
+import { RegionConfigService } from '../region-config/region-config.service';
+import { Region } from '../../common/enums/region.enum';
 import * as crypto from 'crypto';
 
 export interface AuthTokens {
@@ -53,6 +55,7 @@ export class AuthService {
     private readonly configService: ConfigService,
     private readonly licenseKeysService: LicenseKeysService,
     private readonly emailService: EmailService,
+    private readonly regionConfigService: RegionConfigService,
   ) {}
 
   async previewLicense(dto: ValidateLicenseDto) {
@@ -142,6 +145,14 @@ export class AuthService {
 
     // Send notification to super admin about new registration
     try {
+      const region =
+        (organization.region as Region) ??
+        (dto.region as Region) ??
+        (license.region as Region) ??
+        Region.UAE;
+      const rc = this.regionConfigService.getConfig(region);
+      const taxRegistrationLabel = `${rc.trnLabel} / ${rc.vatNumberLabel}`;
+
       await this.emailService.sendNewRegistrationNotificationToSuperAdmin({
         licenseKey: license.key,
         organizationName: dto.organizationName,
@@ -150,6 +161,7 @@ export class AuthService {
         adminEmail: dto.adminEmail,
         adminPhone: dto.adminPhone || undefined,
         vatNumber: dto.vatNumber || undefined,
+        taxRegistrationLabel,
         address: dto.address || undefined,
         currency: dto.currency || undefined,
         region: dto.region || undefined,

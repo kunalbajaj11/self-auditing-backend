@@ -8,8 +8,10 @@
   "scripts": {
     "build": "nest build",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
-    "start": "nest start",
-    "start:dev": "nest start --watch",
+    "start": "DISABLE_OCR_QUEUE_WORKER=1 nest start",
+    "start:dev": "DISABLE_OCR_QUEUE_WORKER=1 nest start --watch",
+    "start:with-queue": "DISABLE_OCR_QUEUE_WORKER=0 nest start",
+    "start:dev:with-queue": "DISABLE_OCR_QUEUE_WORKER=0 nest start --watch",
     "start:debug": "nest start --debug --watch",
     "start:prod": "node dist/main",
     "lint": "eslint \"{src,apps,libs,test}/**/*.ts\" --fix",

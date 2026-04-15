@@ -439,6 +439,8 @@ Follow us:
     adminEmail: string;
     adminPhone?: string;
     vatNumber?: string;
+    /** Column label for {@link vatNumber} (region-specific, e.g. GSTIN / GST Number). */
+    taxRegistrationLabel?: string;
     address?: string;
     currency?: string;
     region?: string;
@@ -521,6 +523,7 @@ Follow us:
     adminEmail: string;
     adminPhone?: string;
     vatNumber?: string;
+    taxRegistrationLabel?: string;
     address?: string;
     currency?: string;
     region?: string;
@@ -549,6 +552,9 @@ Follow us:
       adminEmail: this.escapeHtml(details.adminEmail),
       adminPhone: this.escapeHtml(details.adminPhone),
       vatNumber: this.escapeHtml(details.vatNumber),
+      taxRegistrationLabel: this.escapeHtml(
+        details.taxRegistrationLabel || 'VAT Number',
+      ),
       address: this.escapeHtml(details.address),
       currency: this.escapeHtml(details.currency),
       region: this.escapeHtml(details.region),
@@ -608,7 +614,7 @@ Follow us:
                     <td class="label">Plan Type</td>
                     <td class="value"><span class="badge badge-success">${safe.planType}</span></td>
                   </tr>
-                  ${safe.vatNumber ? `<tr><td class="label">VAT Number</td><td class="value">${safe.vatNumber}</td></tr>` : ''}
+                  ${safe.vatNumber ? `<tr><td class="label">${safe.taxRegistrationLabel}</td><td class="value">${safe.vatNumber}</td></tr>` : ''}
                   ${safe.address ? `<tr><td class="label">Address</td><td class="value">${safe.address}</td></tr>` : ''}
                   ${safe.currency ? `<tr><td class="label">Currency</td><td class="value">${safe.currency}</td></tr>` : ''}
                   ${safe.region ? `<tr><td class="label">Region</td><td class="value">${safe.region}</td></tr>` : ''}
@@ -673,6 +679,7 @@ Follow us:
     adminEmail: string;
     adminPhone?: string;
     vatNumber?: string;
+    taxRegistrationLabel?: string;
     address?: string;
     currency?: string;
     region?: string;
@@ -704,8 +711,13 @@ ORGANIZATION DETAILS
 Organization Name: ${this.sanitizeForPlainText(details.organizationName)}
 Plan Type: ${this.sanitizeForPlainText(details.planType)}`;
 
-    if (details.vatNumber)
-      text += `\nVAT Number: ${this.sanitizeForPlainText(details.vatNumber)}`;
+    if (details.vatNumber) {
+      const regLabel =
+        this.sanitizeForPlainText(
+          details.taxRegistrationLabel || 'VAT Number',
+        ) || 'VAT Number';
+      text += `\n${regLabel}: ${this.sanitizeForPlainText(details.vatNumber)}`;
+    }
     if (details.address)
       text += `\nAddress: ${this.sanitizeForPlainText(details.address)}`;
     if (details.currency)
