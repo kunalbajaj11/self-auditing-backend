@@ -7744,6 +7744,12 @@ export class ReportGeneratorService {
 
         // Build commercial lines list first so we can compute box height
         const commercialLines: { label: string; value: string }[] = [];
+        if (templateSettings.showPaymentTerms) {
+          const paymentTermsValue =
+            templateSettings.paymentTerms ||
+            (customer?.paymentTerms ? `Net ${customer.paymentTerms}` : 'Net 30');
+          commercialLines.push({ label: 'PAYMENT TERMS', value: paymentTermsValue });
+        }
         const deliveryNote = (invoice as any).deliveryNote as string | undefined;
         if (deliveryNote) {
           commercialLines.push({ label: 'DELIVERY NOTE', value: deliveryNote });
@@ -7839,12 +7845,6 @@ export class ReportGeneratorService {
         }
         if (invoice.dueDate) {
           invoiceContentH += measureLabelValue('DUE DATE', this.formatDateForInvoice(invoice.dueDate), columnWidth) + lineGap;
-        }
-        if (templateSettings.showPaymentTerms) {
-          const paymentTerms =
-            templateSettings.paymentTerms ||
-            (customer?.paymentTerms ? `Net ${customer.paymentTerms}` : 'Net 30');
-          invoiceContentH += measureLabelValue('PAYMENT TERMS', paymentTerms, columnWidth) + lineGap;
         }
 
         let commercialContentH = 18 + colHeaderGap;
@@ -8027,22 +8027,6 @@ export class ReportGeneratorService {
           invoiceY += h + lineGap;
         }
 
-        if (templateSettings.showPaymentTerms) {
-          const paymentTerms =
-            templateSettings.paymentTerms ||
-            (customer?.paymentTerms
-              ? `Net ${customer.paymentTerms}`
-              : 'Net 30');
-          h = drawLabelValue(
-            'PAYMENT TERMS',
-            paymentTerms,
-            invoiceX,
-            invoiceY,
-            columnWidth,
-          );
-          invoiceY += h + lineGap;
-        }
-
         // Column 3 - COMMERCIAL DETAILS
         let commercialY = boxY + 10;
         doc.fontSize(8).font((doc as any)._fontBold).fillColor(colors.text);
@@ -8180,12 +8164,21 @@ export class ReportGeneratorService {
 
         // Table rows — only visible items (single-page, no addPage)
         visibleItems.forEach((item: any, index: number) => {
-          const rowTextY = rowY + (rowHeight - 10) / 2;
+          const itemName = item.itemName || '';
+          const sku =
+            item.product?.sku || (item as any).sku || (item as any).productSku || '';
+          const itemLabel = sku ? `${itemName} (${sku})` : itemName;
+          doc.fontSize(8).font((doc as any)._fontRegular);
+          const itemTextHeight = doc.heightOfString(itemLabel, {
+            width: colWidths.item,
+          });
+          const dynamicRowHeight = Math.max(rowHeight, itemTextHeight + 8);
+          const rowTextY = rowY + (dynamicRowHeight - 10) / 2;
 
           if (index % 2 === 0) {
             doc
               .fillColor(colors.backgroundLight)
-              .rect(tableStartX, rowY, tableWidth, rowHeight)
+              .rect(tableStartX, rowY, tableWidth, dynamicRowHeight)
               .fill();
           }
 
@@ -8198,13 +8191,8 @@ export class ReportGeneratorService {
             item.totalAmount || String(amount + vatAmount),
           );
 
-          const itemName = item.itemName || '';
-          const sku =
-            item.product?.sku || (item as any).sku || (item as any).productSku || '';
-          const itemLabel = sku ? `${itemName} (${sku})` : itemName;
-          doc.text(itemLabel, tableX + padding, rowTextY, {
+          doc.text(itemLabel, tableX + padding, rowY + 4, {
             width: colWidths.item,
-            ellipsis: true,
           });
           tableX += colWidths.item + totalPaddingPerColumn;
 
@@ -8275,11 +8263,11 @@ export class ReportGeneratorService {
 
           doc.strokeColor(colors.borderLight).lineWidth(0.5);
           doc
-            .moveTo(tableStartX, rowY + rowHeight)
-            .lineTo(tableStartX + tableWidth, rowY + rowHeight)
+            .moveTo(tableStartX, rowY + dynamicRowHeight)
+            .lineTo(tableStartX + tableWidth, rowY + dynamicRowHeight)
             .stroke();
 
-          rowY += rowHeight;
+          rowY += dynamicRowHeight;
         });
 
         // "... + N more items" row when line items exceed visible cap
@@ -10872,17 +10860,19 @@ export class ReportGeneratorService {
         doc.fillColor(colors.primary).rect(0, 0, pageWidth, 4).fill();
         let currentY = 22;
         let logoHeight = 0;
-        const logoSize = 56;
+        // Bounding box, not a fixed square — matches the invoice PDF's logo
+        // sizing so any uploaded logo stretches into real space instead of
+        // being squeezed into a tiny square.
+        const logoBoxWidth = 130;
+        const logoBoxHeight = 68;
         if (logoBuffer) {
           try {
             const buf = logoBuffer.slice(0, 100).toString('utf-8').toLowerCase();
             if (!buf.includes('<svg') && !buf.includes('<?xml')) {
               doc.image(logoBuffer, margin, currentY, {
-                width: logoSize,
-                height: logoSize,
-                fit: [logoSize, logoSize],
+                fit: [logoBoxWidth, logoBoxHeight],
               });
-              logoHeight = logoSize;
+              logoHeight = logoBoxHeight;
             }
           } catch {
             // ignore
