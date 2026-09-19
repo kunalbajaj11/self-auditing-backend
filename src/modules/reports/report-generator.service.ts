@@ -8090,6 +8090,8 @@ export class ReportGeneratorService {
               return 'Exempt';
             case 'reverse_charge':
               return 'Reverse Chg';
+            case 'out_of_scope':
+              return 'Out of Scope';
             case 'standard':
             default:
               return 'Standard';
