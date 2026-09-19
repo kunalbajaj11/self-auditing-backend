@@ -185,6 +185,12 @@ export class UsersService {
       throw new NotFoundException('User not found');
     }
     user.status = dto.status;
+    if (dto.status !== UserStatus.ACTIVE) {
+      // Deactivating/suspending a user must also kill any outstanding
+      // refresh token immediately — otherwise they can keep calling
+      // /auth/refresh and stay fully logged in after being deactivated.
+      user.refreshTokenHash = null;
+    }
     return this.usersRepository.save(user);
   }
 

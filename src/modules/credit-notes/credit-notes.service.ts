@@ -20,6 +20,7 @@ import { AuditAction } from '../../common/enums/audit-action.enum';
 import { SalesInvoicesService } from '../sales-invoices/sales-invoices.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { ReportGeneratorService } from '../reports/report-generator.service';
+import { EInvoicingService } from '../e-invoicing/e-invoicing.service';
 
 @Injectable()
 export class CreditNotesService {
@@ -41,6 +42,7 @@ export class CreditNotesService {
     private readonly settingsService: SettingsService,
     private readonly reportGeneratorService: ReportGeneratorService,
     private readonly dataSource: DataSource,
+    private readonly eInvoicingService: EInvoicingService,
   ) {}
 
   async findAll(organizationId: string): Promise<CreditNote[]> {
@@ -543,8 +545,21 @@ export class CreditNotesService {
       );
     }
 
+    const wasIssuedJustNow =
+      status === CreditNoteStatus.ISSUED &&
+      creditNote.status !== CreditNoteStatus.ISSUED;
+
     creditNote.status = status;
-    const updated = await this.creditNotesRepository.save(creditNote);
+    if (wasIssuedJustNow && !creditNote.eInvoiceReportingDueAt) {
+      // UAE e-invoicing requires adjustment documents to be reported to the
+      // FTA within 14 days of the adjustment date — start that clock the
+      // moment this becomes a real (issued) document, not at draft creation.
+      creditNote.eInvoiceReportingDueAt =
+        this.eInvoicingService.computeReportingDueDate(
+          creditNote.creditNoteDate,
+        );
+    }
+    let updated = await this.creditNotesRepository.save(creditNote);
 
     // If credit note is linked to an invoice, update the invoice's payment status
     if (updated.invoice?.id) {
@@ -552,6 +567,23 @@ export class CreditNotesService {
         updated.invoice.id,
         organizationId,
       );
+    }
+
+    if (wasIssuedJustNow) {
+      const organization = await this.organizationsRepository.findOne({
+        where: { id: organizationId },
+      });
+      if (organization?.eInvoicingEnabled) {
+        const result = await this.eInvoicingService.submitCreditNote(
+          organizationId,
+          updated.id,
+          updated.creditNoteNumber,
+        );
+        if (result.status === 'submitted') {
+          updated.eInvoiceReportedAt = result.submittedAt ?? new Date();
+          updated = await this.creditNotesRepository.save(updated);
+        }
+      }
     }
 
     // Audit log

@@ -25,6 +25,7 @@ import { ResetPasswordDto } from './dto/reset-password.dto';
 import { EmailService } from '../notifications/email.service';
 import { RegionConfigService } from '../region-config/region-config.service';
 import { Region } from '../../common/enums/region.enum';
+import { UserStatus } from '../../common/enums/user-status.enum';
 import * as crypto from 'crypto';
 
 export interface AuthTokens {
@@ -230,6 +231,12 @@ export class AuthService {
     const user = await this.usersService.findById(payload.sub);
     if (!user.refreshTokenHash) {
       throw new UnauthorizedException('Refresh token revoked');
+    }
+    if (user.status !== UserStatus.ACTIVE) {
+      // A deactivated/suspended user must not be able to mint a new access
+      // token, even if their refresh token hasn't expired yet.
+      await this.usersService.clearRefreshToken(user.id);
+      throw new UnauthorizedException('Account is inactive');
     }
     const isValid = await comparePassword(
       dto.refreshToken,

@@ -754,7 +754,20 @@ export class SettingsService {
 
       // Get settings to check if sequential numbering is enabled
       const settings = await this.getOrCreateSettings(organizationId);
-      const useSequential = settings.numberingUseSequential ?? true;
+      let useSequential = settings.numberingUseSequential ?? true;
+
+      // UAE e-invoicing requires a verifiable, gapless invoice sequence — an
+      // organization transmitting through the e-invoicing network must never
+      // fall back to the non-sequential (timestamp-based) numbering scheme,
+      // regardless of its own numbering preference.
+      if (!useSequential) {
+        const org = await this.organizationRepository.findOne({
+          where: { id: organizationId },
+        });
+        if (org?.eInvoicingEnabled) {
+          useSequential = true;
+        }
+      }
 
       // If sequential numbering is disabled, generate a non-sequential number
       if (!useSequential) {

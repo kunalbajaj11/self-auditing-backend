@@ -7332,6 +7332,41 @@ export class ReportGeneratorService {
   }
 
   /**
+   * Build a TLV (Tag-Length-Value) + Base64 QR payload for an invoice —
+   * tag 1: seller name, 2: seller TRN, 3: invoice timestamp (ISO 8601 UTC),
+   * 4: invoice total incl. VAT, 5: VAT total. Each field is length-prefixed
+   * as a single byte, so any value over 255 UTF-8 bytes would need a
+   * multi-byte length encoding — not expected here (names/TRNs/amounts are
+   * all short), but worth knowing if this is ever reused elsewhere.
+   */
+  private buildTlvQrPayload(fields: {
+    sellerName: string;
+    sellerTrn: string;
+    timestamp: string;
+    invoiceTotal: string;
+    vatTotal: string;
+  }): string {
+    const encodeField = (tag: number, value: string): Buffer => {
+      const valueBuffer = Buffer.from(value, 'utf8');
+      const tlv = Buffer.alloc(2 + valueBuffer.length);
+      tlv.writeUInt8(tag, 0);
+      tlv.writeUInt8(Math.min(valueBuffer.length, 255), 1);
+      valueBuffer.copy(tlv, 2);
+      return tlv;
+    };
+
+    const buffer = Buffer.concat([
+      encodeField(1, fields.sellerName),
+      encodeField(2, fields.sellerTrn),
+      encodeField(3, fields.timestamp),
+      encodeField(4, fields.invoiceTotal),
+      encodeField(5, fields.vatTotal),
+    ]);
+
+    return buffer.toString('base64');
+  }
+
+  /**
    * Generate professional invoice PDF matching UAE Tax Invoice format
    * Premium design inspired by Xero/Tally with clean lines and professional styling
    */
@@ -7352,20 +7387,29 @@ export class ReportGeneratorService {
       logoBuffer = await this.fetchImageAsBuffer(logoUrl);
     }
 
-    // Generate QR code for UAE e-invoicing (supplier TRN, invoice#, date, total with VAT)
+    // Generate QR code for UAE tax invoices. Encoded as TLV (Tag-Length-Value)
+    // + Base64, the regional convention for scannable invoice QR codes (as
+    // used by KSA ZATCA and followed elsewhere in the GCC) — the FTA has not
+    // published a UAE-specific byte-level QR spec independent of the PINT AE
+    // e-invoicing work, so this aligns with that convention rather than a
+    // confirmed FTA-issued format. Revisit once an ASP/FTA guidance names one
+    // explicitly.
     const invoiceForQr = reportData.data;
     const orgForQr = invoiceForQr?.organization;
     // Use amount + vatAmount so discount is applied (totalAmount may be stale)
     const qrTotal =
       parseFloat(invoiceForQr?.amount || '0') +
       parseFloat(invoiceForQr?.vatAmount || '0');
-    const qrPayload = [
-      orgForQr?.vatNumber || '',
-      invoiceForQr?.invoiceNumber || '',
-      (invoiceForQr?.invoiceDate || '').replace(/-/g, ''),
-      qrTotal.toFixed(2),
-      parseFloat(invoiceForQr?.vatAmount || '0').toFixed(2),
-    ].join('|');
+    const qrTimestamp = invoiceForQr?.invoiceDate
+      ? new Date(invoiceForQr.invoiceDate).toISOString()
+      : new Date().toISOString();
+    const qrPayload = this.buildTlvQrPayload({
+      sellerName: orgForQr?.name || '',
+      sellerTrn: orgForQr?.vatNumber || '',
+      timestamp: qrTimestamp,
+      invoiceTotal: qrTotal.toFixed(2),
+      vatTotal: parseFloat(invoiceForQr?.vatAmount || '0').toFixed(2),
+    });
     let qrBuffer: Buffer | null = null;
     try {
       qrBuffer = await QRCode.toBuffer(qrPayload, { width: 90, margin: 1 });
@@ -7505,7 +7549,12 @@ export class ReportGeneratorService {
         // ============================================================================
         let currentY = 22;
         let logoHeight = 0;
-        const logoSize = 56; // Smaller for single-page
+        // Bounding box, not a fixed square — `fit` preserves the logo's own
+        // aspect ratio within it, so a wide/landscape logo gets real width
+        // to stretch into instead of being squeezed into a tiny square, and
+        // a tall/square logo is still capped sensibly by the height.
+        const logoBoxWidth = 130;
+        const logoBoxHeight = 68;
 
         // Add logo on the left if available
         if (templateSettings.logoBuffer) {
@@ -7520,11 +7569,9 @@ export class ReportGeneratorService {
               );
             } else {
               doc.image(templateSettings.logoBuffer, margin, currentY, {
-                width: logoSize,
-                height: logoSize,
-                fit: [logoSize, logoSize],
+                fit: [logoBoxWidth, logoBoxHeight],
               });
-              logoHeight = logoSize;
+              logoHeight = logoBoxHeight;
             }
           } catch (error) {
             console.warn('Failed to load invoice logo:', error);
@@ -7539,11 +7586,9 @@ export class ReportGeneratorService {
             const ext = path.extname(templateSettings.logoUrl).toLowerCase();
             if (ext !== '.svg') {
               doc.image(templateSettings.logoUrl, margin, currentY, {
-                width: logoSize,
-                height: logoSize,
-                fit: [logoSize, logoSize],
+                fit: [logoBoxWidth, logoBoxHeight],
               });
-              logoHeight = logoSize;
+              logoHeight = logoBoxHeight;
             } else {
               console.warn(
                 "Skipping SVG invoice logo file (PDFKit doesn't support SVG)",
@@ -8034,20 +8079,38 @@ export class ReportGeneratorService {
         const tableWidth = contentWidth;
         const padding = 4;
         const totalPaddingPerColumn = padding * 2;
-        const numColumns = 7;
+        const numColumns = 8;
         const totalPaddingForAllColumns = totalPaddingPerColumn * numColumns;
         const availableWidth = tableWidth - totalPaddingForAllColumns;
 
         const colWidths = {
-          item: Math.floor(availableWidth * 0.2),
-          vatRate: Math.floor(availableWidth * 0.1),
-          quantity: Math.floor(availableWidth * 0.12),
-          rate: Math.floor(availableWidth * 0.14),
-          amount: Math.floor(availableWidth * 0.15),
+          item: Math.floor(availableWidth * 0.15),
+          taxType: Math.floor(availableWidth * 0.11),
+          vatRate: Math.floor(availableWidth * 0.08),
+          quantity: Math.floor(availableWidth * 0.1),
+          rate: Math.floor(availableWidth * 0.13),
+          amount: Math.floor(availableWidth * 0.14),
           vat: Math.floor(availableWidth * 0.14),
           total: Math.floor(availableWidth * 0.15),
         };
         const rowHeight = 18; // Compact for single page
+
+        // Maps the FTA tax-treatment category to a short, unambiguous label
+        // for the PDF — shown per line so "0% VAT" is never left to imply
+        // it was just manually zeroed out.
+        const taxTypeLabel = (rawType: unknown): string => {
+          switch (String(rawType || '').toLowerCase()) {
+            case 'zero_rated':
+              return 'Zero-Rated';
+            case 'exempt':
+              return 'Exempt';
+            case 'reverse_charge':
+              return 'Reverse Chg';
+            case 'standard':
+            default:
+              return 'Standard';
+          }
+        };
 
         let tableX = tableStartX;
         const headerY = tableTop;
@@ -8064,6 +8127,10 @@ export class ReportGeneratorService {
           width: colWidths.item,
         });
         tableX += colWidths.item + totalPaddingPerColumn;
+        doc.text('Tax Type', tableX + padding, headerTextY, {
+          width: colWidths.taxType,
+        });
+        tableX += colWidths.taxType + totalPaddingPerColumn;
         doc.text('VAT Rate', tableX + padding, headerTextY, {
           align: 'right',
           width: colWidths.vatRate,
@@ -8141,11 +8208,23 @@ export class ReportGeneratorService {
           });
           tableX += colWidths.item + totalPaddingPerColumn;
 
+          doc.text(taxTypeLabel(item.vatTaxType), tableX + padding, rowTextY, {
+            width: colWidths.taxType,
+            ellipsis: true,
+          });
+          tableX += colWidths.taxType + totalPaddingPerColumn;
+
           const vatTaxType = (item.vatTaxType || '').toLowerCase();
+          const hasExplicitVatRate =
+            item.vatRate !== null &&
+            item.vatRate !== undefined &&
+            item.vatRate !== '';
           const displayVatRate =
             vatTaxType === 'zero_rated' || vatTaxType === 'exempt'
               ? '0'
-              : item.vatRate || '5';
+              : hasExplicitVatRate
+                ? item.vatRate
+                : '5';
           doc.text(`${displayVatRate}%`, tableX + padding, rowTextY, {
             align: 'right',
             width: colWidths.vatRate,
@@ -8237,6 +8316,10 @@ export class ReportGeneratorService {
           width: colWidths.item,
         });
         tableX += colWidths.item + totalPaddingPerColumn;
+        doc.text('', tableX + padding, totalRowTextY, {
+          width: colWidths.taxType,
+        });
+        tableX += colWidths.taxType + totalPaddingPerColumn;
         doc.text('', tableX + padding, totalRowTextY, {
           align: 'right',
           width: colWidths.vatRate,
@@ -8510,16 +8593,34 @@ export class ReportGeneratorService {
           const rightColumnWidth = contentWidth - bankBoxWidth - gapBetweenColumns;
           const sectionStartY = currentY;
 
+          const bankDetailLines: string[] = [];
+          if (organization.bankAccountHolder)
+            bankDetailLines.push(`Account Holder: ${organization.bankAccountHolder}`);
+          if (organization.bankName)
+            bankDetailLines.push(`Bank: ${organization.bankName}`);
+          if (organization.bankAccountNumber)
+            bankDetailLines.push(`Account Number: ${organization.bankAccountNumber}`);
+          if (organization.bankIban)
+            bankDetailLines.push(`IBAN: ${organization.bankIban}`);
+          if (organization.bankBranch)
+            bankDetailLines.push(`Branch: ${organization.bankBranch}`);
+          if (organization.bankSwiftCode)
+            bankDetailLines.push(`SWIFT: ${organization.bankSwiftCode}`);
+
           let bankBoxHeight = 0;
           if (hasBankDetails) {
-            let bankDetailCount = 0;
-            if (organization.bankAccountHolder) bankDetailCount++;
-            if (organization.bankName) bankDetailCount++;
-            if (organization.bankAccountNumber) bankDetailCount++;
-            if (organization.bankIban) bankDetailCount++;
-            if (organization.bankBranch) bankDetailCount++;
-            if (organization.bankSwiftCode) bankDetailCount++;
-            bankBoxHeight = Math.max(bankDetailCount * 10 + 20, 36);
+            // Measure each line's actual wrapped height instead of assuming
+            // a fixed one-line-per-field height — a long account holder
+            // name can wrap to 2+ lines, and the box (and the gap before
+            // the next field) must grow to match or lines print on top of
+            // each other.
+            doc.fontSize(8).font((doc as any)._fontRegular);
+            let bankLinesHeight = 0;
+            for (const line of bankDetailLines) {
+              bankLinesHeight +=
+                doc.heightOfString(line, { width: bankBoxWidth - 16 }) + 2;
+            }
+            bankBoxHeight = Math.max(bankLinesHeight + 26, 36);
           }
 
           let notesBoxHeight = 0;
@@ -8570,49 +8671,10 @@ export class ReportGeneratorService {
             doc.text('Bank Details:', margin + 8, bankContentStartY);
             let bankY = bankContentStartY + 10;
             doc.fontSize(8).font((doc as any)._fontRegular).fillColor(colors.text);
-            if (organization.bankAccountHolder) {
-              doc.text(
-                `Account Holder: ${organization.bankAccountHolder}`,
-                margin + 8,
-                bankY,
-                { width: bankBoxWidth - 16 },
-              );
-              bankY += 10;
-            }
-            if (organization.bankName) {
-              doc.text(`Bank: ${organization.bankName}`, margin + 8, bankY, {
-                width: bankBoxWidth - 16,
-              });
-              bankY += 10;
-            }
-            if (organization.bankAccountNumber) {
-              doc.text(
-                `Account Number: ${organization.bankAccountNumber}`,
-                margin + 8,
-                bankY,
-                { width: bankBoxWidth - 16 },
-              );
-              bankY += 10;
-            }
-            if (organization.bankIban) {
-              doc.text(`IBAN: ${organization.bankIban}`, margin + 8, bankY, {
-                width: bankBoxWidth - 16,
-              });
-              bankY += 10;
-            }
-            if (organization.bankBranch) {
-              doc.text(`Branch: ${organization.bankBranch}`, margin + 8, bankY, {
-                width: bankBoxWidth - 16,
-              });
-              bankY += 10;
-            }
-            if (organization.bankSwiftCode) {
-              doc.text(
-                `SWIFT: ${organization.bankSwiftCode}`,
-                margin + 8,
-                bankY,
-                { width: bankBoxWidth - 16 },
-              );
+            for (const line of bankDetailLines) {
+              doc.text(line, margin + 8, bankY, { width: bankBoxWidth - 16 });
+              bankY +=
+                doc.heightOfString(line, { width: bankBoxWidth - 16 }) + 2;
             }
           }
 
@@ -10934,12 +10996,16 @@ export class ReportGeneratorService {
         if (customerEmail) billToContentH += 10 + lineGap;
         if (customerTrn) billToContentH += 10 + lineGap;
 
+        const invoiceTotalForReceipt = parseFloat(invoice?.totalAmount || '0');
+        const paymentAmountForReceipt = parseFloat(payment?.amount || '0');
         const receiptLines = [
           ['INVOICE NUMBER', invoice?.invoiceNumber || '—'],
+          ['INVOICE AMOUNT', `${formatAmount(invoiceTotalForReceipt)} ${currency}`],
           ['PAYMENT DATE', payment?.paymentDate ? this.formatDateForInvoice(payment.paymentDate) : '—'],
           ['PAYMENT METHOD', String(payment?.paymentMethod || '—').replace(/_/g, ' ').toUpperCase()],
           ['REFERENCE', payment?.referenceNumber || '—'],
-          ['AMOUNT RECEIVED', `${formatAmount(parseFloat(payment?.amount || '0'))} ${currency}`],
+          ['AMOUNT RECEIVED', `${formatAmount(paymentAmountForReceipt)} ${currency}`],
+          ['BALANCE DUE', `${formatAmount(Math.max(0, invoiceTotalForReceipt - parseFloat(invoice?.paidAmount || '0')))} ${currency}`],
         ];
         let receiptContentH = 18 + colHeaderGap;
         doc.fontSize(8).font((doc as any)._fontRegular);

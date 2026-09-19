@@ -33,7 +33,9 @@ import { PurchaseLineItem } from '../../entities/purchase-line-item.entity';
 import { Expense } from '../../entities/expense.entity';
 import { InvoiceHash } from '../../entities/invoice-hash.entity';
 import { JournalEntriesService } from '../journal-entries/journal-entries.service';
+import { PublicInvoiceViewDto } from './dto/public-invoice-view.dto';
 import { JournalEntryAccount } from '../../common/enums/journal-entry-account.enum';
+import { EInvoicingService } from '../e-invoicing/e-invoicing.service';
 import * as crypto from 'crypto';
 
 @Injectable()
@@ -70,6 +72,7 @@ export class SalesInvoicesService {
     private readonly inventoryService: InventoryService,
     private readonly dataSource: DataSource,
     private readonly journalEntriesService: JournalEntriesService,
+    private readonly eInvoicingService: EInvoicingService,
   ) {}
 
   /**
@@ -474,22 +477,61 @@ export class SalesInvoicesService {
   }
 
   /**
-   * Find invoice by public token (for public viewing)
+   * Find invoice by public token (for public viewing).
+   *
+   * This is an unauthenticated endpoint (no JwtAuthGuard) — it must return
+   * only the fields the public invoice page actually displays, never the
+   * raw entity. The Organization relation (bank IBAN/SWIFT, plan/billing
+   * internals) and Customer.notes must never reach this response.
    */
-  async findByPublicToken(token: string): Promise<SalesInvoice> {
+  async findByPublicToken(token: string): Promise<PublicInvoiceViewDto> {
     const invoice = await this.invoicesRepository.findOne({
       where: { publicToken: token, isDeleted: false },
-      relations: ['customer', 'lineItems', 'organization'],
+      relations: ['customer', 'lineItems'],
     });
     if (!invoice) {
       throw new NotFoundException('Invoice not found');
     }
-    if (invoice.totalAmount == null || invoice.totalAmount === '') {
+    let totalAmount = invoice.totalAmount;
+    if (totalAmount == null || totalAmount === '') {
       const amount = parseFloat(invoice.amount || '0');
       const vatAmount = parseFloat(invoice.vatAmount || '0');
-      invoice.totalAmount = (amount + vatAmount).toFixed(2);
+      totalAmount = (amount + vatAmount).toFixed(2);
     }
-    return invoice;
+
+    return {
+      invoiceNumber: invoice.invoiceNumber,
+      invoiceDate: invoice.invoiceDate,
+      dueDate: invoice.dueDate ?? null,
+      paymentStatus: invoice.paymentStatus,
+      currency: invoice.currency,
+      amount: invoice.amount,
+      vatAmount: invoice.vatAmount,
+      totalAmount,
+      paidAmount: invoice.paidAmount,
+      description: invoice.description ?? null,
+      notes: invoice.notes ?? null,
+      customerName: invoice.customerName ?? null,
+      customerTrn: invoice.customerTrn ?? null,
+      customer: invoice.customer
+        ? {
+            name: invoice.customer.name,
+            customerNumber: invoice.customer.customerNumber ?? null,
+            customerTrn: invoice.customer.customerTrn ?? null,
+          }
+        : null,
+      lineItems: (invoice.lineItems ?? []).map((item) => ({
+        itemName: item.itemName,
+        description: item.description ?? null,
+        quantity: item.quantity,
+        unitOfMeasure: item.unitOfMeasure ?? null,
+        unitPrice: item.unitPrice,
+        vatRate: item.vatRate,
+        amount: item.amount,
+        vatAmount: item.vatAmount,
+        totalAmount: item.totalAmount,
+      })),
+    };
   }
 
   /**
@@ -1011,11 +1053,34 @@ export class SalesInvoicesService {
         const isReverseCharge =
           item.vatTaxType === 'REVERSE_CHARGE' ||
           item.vatTaxType === 'reverse_charge';
-        let itemVatRate = parseFloat(item.vatRate || '0');
+        const isZeroRatedOrExempt =
+          item.vatTaxType === 'ZERO_RATED' ||
+          item.vatTaxType === 'zero_rated' ||
+          item.vatTaxType === 'EXEMPT' ||
+          item.vatTaxType === 'exempt';
+        // A rate of exactly 0 is a legitimate, deliberate value (e.g. a
+        // manually zero-rated line) — it must not be treated the same as
+        // "no rate was sent at all". Only the latter should fall back to a
+        // category/default rate.
+        const hasExplicitRate =
+          item.vatRate !== undefined &&
+          item.vatRate !== null &&
+          item.vatRate !== '';
+        let itemVatRate = hasExplicitRate ? parseFloat(item.vatRate) : 0;
         let taxCode = item.taxCode || null;
 
-        if (itemVatRate === 0) {
-          if (item.vatTaxType && !isReverseCharge) {
+        if (isZeroRatedOrExempt) {
+          // Zero-rated and exempt supplies are 0% VAT by definition under
+          // UAE FTA rules — never derived from a rate table or default,
+          // and never overridden by whatever rate was submitted.
+          itemVatRate = 0;
+        } else if (!hasExplicitRate) {
+          if (isReverseCharge) {
+            itemVatRate =
+              taxSettings.taxReverseChargeRate || effectiveDefaultRate;
+            if (!taxCode && taxSettings.taxDefaultCode)
+              taxCode = taxSettings.taxDefaultCode;
+          } else if (item.vatTaxType) {
             const matchingRate = taxRates.find(
               (rate) => rate.isActive && rate.type === item.vatTaxType,
             );
@@ -1027,11 +1092,6 @@ export class SalesInvoicesService {
               if (!taxCode && taxSettings.taxDefaultCode)
                 taxCode = taxSettings.taxDefaultCode;
             }
-          } else if (isReverseCharge) {
-            itemVatRate =
-              taxSettings.taxReverseChargeRate || effectiveDefaultRate;
-            if (!taxCode && taxSettings.taxDefaultCode)
-              taxCode = taxSettings.taxDefaultCode;
           } else {
             itemVatRate = effectiveDefaultRate;
             if (!taxCode && taxSettings.taxDefaultCode)
@@ -1870,6 +1930,10 @@ export class SalesInvoicesService {
     if (!invoice) {
       throw new NotFoundException('Invoice not found');
     }
+    // Ensure totalAmount reflects amount + vatAmount; DB column may be stale (see findById)
+    const invoiceAmount = parseFloat(invoice.amount || '0');
+    const invoiceVatAmount = parseFloat(invoice.vatAmount || '0');
+    invoice.totalAmount = (invoiceAmount + invoiceVatAmount).toFixed(2);
 
     let payment: InvoicePayment;
     if (paymentId) {
@@ -2532,40 +2596,38 @@ ${lines}
     }
     const previousStatus = invoice.status;
 
-    if (
-      invoice.status === InvoiceStatus.PAID ||
-      invoice.status === InvoiceStatus.TAX_INVOICE_BANK_RECEIVED ||
-      invoice.status === InvoiceStatus.TAX_INVOICE_CASH_RECEIVED
-    ) {
-      throw new BadRequestException('Cannot update paid invoice');
-    }
-
+    // Cancelled is the one genuinely terminal state — a voided document has
+    // nothing left to edit. Paid/received invoices are intentionally NOT
+    // blocked here: line items, dates, and other details must stay
+    // editable across every flow (e.g. fixing a typo after payment was
+    // recorded). `updatePaymentStatus` below keeps paymentStatus/status
+    // consistent with the invoice's totals afterward, so editing amounts
+    // on an already-paid invoice can't silently leave it in a stale state.
     if (invoice.status === InvoiceStatus.CANCELLED) {
-      throw new BadRequestException('Cannot update cancelled invoice');
+      throw new BadRequestException('Cannot update a cancelled invoice.');
     }
 
     // Update allowed fields
     if (dto.status !== undefined) {
       const newStatus = dto.status as InvoiceStatus;
+      const currentStatus = invoice.status as InvoiceStatus;
       const paidStatuses = [
         InvoiceStatus.PAID,
         InvoiceStatus.TAX_INVOICE_BANK_RECEIVED,
         InvoiceStatus.TAX_INVOICE_CASH_RECEIVED,
       ];
 
-      // Prevent setting status to paid/cash/bank received via edit — only recordPayment should set these
-      if (paidStatuses.includes(newStatus)) {
+      // Only block an actual transition INTO a paid status via edit — only
+      // "Record Payment" should ever set these. An edit that simply
+      // resubmits an already-paid invoice's unchanged status must not trip
+      // this (the edit form round-trips the full record, status included).
+      if (
+        paidStatuses.includes(newStatus) &&
+        !paidStatuses.includes(currentStatus)
+      ) {
         throw new BadRequestException(
           'Cannot set status to Paid / Cash received / Bank received via edit. Use "Record Payment" to mark the invoice as paid.',
         );
-      }
-
-      const currentStatus = invoice.status as InvoiceStatus;
-      if (
-        paidStatuses.includes(currentStatus) &&
-        !paidStatuses.includes(newStatus)
-      ) {
-        throw new BadRequestException('Cannot change status of paid invoice');
       }
       invoice.status = newStatus;
     }
@@ -2684,9 +2746,26 @@ ${lines}
         const isReverseCharge =
           item.vatTaxType === 'REVERSE_CHARGE' ||
           item.vatTaxType === 'reverse_charge';
+        const isZeroRatedOrExempt =
+          item.vatTaxType === 'ZERO_RATED' ||
+          item.vatTaxType === 'zero_rated' ||
+          item.vatTaxType === 'EXEMPT' ||
+          item.vatTaxType === 'exempt';
+        // A rate of exactly 0 is a legitimate, deliberate value — it must
+        // not be treated the same as "no rate was sent at all". Only the
+        // latter should fall back to a category/default rate.
+        const hasExplicitRate =
+          item.vatRate !== undefined &&
+          item.vatRate !== null &&
+          item.vatRate !== '';
+        let vatRate = hasExplicitRate ? parseFloat(item.vatRate) : 0;
 
-        let vatRate = parseFloat(item.vatRate || '0');
-        if (vatRate === 0) {
+        if (isZeroRatedOrExempt) {
+          // Zero-rated and exempt supplies are 0% VAT by definition under
+          // UAE FTA rules — never derived from a rate table or default,
+          // and never overridden by whatever rate was submitted.
+          vatRate = 0;
+        } else if (!hasExplicitRate) {
           if (isReverseCharge) {
             vatRate = taxSettings.taxReverseChargeRate || effectiveDefaultRate;
           } else if (item.vatTaxType) {
@@ -2829,6 +2908,13 @@ ${lines}
     }
 
     const updated = await this.invoicesRepository.save(invoice);
+
+    // Re-derive paymentStatus/status/paidDate from the (possibly just
+    // changed) total against existing payments + applied credit notes —
+    // necessary now that amounts can be edited on an already-paid invoice,
+    // so it can't be left showing "paid" against a total that no longer
+    // matches what was actually received (or vice versa).
+    await this.updatePaymentStatus(invoiceId, organizationId);
 
     // Audit log
     await this.auditLogsService.record({
@@ -3009,6 +3095,19 @@ ${lines}
       generatedAt: new Date(),
     });
     await this.invoiceHashesRepository.save(record);
+
+    // Single integration point for actually transmitting this invoice
+    // through the UAE e-invoicing network. Only attempted for organizations
+    // that have e-invoicing turned on; everyone else keeps today's
+    // email/download-only behavior with no change.
+    if (invoice.organization?.eInvoicingEnabled) {
+      await this.eInvoicingService.submitInvoice(
+        invoice.organization.id,
+        invoice.id,
+        invoice.invoiceNumber,
+      );
+    }
+
     return record;
   }
 

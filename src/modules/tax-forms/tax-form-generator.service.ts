@@ -1,4 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
+import * as PDFDocument from 'pdfkit';
+import * as ExcelJS from 'exceljs';
 import { TaxForm, TaxFormType } from '../../entities/tax-form.entity';
 import { VATReturnData } from './tax-forms.service';
 import { Organization } from '../../entities/organization.entity';
@@ -50,42 +52,150 @@ export class TaxFormGeneratorService {
   }
 
   /**
-   * Generate VAT return as PDF
+   * Generate VAT return as a real PDF (PDFKit) — not a text buffer wearing a
+   * .pdf extension.
    */
   private async generateVATReturnPDF(
     formType: TaxFormType,
     data: VATReturnData,
     organization: Organization,
   ): Promise<Buffer> {
-    // For now, generate a simple text-based PDF
-    // In production, use a library like pdfkit or puppeteer
-    const pdfContent = this.buildVATReturnPDFContent(
-      formType,
-      data,
-      organization,
-    );
+    const region = organization.region as Region;
+    const formTitle = this.getFormTitle(formType, region);
+    const currency = organization.currency;
 
-    // This is a placeholder - in production, use actual PDF generation library
-    // For now, return a buffer with text content
-    return Buffer.from(pdfContent, 'utf-8');
+    return new Promise<Buffer>((resolve, reject) => {
+      try {
+        const doc = new PDFDocument({ margin: 40, size: 'A4' });
+        const chunks: Buffer[] = [];
+        doc.on('data', (chunk: Buffer) => chunks.push(chunk));
+        doc.on('end', () => resolve(Buffer.concat(chunks)));
+        doc.on('error', reject);
+
+        doc.font('Helvetica-Bold').fontSize(16).text(formTitle, { align: 'center' });
+        doc.moveDown(0.75);
+        doc.font('Helvetica').fontSize(10);
+        doc.text(`Organization: ${data.organization.name}`);
+        if (data.organization.vatNumber) {
+          doc.text(
+            `${this.taxRegistrationFieldLabel(organization)}: ${data.organization.vatNumber}`,
+          );
+        }
+        doc.text(`Period: ${data.period}`);
+        doc.text(`Generated: ${new Date().toISOString()}`);
+        doc.moveDown();
+
+        const section = (
+          title: string,
+          rows: Array<{ label: string; amount: number; vat?: number; count: number }>,
+        ) => {
+          doc.font('Helvetica-Bold').fontSize(11).text(title);
+          doc.moveDown(0.25);
+          doc.font('Helvetica').fontSize(9.5);
+          rows.forEach((row) => {
+            const parts = [
+              `${row.label}:`,
+              `Amount ${row.amount.toFixed(2)} ${currency}`,
+            ];
+            if (row.vat !== undefined) {
+              parts.push(`VAT ${row.vat.toFixed(2)} ${currency}`);
+            }
+            parts.push(`Count ${row.count}`);
+            doc.text(parts.join('   '));
+          });
+          doc.moveDown(0.75);
+        };
+
+        section('Sales (Output VAT)', [
+          { label: 'Standard Rate', amount: data.sales.standardRate.amount, vat: data.sales.standardRate.vatAmount, count: data.sales.standardRate.count },
+          { label: 'Zero Rate', amount: data.sales.zeroRate.amount, vat: data.sales.zeroRate.vatAmount, count: data.sales.zeroRate.count },
+          { label: 'Exempt', amount: data.sales.exempt.amount, count: data.sales.exempt.count },
+          { label: 'Reverse Charge', amount: data.sales.reverseCharge.amount, vat: data.sales.reverseCharge.vatAmount, count: data.sales.reverseCharge.count },
+        ]);
+
+        section('Purchases (Input VAT)', [
+          { label: 'Standard Rate', amount: data.purchases.standardRate.amount, vat: data.purchases.standardRate.vatAmount, count: data.purchases.standardRate.count },
+          { label: 'Zero Rate', amount: data.purchases.zeroRate.amount, vat: data.purchases.zeroRate.vatAmount, count: data.purchases.zeroRate.count },
+          { label: 'Exempt', amount: data.purchases.exempt.amount, count: data.purchases.exempt.count },
+          { label: 'Reverse Charge', amount: data.purchases.reverseCharge.amount, vat: data.purchases.reverseCharge.vatAmount, count: data.purchases.reverseCharge.count },
+        ]);
+
+        doc.font('Helvetica-Bold').fontSize(11).text('Totals');
+        doc.moveDown(0.25);
+        doc.font('Helvetica').fontSize(9.5);
+        doc.text(`Total Output VAT: ${data.totals.totalOutputVAT.toFixed(2)} ${currency}`);
+        doc.text(`Total Input VAT: ${data.totals.totalInputVAT.toFixed(2)} ${currency}`);
+        doc.text(`Net VAT Payable: ${data.totals.netVATPayable.toFixed(2)} ${currency}`);
+        if (data.totals.refundable > 0) {
+          doc.text(`Refundable: ${data.totals.refundable.toFixed(2)} ${currency}`);
+        }
+
+        doc.end();
+      } catch (err) {
+        reject(err);
+      }
+    });
   }
 
   /**
-   * Generate VAT return as Excel
+   * Generate VAT return as a real .xlsx workbook (ExcelJS) — not CSV bytes
+   * wearing an Excel content type.
    */
   private async generateVATReturnExcel(
     formType: TaxFormType,
     data: VATReturnData,
     organization: Organization,
   ): Promise<Buffer> {
-    // For now, generate CSV format (can be opened in Excel)
-    // In production, use a library like exceljs
-    const csvContent = this.buildVATReturnCSVContent(
-      formType,
-      data,
-      organization,
-    );
-    return Buffer.from(csvContent, 'utf-8');
+    const region = organization.region as Region;
+    const formTitle = this.getFormTitle(formType, region);
+
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet('VAT Return');
+
+    sheet.addRow([formTitle]);
+    sheet.addRow(['Organization', data.organization.name]);
+    if (data.organization.vatNumber) {
+      sheet.addRow([
+        this.taxRegistrationFieldLabel(organization),
+        data.organization.vatNumber,
+      ]);
+    }
+    sheet.addRow(['Period', data.period]);
+    sheet.addRow(['Generated', new Date().toISOString()]);
+    sheet.addRow([]);
+
+    sheet.addRow(['SALES (OUTPUT VAT)']);
+    sheet.addRow(['Category', 'Amount', 'VAT Amount', 'Count']);
+    sheet.addRow(['Standard Rate', data.sales.standardRate.amount, data.sales.standardRate.vatAmount, data.sales.standardRate.count]);
+    sheet.addRow(['Zero Rate', data.sales.zeroRate.amount, data.sales.zeroRate.vatAmount, data.sales.zeroRate.count]);
+    sheet.addRow(['Exempt', data.sales.exempt.amount, 0, data.sales.exempt.count]);
+    sheet.addRow(['Reverse Charge', data.sales.reverseCharge.amount, data.sales.reverseCharge.vatAmount, data.sales.reverseCharge.count]);
+    sheet.addRow([]);
+
+    sheet.addRow(['PURCHASES (INPUT VAT)']);
+    sheet.addRow(['Category', 'Amount', 'VAT Amount', 'Count']);
+    sheet.addRow(['Standard Rate', data.purchases.standardRate.amount, data.purchases.standardRate.vatAmount, data.purchases.standardRate.count]);
+    sheet.addRow(['Zero Rate', data.purchases.zeroRate.amount, data.purchases.zeroRate.vatAmount, data.purchases.zeroRate.count]);
+    sheet.addRow(['Exempt', data.purchases.exempt.amount, 0, data.purchases.exempt.count]);
+    sheet.addRow(['Reverse Charge', data.purchases.reverseCharge.amount, data.purchases.reverseCharge.vatAmount, data.purchases.reverseCharge.count]);
+    sheet.addRow([]);
+
+    sheet.addRow(['TOTALS']);
+    sheet.addRow(['Total Output VAT', data.totals.totalOutputVAT]);
+    sheet.addRow(['Total Input VAT', data.totals.totalInputVAT]);
+    sheet.addRow(['Net VAT Payable', data.totals.netVATPayable]);
+    if (data.totals.refundable > 0) {
+      sheet.addRow(['Refundable', data.totals.refundable]);
+    }
+
+    sheet.getColumn(1).width = 24;
+    sheet.getColumn(2).width = 16;
+    sheet.getColumn(3).width = 16;
+    sheet.getColumn(4).width = 10;
+    sheet.getRow(1).font = { bold: true, size: 13 };
+
+    const arrayBuffer = await workbook.xlsx.writeBuffer();
+    return Buffer.from(arrayBuffer as ArrayBuffer);
   }
 
   /**
@@ -102,76 +212,6 @@ export class TaxFormGeneratorService {
       organization,
     );
     return Buffer.from(csvContent, 'utf-8');
-  }
-
-  /**
-   * Build PDF content (placeholder - should use proper PDF library)
-   */
-  private buildVATReturnPDFContent(
-    formType: TaxFormType,
-    data: VATReturnData,
-    organization: Organization,
-  ): string {
-    const region = organization.region as Region;
-    const formTitle = this.getFormTitle(formType, region);
-
-    let content = `\n`;
-    content += `========================================\n`;
-    content += `${formTitle}\n`;
-    content += `========================================\n\n`;
-    content += `Organization: ${data.organization.name}\n`;
-    if (data.organization.vatNumber) {
-      content += `${this.taxRegistrationFieldLabel(organization)}: ${data.organization.vatNumber}\n`;
-    }
-    content += `Period: ${data.period}\n`;
-    content += `Generated: ${new Date().toISOString()}\n\n`;
-
-    content += `SALES (OUTPUT VAT)\n`;
-    content += `------------------\n`;
-    content += `Standard Rate:\n`;
-    content += `  Amount: ${data.sales.standardRate.amount.toFixed(2)} ${organization.currency}\n`;
-    content += `  VAT: ${data.sales.standardRate.vatAmount.toFixed(2)} ${organization.currency}\n`;
-    content += `  Count: ${data.sales.standardRate.count}\n\n`;
-    content += `Zero Rate:\n`;
-    content += `  Amount: ${data.sales.zeroRate.amount.toFixed(2)} ${organization.currency}\n`;
-    content += `  VAT: ${data.sales.zeroRate.vatAmount.toFixed(2)} ${organization.currency}\n`;
-    content += `  Count: ${data.sales.zeroRate.count}\n\n`;
-    content += `Exempt:\n`;
-    content += `  Amount: ${data.sales.exempt.amount.toFixed(2)} ${organization.currency}\n`;
-    content += `  Count: ${data.sales.exempt.count}\n\n`;
-    content += `Reverse Charge:\n`;
-    content += `  Amount: ${data.sales.reverseCharge.amount.toFixed(2)} ${organization.currency}\n`;
-    content += `  VAT: ${data.sales.reverseCharge.vatAmount.toFixed(2)} ${organization.currency}\n`;
-    content += `  Count: ${data.sales.reverseCharge.count}\n\n`;
-
-    content += `PURCHASES (INPUT VAT)\n`;
-    content += `---------------------\n`;
-    content += `Standard Rate:\n`;
-    content += `  Amount: ${data.purchases.standardRate.amount.toFixed(2)} ${organization.currency}\n`;
-    content += `  VAT: ${data.purchases.standardRate.vatAmount.toFixed(2)} ${organization.currency}\n`;
-    content += `  Count: ${data.purchases.standardRate.count}\n\n`;
-    content += `Zero Rate:\n`;
-    content += `  Amount: ${data.purchases.zeroRate.amount.toFixed(2)} ${organization.currency}\n`;
-    content += `  VAT: ${data.purchases.zeroRate.vatAmount.toFixed(2)} ${organization.currency}\n`;
-    content += `  Count: ${data.purchases.zeroRate.count}\n\n`;
-    content += `Exempt:\n`;
-    content += `  Amount: ${data.purchases.exempt.amount.toFixed(2)} ${organization.currency}\n`;
-    content += `  Count: ${data.purchases.exempt.count}\n\n`;
-    content += `Reverse Charge:\n`;
-    content += `  Amount: ${data.purchases.reverseCharge.amount.toFixed(2)} ${organization.currency}\n`;
-    content += `  VAT: ${data.purchases.reverseCharge.vatAmount.toFixed(2)} ${organization.currency}\n`;
-    content += `  Count: ${data.purchases.reverseCharge.count}\n\n`;
-
-    content += `TOTALS\n`;
-    content += `------\n`;
-    content += `Total Output VAT: ${data.totals.totalOutputVAT.toFixed(2)} ${organization.currency}\n`;
-    content += `Total Input VAT: ${data.totals.totalInputVAT.toFixed(2)} ${organization.currency}\n`;
-    content += `Net VAT Payable: ${data.totals.netVATPayable.toFixed(2)} ${organization.currency}\n`;
-    if (data.totals.refundable > 0) {
-      content += `Refundable: ${data.totals.refundable.toFixed(2)} ${organization.currency}\n`;
-    }
-
-    return content;
   }
 
   /**

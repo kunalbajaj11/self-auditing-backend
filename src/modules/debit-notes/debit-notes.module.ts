@@ -16,6 +16,7 @@ import { ExpensesModule } from '../expenses/expenses.module';
 import { ExpensePaymentsModule } from '../expense-payments/expense-payments.module';
 import { AuditLogsModule } from '../audit-logs/audit-logs.module';
 import { ReportsModule } from '../reports/reports.module';
+import { EInvoicingModule } from '../e-invoicing/e-invoicing.module';
 
 @Module({
   imports: [
@@ -35,6 +36,7 @@ import { ReportsModule } from '../reports/reports.module';
     AuditLogsModule,
     SettingsModule,
     ReportsModule,
+    EInvoicingModule,
   ],
   providers: [DebitNotesService],
   controllers: [DebitNotesController],

@@ -161,6 +161,19 @@ export class DebitNote extends AbstractEntity {
   })
   appliedAmount?: string | null;
 
+  /**
+   * UAE e-invoicing requires adjustment documents against a customer invoice
+   * to be reported to the FTA within 14 days of the adjustment date. Only
+   * meaningful for invoice-linked (customer) debit notes, not vendor/expense
+   * debit notes. Set at creation time (debitNoteDate + 14 days);
+   * `eInvoiceReportedAt` is filled in once submission actually succeeds.
+   */
+  @Column({ name: 'e_invoice_reporting_due_at', type: 'timestamp', nullable: true })
+  eInvoiceReportingDueAt?: Date | null;
+
+  @Column({ name: 'e_invoice_reported_at', type: 'timestamp', nullable: true })
+  eInvoiceReportedAt?: Date | null;
+
   @OneToMany(() => DebitNoteApplication, (application) => application.debitNote)
   applications: DebitNoteApplication[];
 

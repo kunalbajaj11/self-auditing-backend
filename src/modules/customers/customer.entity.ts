@@ -46,6 +46,14 @@ export class Customer extends AbstractEntity {
   @Column({ length: 50, nullable: true })
   country?: string | null;
 
+  /** ISO 3166-1 alpha-2 country code — the structured field e-invoicing XML export
+   * requires; `country` above stays as the free-text display value. */
+  @Column({ name: 'country_code', length: 2, nullable: true })
+  countryCode?: string | null;
+
+  @Column({ name: 'postal_code', length: 20, nullable: true })
+  postalCode?: string | null;
+
   @Column({ length: 100, nullable: true })
   emirate?: string | null;
 

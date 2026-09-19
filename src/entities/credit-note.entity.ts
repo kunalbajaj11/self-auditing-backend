@@ -134,6 +134,18 @@ export class CreditNote extends AbstractEntity {
   })
   appliedAmount?: string | null;
 
+  /**
+   * UAE e-invoicing requires adjustment documents to be reported to the FTA
+   * within 14 days of the adjustment date. Set at creation time
+   * (creditNoteDate + 14 days); `eInvoiceReportedAt` is filled in once the
+   * e-invoicing submission actually succeeds.
+   */
+  @Column({ name: 'e_invoice_reporting_due_at', type: 'timestamp', nullable: true })
+  eInvoiceReportingDueAt?: Date | null;
+
+  @Column({ name: 'e_invoice_reported_at', type: 'timestamp', nullable: true })
+  eInvoiceReportedAt?: Date | null;
+
   @OneToMany(
     () => CreditNoteApplication,
     (application) => application.creditNote,

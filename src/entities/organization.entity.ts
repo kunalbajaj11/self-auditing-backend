@@ -41,6 +41,20 @@ export class Organization extends AbstractEntity {
   @Column({ type: 'text', nullable: true })
   address?: string | null;
 
+  /** ISO 3166-1 alpha-2 country code (e.g. 'AE') — required as a discrete field by every
+   * e-invoicing XML schema (PINT AE / UBL); the free-text `address` field alone isn't enough. */
+  @Column({ name: 'country_code', length: 2, default: 'AE' })
+  countryCode: string;
+
+  @Column({ name: 'postal_code', length: 20, nullable: true })
+  postalCode?: string | null;
+
+  /** Whether this organization is transmitting invoices through the UAE e-invoicing
+   * network (Peppol 5-corner / ASP). Off by default until an ASP is actually wired up —
+   * gates strict sequential invoice numbering and real e-invoice submission. */
+  @Column({ name: 'e_invoicing_enabled', type: 'boolean', default: false })
+  eInvoicingEnabled: boolean;
+
   @Column({ length: 10, default: 'AED' })
   currency: string;
 

@@ -12,6 +12,7 @@ import { User } from '../../entities/user.entity';
 import { SalesInvoicesModule } from '../sales-invoices/sales-invoices.module';
 import { AuditLogsModule } from '../audit-logs/audit-logs.module';
 import { ReportsModule } from '../reports/reports.module';
+import { EInvoicingModule } from '../e-invoicing/e-invoicing.module';
 
 @Module({
   imports: [
@@ -27,6 +28,7 @@ import { ReportsModule } from '../reports/reports.module';
     AuditLogsModule,
     SettingsModule,
     ReportsModule,
+    EInvoicingModule,
   ],
   providers: [CreditNotesService],
   controllers: [CreditNotesController],

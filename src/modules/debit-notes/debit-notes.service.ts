@@ -24,6 +24,7 @@ import { ExpensesService } from '../expenses/expenses.service';
 import { ExpensePaymentsService } from '../expense-payments/expense-payments.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { ReportGeneratorService } from '../reports/report-generator.service';
+import { EInvoicingService } from '../e-invoicing/e-invoicing.service';
 
 @Injectable()
 export class DebitNotesService {
@@ -49,6 +50,7 @@ export class DebitNotesService {
     private readonly settingsService: SettingsService,
     private readonly reportGeneratorService: ReportGeneratorService,
     private readonly dataSource: DataSource,
+    private readonly eInvoicingService: EInvoicingService,
   ) {}
 
   async findAll(organizationId: string): Promise<DebitNote[]> {
@@ -659,8 +661,19 @@ export class DebitNotesService {
       );
     }
 
+    const wasIssuedJustNow =
+      status === DebitNoteStatus.ISSUED &&
+      debitNote.status !== DebitNoteStatus.ISSUED;
+
     debitNote.status = status;
-    const updated = await this.debitNotesRepository.save(debitNote);
+    // Only customer-facing debit notes (linked to a sales invoice) are a UAE
+    // e-invoicing adjustment document — vendor/expense debit notes are an
+    // inbound purchase-side record, not something this org reports to the FTA.
+    if (wasIssuedJustNow && debitNote.invoice?.id && !debitNote.eInvoiceReportingDueAt) {
+      debitNote.eInvoiceReportingDueAt =
+        this.eInvoicingService.computeReportingDueDate(debitNote.debitNoteDate);
+    }
+    let updated = await this.debitNotesRepository.save(debitNote);
 
     // If debit note is linked to an invoice, update the invoice's payment status
     if (updated.invoice?.id) {
@@ -668,6 +681,23 @@ export class DebitNotesService {
         updated.invoice.id,
         organizationId,
       );
+    }
+
+    if (wasIssuedJustNow && updated.invoice?.id) {
+      const organization = await this.organizationsRepository.findOne({
+        where: { id: organizationId },
+      });
+      if (organization?.eInvoicingEnabled) {
+        const result = await this.eInvoicingService.submitDebitNote(
+          organizationId,
+          updated.id,
+          updated.debitNoteNumber,
+        );
+        if (result.status === 'submitted') {
+          updated.eInvoiceReportedAt = result.submittedAt ?? new Date();
+          updated = await this.debitNotesRepository.save(updated);
+        }
+      }
     }
 
     // Audit log
