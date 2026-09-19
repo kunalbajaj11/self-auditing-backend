@@ -950,9 +950,11 @@ export class SalesInvoicesService {
           item.vatTaxType === 'ZERO_RATED' ||
           item.vatTaxType === 'zero_rated' ||
           item.vatTaxType === 'EXEMPT' ||
-          item.vatTaxType === 'exempt'
+          item.vatTaxType === 'exempt' ||
+          item.vatTaxType === 'OUT_OF_SCOPE' ||
+          item.vatTaxType === 'out_of_scope'
         ) {
-          // Zero rated or exempt: no VAT
+          // Zero rated, exempt, or out of scope: no VAT
         } else {
           standardVatAmount += vatAmount;
         }
@@ -1057,7 +1059,9 @@ export class SalesInvoicesService {
           item.vatTaxType === 'ZERO_RATED' ||
           item.vatTaxType === 'zero_rated' ||
           item.vatTaxType === 'EXEMPT' ||
-          item.vatTaxType === 'exempt';
+          item.vatTaxType === 'exempt' ||
+          item.vatTaxType === 'OUT_OF_SCOPE' ||
+          item.vatTaxType === 'out_of_scope';
         // A rate of exactly 0 is a legitimate, deliberate value (e.g. a
         // manually zero-rated line) — it must not be treated the same as
         // "no rate was sent at all". Only the latter should fall back to a
@@ -2750,7 +2754,9 @@ ${lines}
           item.vatTaxType === 'ZERO_RATED' ||
           item.vatTaxType === 'zero_rated' ||
           item.vatTaxType === 'EXEMPT' ||
-          item.vatTaxType === 'exempt';
+          item.vatTaxType === 'exempt' ||
+          item.vatTaxType === 'OUT_OF_SCOPE' ||
+          item.vatTaxType === 'out_of_scope';
         // A rate of exactly 0 is a legitimate, deliberate value — it must
         // not be treated the same as "no rate was sent at all". Only the
         // latter should fall back to a category/default rate.
@@ -2828,9 +2834,11 @@ ${lines}
           item.vatTaxType === 'zero_rated' ||
           item.vatTaxType === 'ZERO_RATED' ||
           item.vatTaxType === 'exempt' ||
-          item.vatTaxType === 'EXEMPT'
+          item.vatTaxType === 'EXEMPT' ||
+          item.vatTaxType === 'out_of_scope' ||
+          item.vatTaxType === 'OUT_OF_SCOPE'
         ) {
-          // Zero rated or exempt: no VAT
+          // Zero rated, exempt, or out of scope: no VAT
         } else {
           standardVatAmount += vatAmount;
           // Standard VAT tracked but not added to subtotal

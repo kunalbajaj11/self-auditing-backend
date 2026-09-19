@@ -8210,7 +8210,9 @@ export class ReportGeneratorService {
             item.vatRate !== undefined &&
             item.vatRate !== '';
           const displayVatRate =
-            vatTaxType === 'zero_rated' || vatTaxType === 'exempt'
+            vatTaxType === 'zero_rated' ||
+            vatTaxType === 'exempt' ||
+            vatTaxType === 'out_of_scope'
               ? '0'
               : hasExplicitVatRate
                 ? item.vatRate
@@ -8484,7 +8486,8 @@ export class ReportGeneratorService {
           .filter(
             (li: any) =>
               (li.vatTaxType || '').toLowerCase() !== 'zero_rated' &&
-              (li.vatTaxType || '').toLowerCase() !== 'exempt',
+              (li.vatTaxType || '').toLowerCase() !== 'exempt' &&
+              (li.vatTaxType || '').toLowerCase() !== 'out_of_scope',
           )
           .map((li: any) => parseFloat(li.vatRate || '0'))
           .filter((r: number) => !Number.isNaN(r) && r >= 0);
