@@ -8050,12 +8050,13 @@ export class ReportGeneratorService {
         currentY = Math.max(headerBottomY + 2, boxY + headerHeight + 4);
 
         // ============================================================================
-        // LINE ITEMS TABLE — compact, single-page (cap visible rows)
+        // LINE ITEMS TABLE — compact, paginates onto additional pages so every
+        // item is listed (a table that silently truncated long invoices was a
+        // client-reported bug — every line item must appear, not "+ N more").
         // ============================================================================
         const lineItems = invoice.lineItems || [];
-        const maxVisibleRows = 10; // Fit on one A4 page with totals/notes/footer
-        const visibleItems = lineItems.slice(0, maxVisibleRows);
-        const remainingCount = lineItems.length - visibleItems.length;
+        const visibleItems = lineItems;
+        const tableBottomLimit = doc.page.height - 60;
 
         const tableTop = currentY;
         const tableStartX = margin;
@@ -8098,56 +8099,71 @@ export class ReportGeneratorService {
           }
         };
 
-        let tableX = tableStartX;
+        const drawTableHeaderRow = (y: number): void => {
+          let hx = tableStartX;
+          doc
+            .fillColor(colors.backgroundDark)
+            .rect(tableStartX, y, tableWidth, rowHeight)
+            .fill();
+          doc.fontSize(8).font((doc as any)._fontBold).fillColor('#ffffff');
+          const textY = y + (rowHeight - 10) / 2;
+          doc.text('Item', hx + padding, textY, { width: colWidths.item });
+          hx += colWidths.item + totalPaddingPerColumn;
+          doc.text('Tax Type', hx + padding, textY, { width: colWidths.taxType });
+          hx += colWidths.taxType + totalPaddingPerColumn;
+          doc.text('VAT Rate', hx + padding, textY, {
+            align: 'right',
+            width: colWidths.vatRate,
+          });
+          hx += colWidths.vatRate + totalPaddingPerColumn;
+          doc.text('Qty', hx + padding, textY, {
+            align: 'right',
+            width: colWidths.quantity,
+          });
+          hx += colWidths.quantity + totalPaddingPerColumn;
+          doc.text('Rate', hx + padding, textY, {
+            align: 'right',
+            width: colWidths.rate,
+          });
+          hx += colWidths.rate + totalPaddingPerColumn;
+          doc.text('Amount', hx + padding, textY, {
+            align: 'right',
+            width: colWidths.amount,
+          });
+          hx += colWidths.amount + totalPaddingPerColumn;
+          doc.text('VAT', hx + padding, textY, {
+            align: 'right',
+            width: colWidths.vat,
+          });
+          hx += colWidths.vat + totalPaddingPerColumn;
+          doc.text('Total', hx + padding, textY, {
+            align: 'right',
+            width: colWidths.total,
+          });
+        };
+
         const headerY = tableTop;
-
-        doc
-          .fillColor(colors.backgroundDark)
-          .rect(tableStartX, headerY, tableWidth, rowHeight)
-          .fill();
-
-        doc.fontSize(8).font((doc as any)._fontBold).fillColor('#ffffff');
-
-        const headerTextY = headerY + (rowHeight - 10) / 2;
-        doc.text('Item', tableX + padding, headerTextY, {
-          width: colWidths.item,
-        });
-        tableX += colWidths.item + totalPaddingPerColumn;
-        doc.text('Tax Type', tableX + padding, headerTextY, {
-          width: colWidths.taxType,
-        });
-        tableX += colWidths.taxType + totalPaddingPerColumn;
-        doc.text('VAT Rate', tableX + padding, headerTextY, {
-          align: 'right',
-          width: colWidths.vatRate,
-        });
-        tableX += colWidths.vatRate + totalPaddingPerColumn;
-        doc.text('Qty', tableX + padding, headerTextY, {
-          align: 'right',
-          width: colWidths.quantity,
-        });
-        tableX += colWidths.quantity + totalPaddingPerColumn;
-        doc.text('Rate', tableX + padding, headerTextY, {
-          align: 'right',
-          width: colWidths.rate,
-        });
-        tableX += colWidths.rate + totalPaddingPerColumn;
-        doc.text('Amount', tableX + padding, headerTextY, {
-          align: 'right',
-          width: colWidths.amount,
-        });
-        tableX += colWidths.amount + totalPaddingPerColumn;
-        doc.text('VAT', tableX + padding, headerTextY, {
-          align: 'right',
-          width: colWidths.vat,
-        });
-        tableX += colWidths.vat + totalPaddingPerColumn;
-        doc.text('Total', tableX + padding, headerTextY, {
-          align: 'right',
-          width: colWidths.total,
-        });
+        drawTableHeaderRow(headerY);
 
         let rowY = headerY + rowHeight;
+        let tableX = tableStartX;
+
+        // Continuation pages: blank page, just the top color bar + a
+        // repeated table header so the columns stay legible.
+        const startContinuationPage = (): void => {
+          doc.addPage();
+          doc.fillColor(colors.primary).rect(0, 0, pageWidth, 4).fill();
+          const contTop = 30;
+          doc
+            .fontSize(8)
+            .font((doc as any)._fontRegular)
+            .fillColor(colors.textLight);
+          doc.text(`${invoiceTitle} ${invoice.invoiceNumber || ''} (continued)`, margin, 14, {
+            width: contentWidth,
+          });
+          drawTableHeaderRow(contTop);
+          rowY = contTop + rowHeight;
+        };
 
         // Totals from ALL line items (for summary row)
         let sumQuantity = 0;
@@ -8164,7 +8180,7 @@ export class ReportGeneratorService {
           sumTotal += lineTotalAmount;
         });
 
-        // Table rows — only visible items (single-page, no addPage)
+        // Table rows — every line item, paginating onto new pages as needed
         visibleItems.forEach((item: any, index: number) => {
           const itemName = item.itemName || '';
           const sku =
@@ -8175,6 +8191,11 @@ export class ReportGeneratorService {
             width: colWidths.item,
           });
           const dynamicRowHeight = Math.max(rowHeight, itemTextHeight + 8);
+
+          if (rowY + dynamicRowHeight > tableBottomLimit) {
+            startContinuationPage();
+          }
+
           const rowTextY = rowY + (dynamicRowHeight - 10) / 2;
 
           if (index % 2 === 0) {
@@ -8274,25 +8295,8 @@ export class ReportGeneratorService {
           rowY += dynamicRowHeight;
         });
 
-        // "... + N more items" row when line items exceed visible cap
-        if (remainingCount > 0) {
-          doc
-            .fillColor(colors.backgroundLight)
-            .rect(tableStartX, rowY, tableWidth, rowHeight)
-            .fill();
-          doc.fontSize(8).font((doc as any)._fontRegular).fillColor(colors.textLight);
-          doc.text(
-            `… + ${remainingCount} more item${remainingCount !== 1 ? 's' : ''}`,
-            tableStartX + padding,
-            rowY + (rowHeight - 10) / 2,
-            { width: colWidths.item },
-          );
-          doc.strokeColor(colors.borderLight).lineWidth(0.5);
-          doc
-            .moveTo(tableStartX, rowY + rowHeight)
-            .lineTo(tableStartX + tableWidth, rowY + rowHeight)
-            .stroke();
-          rowY += rowHeight;
+        if (rowY + rowHeight > tableBottomLimit) {
+          startContinuationPage();
         }
 
         // Total summary row
@@ -8358,6 +8362,16 @@ export class ReportGeneratorService {
 
         const sectionGap = 6;
         currentY = rowY + sectionGap;
+
+        // The totals/bank-details/notes block below needs real room too —
+        // if the table's last page ended near the bottom, start fresh
+        // rather than letting that block run off the page.
+        const remainderSectionMinHeight = 280;
+        if (currentY + remainderSectionMinHeight > doc.page.height - 40) {
+          doc.addPage();
+          doc.fillColor(colors.primary).rect(0, 0, pageWidth, 4).fill();
+          currentY = 30;
+        }
 
         const hasReverseCharge = lineItems.some(
           (li: any) => (li.vatTaxType || '').toLowerCase() === 'reverse_charge',
