@@ -7428,6 +7428,7 @@ export class ReportGeneratorService {
           margin: 20, // Tighter for single-page invoice (A4)
           size: 'A4',
           layout: 'portrait',
+          bufferPages: true, // needed to stamp "Page X-Y" once the final page count is known
         });
         this.setupPdfFonts(doc);
         // Use Helvetica for invoice PDF so text renders clearly (standard PDF font used by most invoice tools)
@@ -8844,6 +8845,24 @@ export class ReportGeneratorService {
             align: 'center',
             width: contentWidth,
           });
+        }
+
+        // Stamp "Page X-Y" on every page — only knowable now that the
+        // final page count exists (invoices can span multiple pages
+        // once a line-item table is long enough to paginate).
+        const pageRange = doc.bufferedPageRange();
+        for (let i = pageRange.start; i < pageRange.start + pageRange.count; i++) {
+          doc.switchToPage(i);
+          doc.fontSize(8).font((doc as any)._fontRegular).fillColor(colors.textMuted);
+          // Must stay inside doc.page.maxY() (page.height - bottom margin) —
+          // any closer to the edge and PDFKit treats this positioned text as
+          // overflow and silently appends a blank page per stamp.
+          doc.text(
+            `${i - pageRange.start + 1}-${pageRange.count}`,
+            margin,
+            doc.page.height - 34,
+            { width: contentWidth, align: 'center', lineBreak: false },
+          );
         }
 
         doc.end();
