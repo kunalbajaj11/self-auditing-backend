@@ -8567,7 +8567,7 @@ export class ReportGeneratorService {
           doc.text('Paid Amount:', totalsLabelX, totalsY);
           doc.fillColor('#059669');
           doc.text(
-            `${formatAmount(paidAmount)} ${currency}`,
+            `-${formatAmount(paidAmount)} ${currency}`,
             totalsValueX,
             totalsY,
             { width: totalsValueWidth, align: 'right' },
