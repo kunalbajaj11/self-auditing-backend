@@ -8364,11 +8364,24 @@ export class ReportGeneratorService {
         const sectionGap = 6;
         currentY = rowY + sectionGap;
 
-        // The totals/bank-details/notes block below needs real room too —
-        // if the table's last page ended near the bottom, start fresh
-        // rather than letting that block run off the page.
-        const remainderSectionMinHeight = 280;
-        if (currentY + remainderSectionMinHeight > doc.page.height - 40) {
+        // The totals box needs real room too — if the table's last page
+        // ended near the bottom, start fresh rather than splitting it.
+        // (The bank-details/notes/QR blocks that follow get their own
+        // page-fit checks further down, right before each is drawn, using
+        // their real computed heights — checking everything atomically
+        // up here wasted a full page whenever only the trailing block
+        // didn't fit, even though the totals box itself had plenty of
+        // room.)
+        let preTotalsBoxHeight = 62;
+        if (parseFloat((invoice as any).discountAmount || '0') > 0) preTotalsBoxHeight += 12;
+        if (parseFloat(invoice.paidAmount || '0') > 0) preTotalsBoxHeight += 28;
+        const preHasReverseCharge = lineItems.some(
+          (li: any) => (li.vatTaxType || '').toLowerCase() === 'reverse_charge',
+        );
+        const requiredTotalsSectionHeight =
+          (preHasReverseCharge ? 12 : 0) + preTotalsBoxHeight;
+
+        if (currentY + requiredTotalsSectionHeight > doc.page.height - 34) {
           doc.addPage();
           doc.fillColor(colors.primary).rect(0, 0, pageWidth, 4).fill();
           currentY = 30;
@@ -8415,11 +8428,17 @@ export class ReportGeneratorService {
               : taxableBase;
         // Always derive final total from amount + VAT so discount is applied (invoice.totalAmount may be stale)
         const totalAmount = taxableBase + totalVat;
+        const paidAmount = parseFloat(invoice.paidAmount || '0');
+        const balanceDue = Math.max(0, totalAmount - paidAmount);
+        // Only show the paid/balance breakdown once something has actually
+        // been recorded against this invoice — otherwise it's just noise.
+        const showPaymentRows = paidAmount > 0;
 
         const totalsBoxY = currentY;
         const boxInternalPadding = 8;
         let totalsBoxHeight = 62;
         if (discountAmount > 0) totalsBoxHeight += 12;
+        if (showPaymentRows) totalsBoxHeight += 28;
 
         const totalNumeric = totalAmount;
         const amountInWords = this.numberToWords(Math.floor(totalNumeric));
@@ -8541,6 +8560,30 @@ export class ReportGeneratorService {
           totalsY,
           { width: totalsValueWidth, align: 'right' },
         );
+        totalsY += 14;
+
+        if (showPaymentRows) {
+          doc.fontSize(9).font((doc as any)._fontBold).fillColor(colors.text);
+          doc.text('Paid Amount:', totalsLabelX, totalsY);
+          doc.fillColor('#059669');
+          doc.text(
+            `${formatAmount(paidAmount)} ${currency}`,
+            totalsValueX,
+            totalsY,
+            { width: totalsValueWidth, align: 'right' },
+          );
+          totalsY += 14;
+
+          doc.fontSize(9).font((doc as any)._fontBold).fillColor(colors.text);
+          doc.text('Balance Due:', totalsLabelX, totalsY);
+          doc.fillColor(balanceDue > 0 ? '#dc2626' : '#059669');
+          doc.text(
+            `${formatAmount(balanceDue)} ${currency}`,
+            totalsValueX,
+            totalsY,
+            { width: totalsValueWidth, align: 'right' },
+          );
+        }
 
         currentY = totalsBoxY + totalsBoxHeight + sectionGap;
 
@@ -8599,7 +8642,6 @@ export class ReportGeneratorService {
           const gapBetweenColumns = 12;
           const rightColumnLeft = margin + bankBoxWidth + gapBetweenColumns;
           const rightColumnWidth = contentWidth - bankBoxWidth - gapBetweenColumns;
-          const sectionStartY = currentY;
 
           const bankDetailLines: string[] = [];
           if (organization.bankAccountHolder)
@@ -8658,6 +8700,16 @@ export class ReportGeneratorService {
             (hasNotes && hasTerms ? gapBetweenNotesAndTerms : 0) +
             termsBoxHeight;
           const rowHeight = Math.max(bankBoxHeight, rightColumnHeight);
+
+          // This box (bank details / notes / terms) doesn't split well —
+          // if it won't fit in what's left of the page, give it a fresh
+          // one rather than clipping it.
+          if (currentY + rowHeight > doc.page.height - 34) {
+            doc.addPage();
+            doc.fillColor(colors.primary).rect(0, 0, pageWidth, 4).fill();
+            currentY = 30;
+          }
+          const sectionStartY = currentY;
 
           if (hasBankDetails) {
             const bankBoxY = sectionStartY;
@@ -8754,13 +8806,24 @@ export class ReportGeneratorService {
         // AUTHORISED SIGNATORY + FOOTER (compact, single-page)
         // ============================================================================
         const gapBeforeSignatory = 8;
-        const footerY = currentY + gapBeforeSignatory;
 
         const qrSizePx = 48;
         const hasSignature = Boolean(
           (templateSettings as any).signatureBuffer,
         );
         const signatoryBlockHeight = hasSignature ? 52 : 32;
+        const qrBlockHeight = qrSizePx + 10; // image + "QR" label
+        const footerBlockHeight = templateSettings.showFooter ? 20 : 0;
+        const requiredSignatoryBlockHeight =
+          gapBeforeSignatory +
+          Math.max(signatoryBlockHeight, qrBlockHeight) +
+          footerBlockHeight;
+        if (currentY + requiredSignatoryBlockHeight > doc.page.height - 34) {
+          doc.addPage();
+          doc.fillColor(colors.primary).rect(0, 0, pageWidth, 4).fill();
+          currentY = 30;
+        }
+        const footerY = currentY + gapBeforeSignatory;
 
         const signatoryBlockWidth = 180;
         const signatoryX = margin + contentWidth - signatoryBlockWidth;
